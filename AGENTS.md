@@ -318,6 +318,22 @@ ruff format fix_die_repeat tests
 
 **Each per-file ignore entry must include a comment for each individual rule code explaining why the exception was needed.** This ensures that future maintainers understand the rationale for each rule and can reevaluate whether each exception is still appropriate.
 
+**C901 (complex-structure) - NEVER IGNORE**: The C901 rule checks for functions with high McCabe complexity (cyclomatic complexity). This is a critical code quality metric - functions with high complexity are difficult to understand, test, and maintain, and are more likely to contain bugs.
+
+**C901 MUST NEVER be ignored.** Instead, refactor complex functions into smaller, more focused functions. The default complexity threshold is 10, which is generous. If a function exceeds this threshold:
+
+1. Identify logical sections within the function
+2. Extract helper methods/classes for distinct responsibilities
+3. Consider breaking down switch/case chains or nested conditionals
+4. Use early returns to reduce nesting levels
+5. Apply the Strategy pattern or similar design patterns for complex branching
+
+Refactoring for lower complexity improves:
+- Testability (smaller functions are easier to unit test)
+- Readability (smaller functions are easier to understand)
+- Maintainability (changes are less likely to have unintended side effects)
+- Debuggability (smaller functions have less state to track)
+
 **Current state**: Per-file ruff ignores are configured for `runner.py`, `cli.py`, `config.py`, `utils.py`, `prompts.py`, and test files.
 
 To add a targeted exception (only when unavoidable), use:
