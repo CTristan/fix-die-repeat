@@ -42,10 +42,6 @@ lint.ignore = ["COM812", "D203", "D213"]
 "fix_die_repeat/config.py" = [
     "S603",  # False positive: uses absolute path from shutil.which() with hardcoded git arguments, not untrusted input.
 ]
-"fix_die_repeat/runner.py" = [
-    "TD002",  # Requiring author tags on every TODO adds noise without improving ownership in this small codebase.
-    "TD003",  # Requiring issue links for every TODO is impractical for exploratory notes kept near the code.
-]
 "fix_die_repeat/utils.py" = [
     "FBT001",  # Utility API exposes explicit bool switches; changing signature style would reduce call-site clarity.
     "FBT002",  # Bool arguments are intentionally passed through to keep behavior explicit in command wrappers.
