@@ -108,22 +108,24 @@ def run_command(
         Tuple of (exit_code, stdout, stderr)
 
     """
-    kwargs: dict[str, str | bytes | Path | int | None | bool] = {
-        "cwd": cwd,
-    }  # type: ignore[assignment]
-    if capture_output:
-        kwargs.update(  # type: ignore[dict-item]
-            {
-                "stdout": subprocess.PIPE,
-                "stderr": subprocess.PIPE,
-                "text": True,
-            },
-        )
-
     try:
-        result = subprocess.run(command, shell=True, **kwargs)  # type: ignore[arg-type]
-        if check and result.returncode != 0:
-            raise subprocess.CalledProcessError(result.returncode, command)
+        if capture_output:
+            result = subprocess.run(
+                command,
+                shell=True,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                check=check,
+            )
+        else:
+            result = subprocess.run(
+                command,
+                shell=True,
+                cwd=cwd,
+                text=True,
+                check=check,
+            )
         return (result.returncode, result.stdout or "", result.stderr or "")
     except FileNotFoundError:
         return (127, "", f"Command not found: {command.split(maxsplit=1)[0]}")
