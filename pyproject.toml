@@ -43,8 +43,6 @@ lint.ignore = ["COM812", "D203", "D213"]
     "S603",  # False positive: uses absolute path from shutil.which() with hardcoded git arguments, not untrusted input.
 ]
 "fix_die_repeat/utils.py" = [
-    "FBT001",  # Utility API exposes explicit bool switches; changing signature style would reduce call-site clarity.
-    "FBT002",  # Bool arguments are intentionally passed through to keep behavior explicit in command wrappers.
     "PLW1510",  # subprocess return codes are handled manually; check=True would bypass custom error reporting.
     "S602",    # shell=True is required for user-supplied shell commands and compatibility with existing workflows.
     "T201",    # BEL terminal notifications require direct print output; replacing with logging drops sound behavior.

@@ -21,6 +21,7 @@ LOGGER_NAME = "fix_die_repeat"
 def configure_logger(
     fdr_log: Path | None = None,
     session_log: Path | None = None,
+    *,
     debug: bool = False,
 ) -> logging.Logger:
     """Configure and return the project logger.
@@ -91,6 +92,7 @@ def format_duration(total_seconds: int) -> str:
 def run_command(
     command: str,
     cwd: Path | None = None,
+    *,
     capture_output: bool = True,
     check: bool = False,
 ) -> tuple[int, str, str]:
