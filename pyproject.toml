@@ -39,12 +39,11 @@ lint.ignore = ["D203", "D213"]
     "BLE001",  # CLI entrypoint is an exception boundary; we convert unexpected errors into user-facing exits.
     "D301",    # Keeping conventional Click docstrings avoids noisy rewrites that do not improve generated help.
     "FBT001",  # Click injects bool flags directly into callback signatures; changing to wrappers hurts clarity.
-    "PLR0913",  # main() mirrors CLI options 1:1; splitting args would hide options behind extra mapping layers.
+    "PLR0913",  # Click callbacks require one parameter per option; framework dictates signature, cannot be changed without breaking Click.
 ]
 "fix_die_repeat/config.py" = [
     "FBT001",  # Settings overrides intentionally accept bool flags to match CLI/env toggles without translation.
     "FBT002",  # Bool overrides are forwarded directly to preserve explicit precedence behavior in get_settings().
-    "PLR0913",  # get_settings() aggregates many explicit knobs; splitting would obscure config wiring.
     "S607",    # Git commands rely on PATH resolution across developer environments, not hardcoded absolute paths.
 ]
 "fix_die_repeat/prompts.py" = [

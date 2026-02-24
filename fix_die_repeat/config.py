@@ -1,6 +1,7 @@
 """Configuration management for fix-die-repeat."""
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 import pydantic as pyd
@@ -126,27 +127,30 @@ class Settings(BaseSettings):
             raise ValueError(message)
 
 
-def get_settings(
-    check_cmd: str | None = None,
-    max_iters: int | None = None,
-    model: str | None = None,
-    archive_artifacts: bool | None = None,
-    no_compact: bool = False,
-    pr_review: bool = False,
-    test_model: str | None = None,
-    debug: bool = False,
-) -> Settings:
+@dataclass(frozen=True)
+class CliOptions:
+    """CLI override options for Settings.
+
+    Groups all CLI-provided overrides into a single object to avoid
+    function parameter count violations (PLR0913) in internal logic.
+    """
+
+    check_cmd: str | None = None
+    max_iters: int | None = None
+    model: str | None = None
+    max_pr_threads: int | None = None
+    archive_artifacts: bool | None = None
+    no_compact: bool = False
+    pr_review: bool = False
+    test_model: str | None = None
+    debug: bool = False
+
+
+def get_settings(options: CliOptions | None = None) -> Settings:
     """Create Settings instance from command line args and environment.
 
     Args:
-        check_cmd: Override check command
-        max_iters: Override max iterations
-        model: Override model selection
-        archive_artifacts: Enable artifact archiving
-        no_compact: Disable artifact compaction
-        pr_review: Enable PR review mode
-        test_model: Model to test compatibility
-        debug: Enable debug mode
+        options: CLI override options grouped into a dataclass
 
     Returns:
         Settings instance
@@ -155,28 +159,44 @@ def get_settings(
     # Get base settings from environment
     settings = Settings()
 
-    # Apply CLI overrides
-    if check_cmd is not None:
-        settings.check_cmd = check_cmd
-    if max_iters is not None:
-        settings.max_iters = max_iters
-    if model is not None:
-        settings.model = model
-    if archive_artifacts is not None:
-        settings.archive_artifacts = archive_artifacts
-    if no_compact:
-        settings.compact_artifacts = False
-    if pr_review:
-        settings.pr_review = pr_review
-    if test_model is not None:
-        settings.test_model = test_model
-    if debug:
-        settings.debug = debug
+    # Apply CLI overrides if provided
+    if options is not None:
+        _apply_cli_options(settings, options)
 
     # Validate settings
     settings.validate_max_iters()
 
     return settings
+
+
+def _apply_cli_options(settings: Settings, options: CliOptions) -> None:
+    """Apply CLI options to Settings instance.
+
+    Extracted from get_settings to reduce cyclomatic complexity (C901).
+
+    Args:
+        settings: Settings instance to modify
+        options: CLI options to apply
+
+    """
+    if options.check_cmd is not None:
+        settings.check_cmd = options.check_cmd
+    if options.max_iters is not None:
+        settings.max_iters = options.max_iters
+    if options.model is not None:
+        settings.model = options.model
+    if options.max_pr_threads is not None:
+        settings.max_pr_threads = options.max_pr_threads
+    if options.archive_artifacts is not None:
+        settings.archive_artifacts = options.archive_artifacts
+    if options.no_compact:
+        settings.compact_artifacts = False
+    if options.pr_review:
+        settings.pr_review = options.pr_review
+    if options.test_model is not None:
+        settings.test_model = options.test_model
+    if options.debug:
+        settings.debug = options.debug
 
 
 class Paths:

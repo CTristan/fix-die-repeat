@@ -385,6 +385,45 @@ Refactoring for lower complexity improves:
 - Maintainability (changes are less likely to have unintended side effects)
 - Debuggability (smaller functions have less state to track)
 
+**PLR0913 (too-many-arguments) - NEVER IGNORE**: The PLR0913 rule checks for function definitions that include too many arguments. By default, this rule allows up to five arguments. Functions with many arguments are harder to understand, maintain, and call.
+
+**PLR0913 MUST NEVER be ignored.** Instead, refactor functions with many arguments using one of these strategies:
+
+1. **Group related arguments into objects** using `dataclass`, `NamedTuple`, or a custom class
+2. **Extract helper functions** that handle subsets of the arguments
+3. **Use builder patterns** for complex object construction
+4. **Apply default arguments** or keyword-only arguments to clarify required vs. optional parameters
+5. **Use `@typing.override` decorator** if the function must override a parent class method with a fixed signature
+
+Example of grouping related arguments:
+
+```python
+# Before: too many arguments (PLR0913 violation)
+def calculate_position(x_pos, y_pos, z_pos, x_vel, y_vel, z_vel, time):
+    new_x = x_pos + x_vel * time
+    new_y = y_pos + y_vel * time
+    new_z = z_pos + z_vel * time
+    return new_x, new_y, new_z
+
+# After: grouped into NamedTuple
+from typing import NamedTuple
+
+class Vector(NamedTuple):
+    x: float
+    y: float
+    z: float
+
+def calculate_position(pos: Vector, vel: Vector, time: float) -> Vector:
+    return Vector(*(p + v * time for p, v in zip(pos, vel)))
+```
+
+Refactoring to reduce argument count improves:
+- **Readability**: Related parameters are clearly grouped together
+- **Maintainability**: Changes to related parameters are isolated in one place
+- **Testability**: Easier to create test fixtures for parameter groups
+- **Extensibility**: New parameters can be added to the group without changing function signatures
+- **IDE support**: Better autocomplete and type hints for parameter groups
+
 **PLC0415 (import-outside-top-level) - NEVER IGNORE**: The PLC0415 rule checks for `import` statements outside module top-level scope (for example, inside functions or classes).
 
 **PLC0415 MUST NEVER be ignored.** Follow PEP 8 guidance and place imports at the top of the file, after module docstrings/comments and before module globals/constants. Top-level imports make dependencies explicit and ensure import failures are caught immediately instead of only at runtime on specific code paths.
@@ -770,6 +809,6 @@ with pi's tools before running the full loop.
 
 ---
 
-**Last Updated**: 2026-02-23
+**Last Updated**: 2026-02-24
 **Python Version**: 3.12
 **pi Version Tested**: Latest (assumes tool compatibility)

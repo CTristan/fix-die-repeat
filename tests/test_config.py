@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from fix_die_repeat.config import Paths, Settings, get_settings
+from fix_die_repeat.config import CliOptions, Paths, Settings, get_settings
 
 
 class TestSettings:
@@ -48,7 +48,7 @@ class TestSettings:
 
     def test_get_settings_with_cli_overrides(self) -> None:
         """Test get_settings with CLI parameter overrides."""
-        settings = get_settings(
+        options = CliOptions(
             check_cmd="pytest",
             max_iters=5,
             model="test-model",
@@ -57,6 +57,7 @@ class TestSettings:
             pr_review=True,
             debug=True,
         )
+        settings = get_settings(options)
 
         assert settings.check_cmd == "pytest"
         assert settings.max_iters == 5
@@ -68,7 +69,8 @@ class TestSettings:
 
     def test_get_settings_with_test_model(self) -> None:
         """Test get_settings with test_model parameter."""
-        settings = get_settings(test_model="anthropic/claude-sonnet-4-5")
+        options = CliOptions(test_model="anthropic/claude-sonnet-4-5")
+        settings = get_settings(options)
 
         assert settings.test_model == "anthropic/claude-sonnet-4-5"
 

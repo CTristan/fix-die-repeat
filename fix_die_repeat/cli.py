@@ -6,7 +6,7 @@ import traceback
 import click
 from rich.console import Console
 
-from fix_die_repeat.config import Paths, get_settings
+from fix_die_repeat.config import CliOptions, Paths, get_settings
 from fix_die_repeat.runner import PiRunner
 
 console = Console()
@@ -109,31 +109,19 @@ def main(
 
     """
     try:
-        # Get settings
-        settings = get_settings(
+        # Create CLI options object
+        options = CliOptions(
             check_cmd=check_cmd,
             max_iters=max_iters,
             model=model,
+            max_pr_threads=max_pr_threads,
             archive_artifacts=archive_artifacts or None,
             no_compact=no_compact,
             pr_review=pr_review,
             test_model=test_model,
             debug=debug,
         )
-
-        # Override max_pr_threads if specified
-        if max_pr_threads is not None:
-            settings.max_pr_threads = max_pr_threads
-
-        # Initialize paths
-        paths = Paths()
-
-        # Create runner
-        runner = PiRunner(settings, paths)
-
-        # Run the loop
-        exit_code = runner.run()
-        sys.exit(exit_code)
+        _run_main(options)
 
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
@@ -146,6 +134,32 @@ def main(
         if debug:
             console.print(traceback.format_exc())
         sys.exit(1)
+
+
+def _run_main(options: CliOptions) -> int:
+    """Run main application logic using CliOptions.
+
+    Avoids Click's parameter explosion by accepting a grouped options
+    object instead of individual parameters.
+
+    Args:
+        options: CLI options grouped into a dataclass
+
+    Returns:
+        Exit code from PiRunner
+
+    """
+    # Get settings
+    settings = get_settings(options)
+
+    # Initialize paths
+    paths = Paths()
+
+    # Create runner
+    runner = PiRunner(settings, paths)
+
+    # Run the loop
+    return runner.run()
 
 
 if __name__ == "__main__":
