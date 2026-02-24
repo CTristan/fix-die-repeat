@@ -40,7 +40,7 @@ lint.ignore = ["COM812", "D203", "D213"]
     "D301",    # Keeping conventional Click docstrings avoids noisy rewrites that do not improve generated help.
 ]
 "fix_die_repeat/config.py" = [
-    "S607",    # Git commands rely on PATH resolution across developer environments, not hardcoded absolute paths.
+    "S603",  # False positive: uses absolute path from shutil.which() with hardcoded git arguments, not untrusted input.
 ]
 "fix_die_repeat/prompts.py" = [
     "ANN401",  # Jinja context values are intentionally heterogeneous; narrowing types breaks legitimate template inputs.

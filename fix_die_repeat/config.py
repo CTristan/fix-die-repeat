@@ -1,5 +1,6 @@
 """Configuration management for fix-die-repeat."""
 
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -237,17 +238,21 @@ class Paths:
 
         """
         # Try to get git root first
-        try:
-            result = subprocess.run(
-                ["git", "rev-parse", "--show-toplevel"],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            return Path(result.stdout.strip())
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            # Fall back to current directory
-            return Path.cwd()
+        git_path = shutil.which("git")
+        if git_path:
+            try:
+                result = subprocess.run(
+                    [git_path, "rev-parse", "--show-toplevel"],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                return Path(result.stdout.strip())
+            except subprocess.CalledProcessError:
+                # Git failed, fall back to current directory
+                pass
+        # Fall back to current directory
+        return Path.cwd()
 
     def ensure_fdr_dir(self) -> None:
         """Ensure .fix-die-repeat directory exists."""
