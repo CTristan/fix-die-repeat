@@ -56,7 +56,7 @@ class PiRunner:
 
         # Determine session log path
         if self.settings.debug:
-            session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            session_timestamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
             self.session_log = self.paths.fdr_dir / f"session_{session_timestamp}.log"
         else:
             self.session_log = self.paths.fdr_dir / "session.log"
@@ -409,7 +409,7 @@ class PiRunner:
 
         # Archive artifacts if requested
         if self.settings.archive_artifacts:
-            archive_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            archive_timestamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
             archive_dir = self.paths.fdr_dir / "archive" / archive_timestamp
             self.logger.info(f"Archiving existing artifacts to {archive_dir}")
             archive_dir.mkdir(parents=True, exist_ok=True)

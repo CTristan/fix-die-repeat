@@ -43,7 +43,6 @@ lint.ignore = ["COM812", "D203", "D213"]
     "S603",  # False positive: uses absolute path from shutil.which() with hardcoded git arguments, not untrusted input.
 ]
 "fix_die_repeat/runner.py" = [
-    "DTZ005",  # Local wall-clock timestamps are intentional for human-readable run logs and local debugging context.
     "FIX002",  # TODOs document known follow-up work inline; moving all notes elsewhere loses implementation context.
     "G004",    # Custom Logger expects preformatted strings; deferred %-format logging APIs are not available here.
     "TD002",   # Requiring author tags on every TODO adds noise without improving ownership in this small codebase.
@@ -51,7 +50,6 @@ lint.ignore = ["COM812", "D203", "D213"]
     "TRY400",  # We cannot use logging.exception because the project uses a custom logger without that API.
 ]
 "fix_die_repeat/utils.py" = [
-    "DTZ005",  # Local timestamps are used for operator-facing logs where timezone offsets add noise, not value.
     "FBT001",  # Utility API exposes explicit bool switches; changing signature style would reduce call-site clarity.
     "FBT002",  # Bool arguments are intentionally passed through to keep behavior explicit in command wrappers.
     "PLW1510",  # subprocess return codes are handled manually; check=True would bypass custom error reporting.

@@ -44,7 +44,7 @@ class Logger:
             level: Log level (INFO, DEBUG, ERROR, WARNING)
 
         """
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
         log_message = f"[{timestamp}] [fdr] [{level}] {message}"
 
         # Console output
