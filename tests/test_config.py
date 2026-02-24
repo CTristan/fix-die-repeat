@@ -1,5 +1,7 @@
 """Tests for config module."""
 
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -81,8 +83,6 @@ class TestPaths:
         project_dir.mkdir()
 
         # Initialize git repo
-        import subprocess
-
         subprocess.run(["git", "init"], cwd=project_dir, check=True, capture_output=True)
         subprocess.run(
             ["git", "config", "user.email", "test@example.com"],
@@ -108,9 +108,6 @@ class TestPaths:
         project_dir.mkdir()
 
         # Initialize git repo
-        import os
-        import subprocess
-
         subprocess.run(["git", "init"], cwd=project_dir, check=True, capture_output=True)
         subprocess.run(
             ["git", "config", "user.email", "test@example.com"],
@@ -142,8 +139,6 @@ class TestPaths:
         no_git_dir.mkdir()
 
         # Change to this directory and create Paths without project_root
-        import os
-
         original_cwd = Path.cwd()
         try:
             os.chdir(no_git_dir)

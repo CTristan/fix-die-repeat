@@ -1,5 +1,6 @@
 """Configuration management for fix-die-repeat."""
 
+import subprocess
 from pathlib import Path
 
 import pydantic as pyd
@@ -216,8 +217,6 @@ class Paths:
 
         """
         # Try to get git root first
-        import subprocess
-
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "--show-toplevel"],

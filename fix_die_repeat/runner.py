@@ -717,8 +717,6 @@ class PiRunner:
             PR data dict or None if not found
 
         """
-        import json
-
         returncode, pr_json, _ = run_command(
             f"gh pr view {branch} --json number,url,headRepository,headRepositoryOwner",
         )
@@ -772,8 +770,6 @@ class PiRunner:
             Thread data list or None on failure
 
         """
-        import json
-
         query = """
             query($owner: String!, $repo: String!, $number: Int!) {
                 repository(owner: $owner, name: $repo) {

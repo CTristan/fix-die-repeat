@@ -44,7 +44,6 @@ lint.ignore = ["D203", "D213"]
 "fix_die_repeat/config.py" = [
     "FBT001",  # Settings overrides intentionally accept bool flags to match CLI/env toggles without translation.
     "FBT002",  # Bool overrides are forwarded directly to preserve explicit precedence behavior in get_settings().
-    "PLC0415",  # Function-local imports avoid startup-time side effects and keep optional paths lazily loaded.
     "PLR0913",  # get_settings() aggregates many explicit knobs; splitting would obscure config wiring.
     "S607",    # Git commands rely on PATH resolution across developer environments, not hardcoded absolute paths.
 ]
@@ -56,7 +55,6 @@ lint.ignore = ["D203", "D213"]
     "DTZ005",  # Local wall-clock timestamps are intentional for human-readable run logs and local debugging context.
     "FIX002",  # TODOs document known follow-up work inline; moving all notes elsewhere loses implementation context.
     "G004",    # Custom Logger expects preformatted strings; deferred %-format logging APIs are not available here.
-    "PLC0415",  # Deferred imports prevent circular dependencies in rarely used review/PR code paths.
     "TD002",   # Requiring author tags on every TODO adds noise without improving ownership in this small codebase.
     "TD003",   # Requiring issue links for every TODO is impractical for exploratory notes kept near the code.
     "TRY400",  # We cannot use logging.exception because the project uses a custom logger without that API.
@@ -65,14 +63,12 @@ lint.ignore = ["D203", "D213"]
     "DTZ005",  # Local timestamps are used for operator-facing logs where timezone offsets add noise, not value.
     "FBT001",  # Utility API exposes explicit bool switches; changing signature style would reduce call-site clarity.
     "FBT002",  # Bool arguments are intentionally passed through to keep behavior explicit in command wrappers.
-    "PLC0415",  # Local imports keep optional command-path behavior isolated and avoid unnecessary module loading.
     "PLW1510",  # subprocess return codes are handled manually; check=True would bypass custom error reporting.
     "S602",    # shell=True is required for user-supplied shell commands and compatibility with existing workflows.
     "T201",    # BEL terminal notifications require direct print output; replacing with logging drops sound behavior.
     "TRY300",  # try/except structure preserves linear cleanup/return flow; adding else made control flow harder to scan.
 ]
 "tests/*.py" = [
-    "PLC0415",  # Test-only imports are scoped per test to avoid unnecessary fixture/module setup overhead.
     "PLR2004",  # Literal values in tests improve readability by keeping expected outcomes inline with assertions.
     "S101",    # Pytest idioms rely on assert statements; replacing them reduces failure introspection quality.
     "S607",    # Test subprocess calls intentionally rely on PATH to mirror real user/runtime behavior.

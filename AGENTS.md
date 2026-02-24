@@ -385,6 +385,23 @@ Refactoring for lower complexity improves:
 - Maintainability (changes are less likely to have unintended side effects)
 - Debuggability (smaller functions have less state to track)
 
+**PLC0415 (import-outside-top-level) - NEVER IGNORE**: The PLC0415 rule checks for `import` statements outside module top-level scope (for example, inside functions or classes).
+
+**PLC0415 MUST NEVER be ignored.** Follow PEP 8 guidance and place imports at the top of the file, after module docstrings/comments and before module globals/constants. Top-level imports make dependencies explicit and ensure import failures are caught immediately instead of only at runtime on specific code paths.
+
+If PLC0415 fires, fix it by default with this order of operations:
+1. Move the import to module top-level.
+2. If a circular dependency exists, refactor module boundaries to remove the cycle.
+3. If startup cost is the concern, isolate the expensive dependency behind a dedicated adapter/module with clear ownership.
+4. Only keep a local import when it is truly required for runtime/environment constraints, and document the rationale in code comments.
+
+Common acceptable reasons for temporary local imports are:
+- Avoiding unavoidable circular dependencies during staged refactors
+- Deferring very costly module loads when measured and justified
+- Avoiding loading optional dependencies in specific runtime environments
+
+Even in those cases, do not add PLC0415 to ignore lists; prefer structural fixes and explicit documentation.
+
 **Current state**: Per-file ruff ignores are configured for `runner.py`, `cli.py`, `config.py`, `utils.py`, `prompts.py`, and test files.
 
 To add a targeted exception (only when unavoidable), use:

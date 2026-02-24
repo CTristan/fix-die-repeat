@@ -1,15 +1,25 @@
 """Tests for utils module."""
 
 from pathlib import Path
-from unittest.mock import patch
+from subprocess import CalledProcessError
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from fix_die_repeat.utils import (
     Logger,
+    _collect_git_files,
     detect_large_files,
     format_duration,
+    get_changed_files,
     get_file_line_count,
     get_file_size,
+    get_git_revision_hash,
+    is_excluded_file,
+    play_completion_sound,
+    run_command,
     sanitize_ntfy_topic,
+    send_ntfy_notification,
 )
 
 
@@ -194,8 +204,6 @@ class TestLogger:
 
     def test_file_write_error_handling(self, tmp_path: Path) -> None:
         """Test that logger handles file write errors gracefully."""
-        from unittest.mock import MagicMock, patch
-
         log_file = tmp_path / "test.log"
 
         # Mock the file open to raise OSError
@@ -215,8 +223,6 @@ class TestGetGitRevisionHash:
 
     def test_nonexistent_file(self) -> None:
         """Test getting hash of non-existent file."""
-        from fix_die_repeat.utils import get_git_revision_hash
-
         result = get_git_revision_hash(Path("/nonexistent/file.txt"))
         # Should return a fallback hash string
         assert result is not None
@@ -225,8 +231,6 @@ class TestGetGitRevisionHash:
 
     def test_existing_file(self, tmp_path: Path) -> None:
         """Test getting hash of existing file."""
-        from fix_die_repeat.utils import get_git_revision_hash
-
         test_file = tmp_path / "test.txt"
         test_file.write_text("Hello, World!")
 
@@ -239,8 +243,6 @@ class TestGetGitRevisionHash:
 
     def test_file_content_affects_hash(self, tmp_path: Path) -> None:
         """Test that different file content produces different hashes."""
-        from fix_die_repeat.utils import get_git_revision_hash
-
         file1 = tmp_path / "file1.txt"
         file2 = tmp_path / "file2.txt"
         file1.write_text("content 1")
@@ -257,16 +259,12 @@ class TestGetChangedFiles:
 
     def test_no_git_repo(self, tmp_path: Path) -> None:
         """Test getting changed files when not in a git repo."""
-        from fix_die_repeat.utils import get_changed_files
-
         files = get_changed_files(tmp_path)
         # Should return empty list or handle gracefully
         assert isinstance(files, list)
 
     def test_excluded_patterns(self) -> None:
         """Test that excluded patterns are filtered out."""
-        from fix_die_repeat.utils import is_excluded_file
-
         assert is_excluded_file("yarn.lock")
         assert is_excluded_file("package-lock.json")
         assert is_excluded_file("main.min.js")
@@ -279,8 +277,6 @@ class TestRunCommand:
 
     def test_run_command_success(self) -> None:
         """Test successful command execution."""
-        from fix_die_repeat.utils import run_command
-
         returncode, stdout, _stderr = run_command("echo hello", check=False)
 
         assert returncode == 0
@@ -288,27 +284,17 @@ class TestRunCommand:
 
     def test_run_command_failure(self) -> None:
         """Test failed command execution."""
-        from fix_die_repeat.utils import run_command
-
         returncode, _stdout, _stderr = run_command("exit 1", check=False)
 
         assert returncode == 1
 
     def test_run_command_with_check(self) -> None:
         """Test command with check=True raises on failure."""
-        from subprocess import CalledProcessError
-
-        import pytest
-
-        from fix_die_repeat.utils import run_command
-
         with pytest.raises(CalledProcessError):
             run_command("exit 1", check=True)
 
     def test_run_command_not_found(self) -> None:
         """Test command not found error."""
-        from fix_die_repeat.utils import run_command
-
         returncode, _stdout, stderr = run_command("nonexistent-command-xyz-123", check=False)
 
         assert returncode == 127
@@ -317,8 +303,6 @@ class TestRunCommand:
 
     def test_run_command_with_cwd(self, tmp_path: Path) -> None:
         """Test command with custom working directory."""
-        from fix_die_repeat.utils import run_command
-
         # Create a test file in tmp_path
         (tmp_path / "test.txt").write_text("content")
 
@@ -333,8 +317,6 @@ class TestPlayCompletionSound:
 
     def test_no_exception(self) -> None:
         """Test that play_completion_sound doesn't raise exceptions."""
-        from fix_die_repeat.utils import play_completion_sound
-
         # Should not raise any exceptions (best-effort function)
         play_completion_sound()
 
@@ -344,8 +326,6 @@ class TestSendNtfyNotification:
 
     def test_send_ntfy_success(self, tmp_path: Path) -> None:
         """Test sending notification successfully."""
-        from fix_die_repeat.utils import send_ntfy_notification
-
         log_file = tmp_path / "test.log"
         logger = Logger(fdr_log=log_file, session_log=None, debug=False)
 
@@ -366,8 +346,6 @@ class TestSendNtfyNotification:
 
     def test_send_ntfy_curl_not_available(self, tmp_path: Path) -> None:
         """Test notification when curl is not available."""
-        from fix_die_repeat.utils import send_ntfy_notification
-
         log_file = tmp_path / "test.log"
         logger = Logger(fdr_log=log_file, session_log=None, debug=False)
 
@@ -389,8 +367,6 @@ class TestSendNtfyNotification:
 
     def test_send_ntfy_failure_exit_code(self, tmp_path: Path) -> None:
         """Test notification for failed exit code."""
-        from fix_die_repeat.utils import send_ntfy_notification
-
         log_file = tmp_path / "test.log"
         logger = Logger(fdr_log=log_file, session_log=None, debug=False)
 
@@ -414,8 +390,6 @@ class TestCollectGitFiles:
 
     def test_collect_git_files_no_git(self, tmp_path: Path) -> None:
         """Test collecting git files outside of git repo."""
-        from fix_die_repeat.utils import _collect_git_files
-
         files = _collect_git_files(tmp_path)
 
         # Should return empty set for non-git directory
@@ -427,42 +401,30 @@ class TestIsExcludedFile:
 
     def test_excluded_lock_file(self) -> None:
         """Test that .lock files are excluded."""
-        from fix_die_repeat.utils import is_excluded_file
-
         assert is_excluded_file("package.lock") is True
         assert is_excluded_file("file.lock") is True
 
     def test_excluded_lock_json(self) -> None:
         """Test that -lock.json files are excluded."""
-        from fix_die_repeat.utils import is_excluded_file
-
         assert is_excluded_file("package-lock.json") is True
         assert is_excluded_file("npm-lock.json") is True
 
     def test_excluded_lock_yaml(self) -> None:
         """Test that -lock.yaml files are excluded."""
-        from fix_die_repeat.utils import is_excluded_file
-
         assert is_excluded_file("composer-lock.yaml") is True
         assert is_excluded_file("yarn-lock.yaml") is True
 
     def test_excluded_go_sum(self) -> None:
         """Test that go.sum is excluded."""
-        from fix_die_repeat.utils import is_excluded_file
-
         assert is_excluded_file("go.sum") is True
 
     def test_excluded_min_files(self) -> None:
         """Test that .min.* files are excluded."""
-        from fix_die_repeat.utils import is_excluded_file
-
         assert is_excluded_file("script.min.js") is True
         assert is_excluded_file("style.min.css") is True
 
     def test_not_excluded_normal_files(self) -> None:
         """Test that normal files are not excluded."""
-        from fix_die_repeat.utils import is_excluded_file
-
         assert is_excluded_file("package.json") is False
         assert is_excluded_file("script.js") is False
         assert is_excluded_file("style.css") is False
@@ -470,15 +432,11 @@ class TestIsExcludedFile:
 
     def test_custom_exclude_patterns(self) -> None:
         """Test with custom exclude patterns."""
-        from fix_die_repeat.utils import is_excluded_file
-
         assert is_excluded_file("test.log", exclude_patterns=["*.log"]) is True
         assert is_excluded_file("test.py", exclude_patterns=["*.log"]) is False
 
     def test_case_insensitive_matching(self) -> None:
         """Test that matching is case-insensitive."""
-        from fix_die_repeat.utils import is_excluded_file
-
         assert is_excluded_file("PACKAGE.LOCK") is True
         assert is_excluded_file("Package-Lock.Json") is True
         assert is_excluded_file("SCRIPT.MIN.JS") is True

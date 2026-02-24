@@ -2,6 +2,7 @@
 
 import fnmatch
 import hashlib
+import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -374,8 +375,6 @@ def sanitize_ntfy_topic(text: str) -> str:
         Sanitized topic name
 
     """
-    import re
-
     # ntfy allows alphanumeric, hyphen, underscore, and dot
     return re.sub(r"[^a-z0-9._-]", "-", text.lower()).strip("-")
 

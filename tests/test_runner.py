@@ -1,5 +1,6 @@
 """Tests for runner module."""
 
+from contextlib import suppress
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -1939,8 +1940,6 @@ class TestCompleteSuccess:
             patch("fix_die_repeat.runner.format_duration") as mock_format,
         ):
             mock_format.return_value = "0s"
-            from contextlib import suppress
-
             with suppress(SystemExit):
                 runner._complete_success()
 
@@ -1980,8 +1979,6 @@ class TestCompleteSuccess:
             patch("fix_die_repeat.runner.format_duration") as mock_format,
         ):
             mock_format.return_value = "5m 30s"
-            from contextlib import suppress
-
             with suppress(SystemExit):
                 runner._complete_success()
 

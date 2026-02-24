@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from fix_die_repeat import config, runner
 from fix_die_repeat.cli import main
 
 
@@ -49,8 +50,6 @@ class TestCliMain:
     ) -> None:
         """Test CLI with an invalid check command."""
         # Monkeypatch Paths to use tmp_path
-        from fix_die_repeat import config
-
         original_paths = config.Paths
 
         def mock_paths(_project_root: Path | None = None) -> config.Paths:
@@ -117,8 +116,6 @@ class TestCliMain:
 
     def test_cli_env_vars_work(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that environment variables work correctly."""
-        from fix_die_repeat import config
-
         # Set environment variables
         monkeypatch.setenv("FDR_CHECK_CMD", "make test")
         monkeypatch.setenv("FDR_MAX_ITERS", "5")
@@ -221,8 +218,6 @@ class TestCliExceptions:
 
     def test_keyboard_interrupt(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test CLI handles KeyboardInterrupt gracefully."""
-        from fix_die_repeat import config, runner
-
         original_paths = config.Paths
 
         def mock_paths(_project_root: Path | None = None) -> config.Paths:
@@ -245,8 +240,6 @@ class TestCliExceptions:
 
     def test_generic_exception(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test CLI handles generic exceptions."""
-        from fix_die_repeat import config, runner
-
         original_paths = config.Paths
 
         def mock_paths(_project_root: Path | None = None) -> config.Paths:
@@ -273,8 +266,6 @@ class TestCliExceptions:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that debug mode shows traceback for exceptions."""
-        from fix_die_repeat import config, runner
-
         original_paths = config.Paths
 
         def mock_paths(_project_root: Path | None = None) -> config.Paths:
