@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  push:
+    branches: ['main', 'develop']
+  pull_request:
+    branches: ['main', 'develop']
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Install ruff and mypy
+        run: uv pip install ruff mypy
+
+      - name: Run CI script
+        run: ./scripts/ci.sh
