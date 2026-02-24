@@ -32,7 +32,7 @@ build-backend = "hatchling.build"
 target-version = "py312"
 line-length = 100
 lint.select = ["ALL"]
-lint.ignore = ["D203", "D213"]
+lint.ignore = ["COM812", "D203", "D213"]
 
 [tool.ruff.lint.per-file-ignores]
 "fix_die_repeat/cli.py" = [
@@ -40,7 +40,6 @@ lint.ignore = ["D203", "D213"]
     "D301",    # Keeping conventional Click docstrings avoids noisy rewrites that do not improve generated help.
 ]
 "fix_die_repeat/config.py" = [
-    "FBT001",  # Settings overrides intentionally accept bool flags to match CLI/env toggles without translation.
     "FBT002",  # Bool overrides are forwarded directly to preserve explicit precedence behavior in get_settings().
     "S607",    # Git commands rely on PATH resolution across developer environments, not hardcoded absolute paths.
 ]

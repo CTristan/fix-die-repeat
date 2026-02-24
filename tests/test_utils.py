@@ -320,8 +320,12 @@ class TestRunCommand:
 class TestPlayCompletionSound:
     """Tests for play_completion_sound function."""
 
-    def test_no_exception(self) -> None:
+    @patch("fix_die_repeat.utils.run_command")
+    def test_no_exception(self, mock_run: MagicMock) -> None:
         """Test that play_completion_sound doesn't raise exceptions."""
+        # Mock run_command to prevent actual sound playback
+        mock_run.return_value = (0, "", "")
+
         # Should not raise any exceptions (best-effort function)
         play_completion_sound()
 
