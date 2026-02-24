@@ -1,9 +1,13 @@
 """Prompt rendering utilities."""
 
 from functools import lru_cache
-from typing import Any
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
+
+# Types that Jinja2 can render natively in our templates.
+# Using a union instead of Any enables type checking while maintaining
+# flexibility for future template additions.
+TemplateContextValue = str | int | bool | None
 
 
 @lru_cache(maxsize=1)
@@ -19,12 +23,12 @@ def _prompt_environment() -> Environment:
     )
 
 
-def render_prompt(template_name: str, **context: Any) -> str:
+def render_prompt(template_name: str, **context: TemplateContextValue) -> str:
     """Render a prompt template.
 
     Args:
         template_name: Template filename (e.g., "review_prompt.j2")
-        **context: Template variables
+        **context: Template variables (str, int, bool, or None)
 
     Returns:
         Rendered prompt text
