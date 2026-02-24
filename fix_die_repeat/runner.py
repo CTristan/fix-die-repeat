@@ -8,6 +8,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fix_die_repeat.config import Paths, Settings
+from fix_die_repeat.messages import (
+    git_checkout_instructions,
+    git_diff_instructions,
+    model_recommendations_full,
+    oscillation_warning,
+    pr_threads_safe_only_message,
+    pr_threads_unsafe_count_warning,
+)
 from fix_die_repeat.prompts import render_prompt
 from fix_die_repeat.utils import (
     Logger,
@@ -211,17 +219,12 @@ class PiRunner:
             hashes = self.paths.checks_hash_file.read_text().strip().split("\n")
             for entry in reversed(hashes):
                 if entry.startswith(f"{current_hash}:"):
-                    prev_iter = entry.split(":")[-1]
+                    prev_iter = int(entry.split(":")[-1])
                     self.logger.info(
                         f"Detected oscillation: iteration {self.iteration} "
                         f"matches iteration {prev_iter}",
                     )
-                    warning = (
-                        "WARNING: Check output is IDENTICAL to iteration "
-                        f"{prev_iter}. You are going in CIRCLES. "
-                        "Your previous approach did NOT work — "
-                        "you MUST try a fundamentally DIFFERENT strategy."
-                    )
+                    warning = oscillation_warning(prev_iter)
                     # Record this hash
                     with self.paths.checks_hash_file.open("a") as f:
                         f.write(f"{current_hash}:{self.iteration}\n")
@@ -349,10 +352,7 @@ class PiRunner:
                 f"Model {self.settings.test_model} is NOT suitable for code editing tasks.",
             )
             self.logger.info("")
-            self.logger.info("RECOMMENDATION: Try a different model:")
-            self.logger.info("  - anthropic/claude-sonnet-4-5 (recommended for code editing)")
-            self.logger.info("  - anthropic/claude-opus-4-6 (high capacity, more expensive)")
-            self.logger.info("  - github-copilot/gpt-5.2-codex (good for code generation)")
+            self.logger.info(model_recommendations_full())
             self.logger.info("")
             self.logger.info("To override: fix-die-repeat --model <model>")
             sys.exit(1)
@@ -441,10 +441,8 @@ class PiRunner:
                     "Could not resolve all issues.",
                 )
                 if self.start_sha:
-                    self.logger.error(f"To see all changes made: git diff {self.start_sha}")
-                    self.logger.error(
-                        f"To revert all changes:   git checkout {self.start_sha} -- .",
-                    )
+                    self.logger.error(git_diff_instructions(self.start_sha))
+                    self.logger.error(git_checkout_instructions(self.start_sha))
                 return 1
 
             # Step 1: Run checks
@@ -461,10 +459,8 @@ class PiRunner:
                         "Could not resolve check failures.",
                     )
                     if self.start_sha:
-                        self.logger.error(f"To see all changes made: git diff {self.start_sha}")
-                        self.logger.error(
-                            f"To revert all changes:   git checkout {self.start_sha} -- .",
-                        )
+                        self.logger.error(git_diff_instructions(self.start_sha))
+                        self.logger.error(git_checkout_instructions(self.start_sha))
                     return 1
 
                 # Check for oscillation
@@ -1071,10 +1067,9 @@ class PiRunner:
         if len(safe_resolved_ids) < len(resolved_ids):
             unsafe_ids = set(resolved_ids) - set(in_scope_ids)
             self.logger.warning(
-                f"WARNING: Model reported {len(unsafe_ids)} thread(s) NOT in scope: "
-                f"{', '.join(unsafe_ids)}",
+                pr_threads_unsafe_count_warning(len(unsafe_ids), list(unsafe_ids)),
             )
-            self.logger.info(f"Only resolving the {len(safe_resolved_ids)} in-scope thread(s).")
+            self.logger.info(pr_threads_safe_only_message(len(safe_resolved_ids)))
 
         if safe_resolved_ids:
             # Build JSON array

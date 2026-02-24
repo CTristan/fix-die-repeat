@@ -9,6 +9,8 @@ from pathlib import Path
 from rich.console import Console
 from rich.text import Text
 
+from fix_die_repeat.messages import build_large_file_warning
+
 console = Console()
 
 
@@ -284,36 +286,16 @@ def detect_large_files(
         Warning message (empty if no large files found)
 
     """
-    warning_parts: list[str] = []
+    large_files: list[tuple[str, int]] = []
 
     for f in files:
         file_path = project_root / f
         if file_path.exists():
             lines = get_file_line_count(file_path)
             if lines > threshold_lines:
-                if not warning_parts:
-                    warning_parts.append(
-                        "CRITICAL WARNING: The following files are >2000 lines and "
-                        "will be TRUNCATED by the 'read' tool:",
-                    )
-                warning_parts.append(f"- {f} ({lines} lines)")
+                large_files.append((f, lines))
 
-    if warning_parts:
-        warning_parts.extend(
-            [
-                "",
-                "[CRITICAL]: You CANNOT see the bottom of these files. If errors "
-                "occur there, you are flying blind.",
-                "STRONGLY RECOMMENDED: Split these files into smaller files or "
-                "modules to bring them under the 2000-line limit.",
-                "  - If the file contains tests at the bottom, move them to a "
-                "separate test file (e.g., tests.rs, test_file.py, file.test.js).",
-                "  - If it is a large logic file, extract cohesive functionality "
-                "into separate source files or subfolders.",
-            ],
-        )
-
-    return "\n".join(warning_parts)
+    return build_large_file_warning(large_files)
 
 
 def is_excluded_file(filename: str, exclude_patterns: list[str] | None = None) -> bool:
