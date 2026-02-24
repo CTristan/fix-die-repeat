@@ -275,8 +275,7 @@ class PiRunner:
             "Compacting with pi...",
         )
 
-        # TODO: Implement pi-based compaction
-        # For now, do simple truncation
+        # Use simple truncation; pi-based compaction needs a dedicated prompt flow.
         for f in [self.paths.review_file, self.paths.build_history_file]:
             if f.exists():
                 before = get_file_line_count(f)

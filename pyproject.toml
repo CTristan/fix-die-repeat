@@ -43,7 +43,6 @@ lint.ignore = ["COM812", "D203", "D213"]
     "S603",  # False positive: uses absolute path from shutil.which() with hardcoded git arguments, not untrusted input.
 ]
 "fix_die_repeat/runner.py" = [
-    "FIX002",  # TODOs document known follow-up work inline; moving all notes elsewhere loses implementation context.
     "G004",    # Custom Logger expects preformatted strings; deferred %-format logging APIs are not available here.
     "TD002",   # Requiring author tags on every TODO adds noise without improving ownership in this small codebase.
     "TD003",   # Requiring issue links for every TODO is impractical for exploratory notes kept near the code.
