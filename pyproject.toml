@@ -39,9 +39,6 @@ lint.ignore = ["COM812", "D203", "D213"]
     "BLE001",  # CLI entrypoint is an exception boundary; we convert unexpected errors into user-facing exits.
     "D301",    # Keeping conventional Click docstrings avoids noisy rewrites that do not improve generated help.
 ]
-"fix_die_repeat/utils.py" = [
-    "TRY300",  # try/except structure preserves linear cleanup/return flow; adding else made control flow harder to scan.
-]
 "tests/*.py" = [
     "S101",    # Pytest idioms rely on assert statements; replacing them reduces failure introspection quality.
     "S607",    # Test subprocess calls intentionally rely on PATH to mirror real user/runtime behavior.

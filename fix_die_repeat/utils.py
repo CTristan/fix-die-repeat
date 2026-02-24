@@ -130,9 +130,10 @@ def run_command(
             text=True,
             check=check,
         )
-        return (result.returncode, result.stdout or "", result.stderr or "")
     except FileNotFoundError:
         return (127, "", f"Command not found: {args[0]}")
+    else:
+        return (result.returncode, result.stdout or "", result.stderr or "")
 
 
 def get_git_revision_hash(file_path: Path) -> str:

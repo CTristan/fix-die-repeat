@@ -535,7 +535,7 @@ Using named constants improves:
 - **Self-documentation**: Code becomes clearer without needing additional comments
 - **Consistency**: The same constant can be reused across the codebase
 
-**Current state**: Per-file ruff ignores are configured for `runner.py`, `cli.py`, `config.py`, `utils.py`, `prompts.py`, and test files.
+**Current state**: Per-file ruff ignores are currently configured for `fix_die_repeat/cli.py` and `tests/*.py` (see `pyproject.toml` for the source of truth).
 
 To add a targeted exception (only when unavoidable), use:
 
