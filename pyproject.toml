@@ -34,54 +34,54 @@ line-length = 100
 lint.select = ["ALL"]
 
 [tool.ruff.lint.per-file-ignores]
-"fix_die_repeat/runner.py" = [
-    "G004",    # Logging uses f-string for format string (custom Logger class)
-    "PLR0912", # Too many branches in integration-heavy methods
-    "PLR0915", # Too many statements in run() method
-    "G201",    # Logging check exception with custom Logger
-    "DTZ005",  # datetime.now() without timezone is acceptable for timestamps
-    "PLC0415", # Import outside top-level for dynamic imports
-    "TD002",   # TODO comments without author are acceptable
-    "TD003",   # TODO comments without issue link are acceptable
-    "FIX002",  # TODO comments are acceptable for future improvements
-    "TRY400",  # Bare except in logging error handler
-]
 "fix_die_repeat/cli.py" = [
-    "BLE001",  # Blind except in Click CLI entry point
-    "PLR0913", # Too many arguments in main() function (Click options)
-    "FBT001",  # Boolean positional args in function def (Click options)
-    "FBT002",  # Boolean positional args in function call (Click options)
-    "D301",    # Docstring triple quotes style (Click convention)
+    "BLE001",  # CLI entrypoint is an exception boundary; we convert unexpected errors into user-facing exits.
+    "D301",    # Keeping conventional Click docstrings avoids noisy rewrites that do not improve generated help.
+    "FBT001",  # Click injects bool flags directly into callback signatures; changing to wrappers hurts clarity.
+    "FBT002",  # Bool flags are passed through intentionally so CLI semantics remain explicit at call sites.
+    "PLR0913",  # main() mirrors CLI options 1:1; splitting args would hide options behind extra mapping layers.
 ]
 "fix_die_repeat/config.py" = [
-    "PLR0913", # Too many arguments in get_settings() function
-    "FBT001",  # Boolean positional args in function def (settings overrides)
-    "FBT002",  # Boolean positional args in function call
-    "PLC0415", # Import outside top-level for dynamic imports
-    "S607",    # Starting process with partial path (git commands)
-]
-"fix_die_repeat/utils.py" = [
-    "FBT001",  # Boolean positional args in function def (API defaults)
-    "FBT002",  # Boolean positional args in function call
-    "PLC0415", # Import outside top-level for dynamic imports
-    "S602",    # subprocess.call with shell=True (git commands require it)
-    "T201",    # print statement used for terminal bell
-    "DTZ005",  # datetime.now() without timezone is acceptable for timestamps
-    "TRY300",  # try except without else pattern in error handling
-    "PERF401", # Manual list comp preferred over join for clarity
-    "SIM110",  # Complex logic that could be simplified but is clearer as-is
-    "PLW1510", # subprocess.run without check (we handle return code)
+    "FBT001",  # Settings overrides intentionally accept bool flags to match CLI/env toggles without translation.
+    "FBT002",  # Bool overrides are forwarded directly to preserve explicit precedence behavior in get_settings().
+    "PLC0415",  # Function-local imports avoid startup-time side effects and keep optional paths lazily loaded.
+    "PLR0913",  # get_settings() aggregates many explicit knobs; splitting would obscure config wiring.
+    "S607",    # Git commands rely on PATH resolution across developer environments, not hardcoded absolute paths.
 ]
 "fix_die_repeat/prompts.py" = [
-    "S701",    # Jinja2 autoescape disabled for code prompts
-    "ANN401",  # Any type annotation for **kwargs
+    "ANN401",  # Jinja context values are intentionally heterogeneous; narrowing types breaks legitimate template inputs.
+    "S701",    # Autoescape must stay off because we render plain-text prompts where escaping would corrupt content.
+]
+"fix_die_repeat/runner.py" = [
+    "DTZ005",  # Local wall-clock timestamps are intentional for human-readable run logs and local debugging context.
+    "FIX002",  # TODOs document known follow-up work inline; moving all notes elsewhere loses implementation context.
+    "G004",    # Custom Logger expects preformatted strings; deferred %-format logging APIs are not available here.
+    "G201",    # Custom Logger lacks logging.exception semantics; we preserve explicit exception formatting behavior.
+    "PLC0415",  # Deferred imports prevent circular dependencies in rarely used review/PR code paths.
+    "PLR0912",  # Orchestrator branches model distinct loop states; flattening them would hide state transitions.
+    "PLR0915",  # run() remains a single workflow coordinator; splitting further would fragment shared loop state.
+    "TD002",   # Requiring author tags on every TODO adds noise without improving ownership in this small codebase.
+    "TD003",   # Requiring issue links for every TODO is impractical for exploratory notes kept near the code.
+    "TRY400",  # We cannot use logging.exception because the project uses a custom logger without that API.
+]
+"fix_die_repeat/utils.py" = [
+    "DTZ005",  # Local timestamps are used for operator-facing logs where timezone offsets add noise, not value.
+    "FBT001",  # Utility API exposes explicit bool switches; changing signature style would reduce call-site clarity.
+    "FBT002",  # Bool arguments are intentionally passed through to keep behavior explicit in command wrappers.
+    "PERF401",  # Comprehensions are retained where they read clearer than join/map micro-optimizations.
+    "PLC0415",  # Local imports keep optional command-path behavior isolated and avoid unnecessary module loading.
+    "PLW1510",  # subprocess return codes are handled manually; check=True would bypass custom error reporting.
+    "S602",    # shell=True is required for user-supplied shell commands and compatibility with existing workflows.
+    "SIM110",  # Expanded branching keeps failure modes explicit; compact forms reduced debuggability in practice.
+    "T201",    # BEL terminal notifications require direct print output; replacing with logging drops sound behavior.
+    "TRY300",  # try/except structure preserves linear cleanup/return flow; adding else made control flow harder to scan.
 ]
 "tests/*.py" = [
-    "S101",    # assert usage is expected in tests
-    "PLC0415", # Import outside top-level in tests
-    "PLR2004", # Magic values are acceptable in tests
-    "S607",    # Starting process with partial path for test commands
-    "SLF001",  # Private member access is expected when testing internal methods
+    "PLC0415",  # Test-only imports are scoped per test to avoid unnecessary fixture/module setup overhead.
+    "PLR2004",  # Literal values in tests improve readability by keeping expected outcomes inline with assertions.
+    "S101",    # Pytest idioms rely on assert statements; replacing them reduces failure introspection quality.
+    "S607",    # Test subprocess calls intentionally rely on PATH to mirror real user/runtime behavior.
+    "SLF001",  # Tests exercise internal APIs intentionally when validating invariants not exposed publicly.
 ]
 
 [tool.ruff.lint.isort]
