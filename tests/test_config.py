@@ -3,6 +3,8 @@
 import os
 import subprocess
 from pathlib import Path
+from subprocess import CalledProcessError
+from unittest.mock import patch
 
 import pytest
 
@@ -12,6 +14,7 @@ from fix_die_repeat.config import CliOptions, Paths, Settings, get_settings
 DEFAULT_MAX_ITERS = 10
 DEFAULT_MAX_PR_THREADS = 5
 TEST_MAX_ITERS = 5
+TEST_MAX_PR_THREADS = 10
 
 
 class TestSettings:
@@ -78,6 +81,13 @@ class TestSettings:
         settings = get_settings(options)
 
         assert settings.test_model == "anthropic/claude-sonnet-4-5"
+
+    def test_get_settings_with_max_pr_threads(self) -> None:
+        """Test get_settings with max_pr_threads parameter (line 190)."""
+        options = CliOptions(max_pr_threads=10)
+        settings = get_settings(options)
+
+        assert settings.max_pr_threads == TEST_MAX_PR_THREADS
 
 
 class TestPaths:
@@ -219,3 +229,23 @@ class TestPaths:
         assert paths.pr_resolved_threads_file == paths.fdr_dir / ".resolved_threads"
         assert paths.diff_file == paths.fdr_dir / "changes.diff"
         assert paths.run_timestamps_file == paths.fdr_dir / "run_timestamps.md"
+
+    def test_find_project_root_git_fallback_to_cwd(self, tmp_path: Path) -> None:
+        """Test _find_project_root falls back to cwd when git command fails (line 190)."""
+        no_git_dir = tmp_path / "no_git"
+        no_git_dir.mkdir()
+
+        # Mock subprocess.run to raise CalledProcessError for git commands
+        original_cwd = Path.cwd()
+        try:
+            os.chdir(no_git_dir)
+            with patch("fix_die_repeat.config.subprocess.run") as mock_run:
+                mock_run.side_effect = CalledProcessError(128, "git")
+
+                # Create Paths - should fall back to cwd when git fails
+                paths = Paths()
+
+                # Should return current working directory when git fails
+                assert paths.project_root == no_git_dir
+        finally:
+            os.chdir(original_cwd)

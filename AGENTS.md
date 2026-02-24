@@ -10,7 +10,7 @@ This is a living document for coding agents (pi, assistants, etc.) working on **
 
 ### Purpose
 
-1. Run a check command (e.g., `./scripts/ci.sh`, `pytest`)
+1. Run a check command (e.g., `./scripts/ci.sh`, `uv run pytest`)
 2. If checks fail → use pi to fix the errors
 3. If checks pass → use pi to review the changes
 4. If review finds issues → fix them
@@ -246,17 +246,20 @@ if current_review_hash == last_review_hash and current_git_state == last_git_sta
 
 ## Testing
 
+### Python Tooling Policy (uv required)
+
+All Python-based commands (pytest, ruff, mypy, CLI invocations, scripts) must be run via `uv run ...`. Do not activate a virtualenv or call these tools directly; this includes pytest.
+
 ### Run All Tests
 
 ```bash
-source .venv/bin/activate
-pytest
+uv run pytest
 ```
 
 ### Run with Coverage
 
 ```bash
-pytest --cov=fix_die_repeat --cov-report=term-missing --cov-report=html
+uv run pytest --cov=fix_die_repeat --cov-report=term-missing --cov-report=html
 ```
 
 ### Current Coverage
@@ -326,14 +329,14 @@ def test_something(tmp_path: Path) -> None:
 
 ```bash
 # Check
-ruff check fix_die_repeat tests
+uv run ruff check fix_die_repeat tests
 
 # Format
-ruff format fix_die_repeat tests
+uv run ruff format fix_die_repeat tests
 
 # Both (auto-fix + format)
-ruff check --fix fix_die_repeat tests
-ruff format fix_die_repeat tests
+uv run ruff check --fix fix_die_repeat tests
+uv run ruff format fix_die_repeat tests
 ```
 
 **Configuration**: `pyproject.toml` `[tool.ruff]`
@@ -550,7 +553,7 @@ To add a targeted exception (only when unavoidable), use:
 ### MyPy (Type Checking)
 
 ```bash
-mypy fix_die_repeat
+uv run mypy fix_die_repeat
 ```
 
 **Configuration**: `pyproject.toml` `[tool.mypy]`
@@ -657,7 +660,7 @@ class PiRunner:
 
 ```bash
 # Run tests + linting + type check
-pytest && ruff check fix_die_repeat tests && mypy fix_die_repeat
+uv run pytest && uv run ruff check fix_die_repeat tests && uv run mypy fix_die_repeat
 ```
 
 ---
@@ -821,8 +824,8 @@ self.logger.debug_log("Debug message")  # Only shown in debug mode
 
 ### Before Making Changes
 
-1. **Run tests**: `pytest` — ensure baseline passes.
-2. **Check linting**: `ruff check fix_die_repeat tests`.
+1. **Run tests**: `uv run pytest` — ensure baseline passes.
+2. **Check linting**: `uv run ruff check fix_die_repeat tests`.
 3. **Understand context**: Why does this code exist? What problem does it solve?
 
 ### After Making Changes
@@ -830,7 +833,7 @@ self.logger.debug_log("Debug message")  # Only shown in debug mode
 1. **Update tests**: Add coverage for new code.
 2. **Update this document** (AGENTS.md) if architecture changes.
 3. **Update README.md** if user-facing changes.
-4. **Run full check**: `pytest && ruff check --fix fix_die_repeat tests && ruff format fix_die_repeat tests`.
+4. **Run full check**: `uv run pytest && uv run ruff check --fix fix_die_repeat tests && uv run ruff format fix_die_repeat tests`.
 
 ---
 

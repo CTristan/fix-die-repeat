@@ -1,5 +1,6 @@
 """Tests for utils module."""
 
+import hashlib
 from pathlib import Path
 from subprocess import CalledProcessError
 from unittest.mock import MagicMock, patch
@@ -9,6 +10,7 @@ import pytest
 from fix_die_repeat.utils import (
     Logger,
     _collect_git_files,
+    _should_exclude_file,
     detect_large_files,
     format_duration,
     get_changed_files,
@@ -449,3 +451,101 @@ class TestIsExcludedFile:
         assert is_excluded_file("PACKAGE.LOCK") is True
         assert is_excluded_file("Package-Lock.Json") is True
         assert is_excluded_file("SCRIPT.MIN.JS") is True
+
+
+class TestRunCommandErrorHandling:
+    """Tests for run_command error handling."""
+
+    def test_run_command_file_not_found_exception(self) -> None:
+        """Test run_command handles FileNotFoundError."""
+        with patch("fix_die_repeat.utils.subprocess.run", side_effect=FileNotFoundError):
+            returncode, _stdout, stderr = run_command("missing-command", check=False)
+
+        assert returncode == COMMAND_NOT_FOUND_EXIT_CODE
+        assert "Command not found" in stderr
+
+
+class TestGetGitRevisionHashFallback:
+    """Tests for get_git_revision_hash fallback behavior."""
+
+    def test_hash_fallback_on_oserror(self, tmp_path: Path) -> None:
+        """Test fallback to sha256 when git hash-object fails."""
+        test_file = tmp_path / "file.txt"
+        test_file.write_text("content")
+        expected = hashlib.sha256(test_file.read_bytes()).hexdigest()
+
+        with patch("fix_die_repeat.utils.run_command", side_effect=OSError("boom")):
+            result = get_git_revision_hash(test_file)
+
+        assert result == expected
+
+
+class TestCollectGitFilesWithChanges:
+    """Tests for _collect_git_files with mocked git output."""
+
+    def test_collect_git_files_with_changes(self, tmp_path: Path) -> None:
+        """Test collecting git files when git outputs file names."""
+        with patch("fix_die_repeat.utils.run_command") as mock_run:
+            mock_run.side_effect = [
+                (0, "file1.py\n", ""),
+                (0, "file2.py\n", ""),
+                (0, "file3.py\n", ""),
+            ]
+
+            files = _collect_git_files(tmp_path)
+
+        assert files == {"file1.py", "file2.py", "file3.py"}
+
+
+class TestShouldExcludeFile:
+    """Tests for _should_exclude_file helper."""
+
+    def test_should_exclude_file_suffix(self) -> None:
+        """Test excluding files with suffix patterns."""
+        assert _should_exclude_file("-lock.json", ["*-lock.json"]) is True
+
+    def test_should_exclude_file_exact(self) -> None:
+        """Test excluding files with exact patterns."""
+        assert _should_exclude_file("skip.log", ["skip.log"]) is True
+        assert _should_exclude_file("keep.log", ["skip.log"]) is False
+
+
+class TestGetChangedFilesFiltering:
+    """Tests for get_changed_files filtering behavior."""
+
+    def test_get_changed_files_filters_excluded(self, tmp_path: Path) -> None:
+        """Test get_changed_files filters missing and excluded files."""
+        (tmp_path / "keep.txt").write_text("ok")
+        (tmp_path / "skip.log").write_text("skip")
+
+        with patch(
+            "fix_die_repeat.utils._collect_git_files",
+            return_value={
+                "keep.txt",
+                "skip.log",
+                "missing.txt",
+                ".fix-die-repeat/skip.txt",
+            },
+        ):
+            result = get_changed_files(tmp_path, exclude_patterns=["skip.log"])
+
+        assert result == ["keep.txt"]
+
+
+class TestPlayCompletionSoundFallback:
+    """Tests for play_completion_sound fallback behavior."""
+
+    def test_play_completion_sound_fallback(self) -> None:
+        """Test that fallback command runs when no sound files exist."""
+        with (
+            patch("fix_die_repeat.utils.Path.exists", return_value=False),
+            patch("fix_die_repeat.utils.run_command") as mock_run,
+            patch("builtins.print") as mock_print,
+        ):
+            play_completion_sound()
+
+        mock_run.assert_called_with(
+            "canberra-gtk-play -i complete -d 'fix-die-repeat'",
+            check=False,
+        )
+        mock_print.assert_called_once()

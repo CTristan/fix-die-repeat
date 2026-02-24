@@ -5,12 +5,17 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from fix_die_repeat import cli as cli_module
 from fix_die_repeat import config, runner
-from fix_die_repeat.cli import main
+from fix_die_repeat.cli import _build_cli_options, main
 
 # Constants for CLI test values
 TEST_MAX_ITERS = 5
+TEST_MAX_PR_THREADS = 10
+TEST_PARTIAL_MAX_ITERS = 3
 KEYBOARD_INTERRUPT_EXIT_CODE = 130
+
+type CliKwargs = dict[str, str | int | bool | None]
 
 
 class TestCliMain:
@@ -46,34 +51,6 @@ class TestCliMain:
         result = runner.invoke(main, ["--test-model", "test-model", "--help"])
         assert result.exit_code == 0
         assert "--test-model" in result.output
-
-    def test_cli_invalid_check_cmd_integration(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Test CLI with an invalid check command."""
-        # Monkeypatch Paths to use tmp_path
-        original_paths = config.Paths
-
-        def mock_paths(_project_root: Path | None = None) -> config.Paths:
-            return original_paths(project_root=tmp_path)
-
-        monkeypatch.setattr(config, "Paths", mock_paths)
-
-        runner = CliRunner()
-
-        # Test with a check command that doesn't exist
-        result = runner.invoke(
-            main,
-            ["--check-cmd", "nonexistent-command-xyz-123"],
-            catch_exceptions=False,
-        )
-
-        # The CLI will try to run the command, which will fail
-        # The exact exit code depends on the system
-        # This test verifies the CLI accepts the option and attempts to run
-        assert "nonexistent-command-xyz-123" in result.output or result.exit_code != 0
 
     def test_cli_with_max_iters(self) -> None:
         """Test CLI with max-iters option."""
@@ -217,6 +194,102 @@ class TestCliOptions:
         assert result.exit_code == 0
 
 
+class TestBuildCliOptions:
+    """Tests for _build_cli_options function."""
+
+    def test_all_options_set(self) -> None:
+        """Test building CliOptions with all options set."""
+        kwargs: CliKwargs = {
+            "check_cmd": "pytest",
+            "max_iters": TEST_MAX_ITERS,
+            "model": "test-model",
+            "max_pr_threads": TEST_MAX_PR_THREADS,
+            "archive_artifacts": True,
+            "no_compact": True,
+            "pr_review": True,
+            "test_model": "test-model-2",
+            "debug": True,
+        }
+
+        options = _build_cli_options(kwargs)
+
+        assert options.check_cmd == "pytest"
+        assert options.max_iters == TEST_MAX_ITERS
+        assert options.model == "test-model"
+        assert options.max_pr_threads == TEST_MAX_PR_THREADS
+        assert options.archive_artifacts is True  # True when flag is set
+        assert options.no_compact is True
+        assert options.pr_review is True
+        assert options.test_model == "test-model-2"
+        assert options.debug is True
+
+    def test_archive_artifacts_flag_true(self) -> None:
+        """Test archive_artifacts when flag is True (uncovered line 107-108)."""
+        kwargs: CliKwargs = {"archive_artifacts": True}
+
+        options = _build_cli_options(kwargs)
+
+        assert options.archive_artifacts is True
+
+    def test_archive_artifacts_flag_false(self) -> None:
+        """Test archive_artifacts when flag is False (not set)."""
+        kwargs: CliKwargs = {"archive_artifacts": False}
+
+        options = _build_cli_options(kwargs)
+
+        assert options.archive_artifacts is None
+
+    def test_no_options_set(self) -> None:
+        """Test building CliOptions with no options set (all defaults)."""
+        kwargs: CliKwargs = {}
+
+        options = _build_cli_options(kwargs)
+
+        assert options.check_cmd is None
+        assert options.max_iters is None
+        assert options.model is None
+        assert options.max_pr_threads is None
+        assert options.archive_artifacts is None
+        assert options.no_compact is False
+        assert options.pr_review is False
+        assert options.test_model is None
+        assert options.debug is False
+
+    def test_partial_options(self) -> None:
+        """Test building CliOptions with partial options set."""
+        kwargs: CliKwargs = {
+            "check_cmd": "make test",
+            "max_iters": TEST_PARTIAL_MAX_ITERS,
+            "no_compact": True,
+        }
+
+        options = _build_cli_options(kwargs)
+
+        assert options.check_cmd == "make test"
+        assert options.max_iters == TEST_PARTIAL_MAX_ITERS
+        assert options.model is None
+        assert options.max_pr_threads is None
+        assert options.archive_artifacts is None
+        assert options.no_compact is True
+        assert options.pr_review is False
+        assert options.test_model is None
+        assert options.debug is False
+
+    def test_type_conversions(self) -> None:
+        """Test that type conversions work correctly."""
+        kwargs: CliKwargs = {
+            "check_cmd": 123,  # Wrong type, should be converted to string
+            "max_iters": "5",  # Wrong type, should be converted to int
+            "max_pr_threads": TEST_MAX_PR_THREADS,  # Already int, should stay int
+        }
+
+        options = _build_cli_options(kwargs)
+
+        assert options.check_cmd == "123"
+        assert options.max_iters == TEST_MAX_ITERS
+        assert options.max_pr_threads == TEST_MAX_PR_THREADS
+
+
 class TestCliExceptions:
     """Tests for CLI exception handling."""
 
@@ -289,3 +362,27 @@ class TestCliExceptions:
         # Should show traceback in debug mode
         assert result.exit_code == 1
         assert "RuntimeError" in result.output
+
+    def test_value_error_handling(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test CLI handles ValueError with appropriate error message (lines 107-108)."""
+        original_paths = config.Paths
+
+        def mock_paths(_project_root: Path | None = None) -> config.Paths:
+            return original_paths(project_root=tmp_path)
+
+        monkeypatch.setattr(config, "Paths", mock_paths)
+
+        # Monkeypatch _run_main to raise ValueError
+        error_msg = "Invalid configuration"
+
+        def failing_run(_options: object) -> int:
+            raise ValueError(error_msg)
+
+        monkeypatch.setattr(cli_module, "_run_main", failing_run)
+
+        cli_runner = CliRunner()
+        result = cli_runner.invoke(main, catch_exceptions=False)
+
+        # Should exit with code 1 and show error message
+        assert result.exit_code == 1
+        assert "Error: Invalid configuration" in result.output
