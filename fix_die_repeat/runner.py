@@ -32,12 +32,13 @@ class PiRunner:
         Args:
             settings: Configuration settings
             paths: Path management
+
         """
         self.settings = settings
         self.paths = paths
         self.iteration = 0
         self.pi_invocation_count = 0
-        self.script_start_time = 0
+        self.script_start_time: float = 0.0
         self.start_sha = ""
         self.pr_review_no_progress_count = 0
         self.last_review_current_hash = ""
@@ -72,6 +73,7 @@ class PiRunner:
 
         Returns:
             Tuple of (exit_code, stdout, stderr)
+
         """
         self.before_pi_call()
 
@@ -104,6 +106,7 @@ class PiRunner:
 
         Returns:
             Tuple of (exit_code, stdout, stderr)
+
         """
         returncode, stdout, stderr = self.run_pi(*args)
 
@@ -121,7 +124,9 @@ class PiRunner:
         if self.paths.pi_log and self.paths.pi_log.exists():
             content = self.paths.pi_log.read_text()
             if "429" in content.lower() and "long context" in content.lower():
-                self.logger.info("Detected long context rate limit (429). Forcing emergency compaction...")
+                self.logger.info(
+                    "Detected long context rate limit (429). Forcing emergency compaction...",
+                )
                 self._emergency_compact()
                 self.logger.info("Emergency compaction complete. Retrying...")
 
@@ -161,8 +166,12 @@ class PiRunner:
         )
 
         lines = self.paths.checks_log.read_text().splitlines()
-        filtered_lines = ["=== FILTERED CHECK OUTPUT (full log: .fix-die-repeat/checks.log, "
-                         f"{total_lines} lines) ===", "", "--- Error/failure lines with context ---"]
+        filtered_lines = [
+            "=== FILTERED CHECK OUTPUT (full log: .fix-die-repeat/checks.log, "
+            f"{total_lines} lines) ===",
+            "",
+            "--- Error/failure lines with context ---",
+        ]
 
         seen_indices = set()
         for i, line in enumerate(lines):
@@ -192,6 +201,7 @@ class PiRunner:
 
         Returns:
             Warning message if oscillation detected, None otherwise
+
         """
         current_hash = get_git_revision_hash(self.paths.checks_log)
 
@@ -201,7 +211,7 @@ class PiRunner:
                 if entry.startswith(f"{current_hash}:"):
                     prev_iter = entry.split(":")[-1]
                     self.logger.info(
-                        f"Detected oscillation: iteration {self.iteration} matches iteration {prev_iter}"
+                        f"Detected oscillation: iteration {self.iteration} matches iteration {prev_iter}",
                     )
                     warning = (
                         "WARNING: Check output is IDENTICAL to iteration "
@@ -224,6 +234,7 @@ class PiRunner:
 
         Returns:
             True if compaction was performed, False otherwise
+
         """
         if not self.settings.compact_artifacts:
             return False
@@ -237,13 +248,13 @@ class PiRunner:
                 if line_count > self.settings.emergency_threshold_lines:
                     needs_emergency = True
                     break
-                elif line_count > self.settings.compact_threshold_lines:
+                if line_count > self.settings.compact_threshold_lines:
                     needs_compact = True
 
         if needs_emergency:
             self.logger.info(
                 f"Emergency: artifacts exceed {self.settings.emergency_threshold_lines} lines. "
-                "Truncating to last 100 lines..."
+                "Truncating to last 100 lines...",
             )
             for f in [self.paths.review_file, self.paths.build_history_file]:
                 if f.exists():
@@ -255,7 +266,7 @@ class PiRunner:
             return False
 
         self.logger.info(
-            f"Artifacts exceed {self.settings.compact_threshold_lines} lines. Compacting with pi..."
+            f"Artifacts exceed {self.settings.compact_threshold_lines} lines. Compacting with pi...",
         )
 
         # TODO: Implement pi-based compaction
@@ -284,8 +295,8 @@ class PiRunner:
         # Create test prompt
         self.before_pi_call()
         returncode, _stdout, _stderr = run_command(
-            f'pi -p --model {self.settings.test_model} '
-            f'"Write \'MODEL TEST OK\' to file {test_file}. Do NOT use any other tools or generate pseudo-code."',
+            f"pi -p --model {self.settings.test_model} "
+            f"\"Write 'MODEL TEST OK' to file {test_file}. Do NOT use any other tools or generate pseudo-code.\"",
             cwd=self.paths.project_root,
         )
 
@@ -303,7 +314,9 @@ class PiRunner:
 
             self.logger.info("Model is compatible for code editing. Ready to proceed.")
             self.logger.info("")
-            self.logger.info(f"To run with this model: fix-die-repeat --model {self.settings.test_model}")
+            self.logger.info(
+                f"To run with this model: fix-die-repeat --model {self.settings.test_model}",
+            )
             self.logger.info(f"Or set via env var: export FDR_MODEL={self.settings.test_model}")
             sys.exit(0)
         else:
@@ -312,15 +325,23 @@ class PiRunner:
             self.logger.info(f"Test output: {test_output}")
 
             # Check for pseudo-code
-            if re.search(r"print|IO\.puts|System\.cmd|File\.write|defmodule", test_output, re.I):
+            if re.search(
+                r"print|IO\.puts|System\.cmd|File\.write|defmodule",
+                test_output,
+                re.IGNORECASE,
+            ):
                 self.logger.warning(
-                    "WARNING: Model generated pseudo-code instead of using pi's tools."
+                    "WARNING: Model generated pseudo-code instead of using pi's tools.",
                 )
-                self.logger.warning("This model appears incompatible with pi's tool-calling interface.")
+                self.logger.warning(
+                    "This model appears incompatible with pi's tool-calling interface.",
+                )
 
             test_file.unlink(missing_ok=True)
 
-            self.logger.info(f"Model {self.settings.test_model} is NOT suitable for code editing tasks.")
+            self.logger.info(
+                f"Model {self.settings.test_model} is NOT suitable for code editing tasks.",
+            )
             self.logger.info("")
             self.logger.info("RECOMMENDATION: Try a different model:")
             self.logger.info("  - anthropic/claude-sonnet-4-5 (recommended for code editing)")
@@ -335,12 +356,14 @@ class PiRunner:
 
         Returns:
             Tuple of (exit_code, output)
+
         """
         self.logger.info(f"[Step 1] Running {self.settings.check_cmd} (output: checks.log)...")
 
         start_time = time.time()
         returncode, stdout, stderr = run_command(
-            self.settings.check_cmd, cwd=self.paths.project_root
+            self.settings.check_cmd,
+            cwd=self.paths.project_root,
         )
 
         # Write output to checks log
@@ -358,6 +381,7 @@ class PiRunner:
 
         Returns:
             Exit code (0 for success, non-zero for failure)
+
         """
         self.script_start_time = time.time()
 
@@ -370,18 +394,22 @@ class PiRunner:
             archive_dir = self.paths.fdr_dir / "archive" / archive_timestamp
             self.logger.info(f"Archiving existing artifacts to {archive_dir}")
             archive_dir.mkdir(parents=True, exist_ok=True)
-            for f in self.paths.fdr_dir.glob("*"):
-                if f.is_file():
-                    f.rename(archive_dir / f.name)
+            for file_path in self.paths.fdr_dir.glob("*"):
+                if file_path.is_file():
+                    file_path.rename(archive_dir / file_path.name)
 
         # Initialize logs
         self.paths.pi_log.write_text("")
-        self.paths.session_log.write_text("")
+        self.session_log.write_text("")
         self.paths.checks_hash_file.write_text("")
-        self.logger.info(f"Logging full session output to: {self.paths.session_log}")
+        self.logger.info(f"Logging full session output to: {self.session_log}")
 
         # Record starting commit SHA
-        returncode, stdout, _ = run_command("git rev-parse HEAD", cwd=self.paths.project_root, check=False)
+        returncode, stdout, _ = run_command(
+            "git rev-parse HEAD",
+            cwd=self.paths.project_root,
+            check=False,
+        )
         if returncode == 0:
             self.start_sha = stdout.strip()
             self.paths.start_sha_file.write_text(self.start_sha)
@@ -404,11 +432,13 @@ class PiRunner:
             if self.iteration > self.settings.max_iters:
                 self.logger.error(
                     f"Maximum iterations ({self.settings.max_iters}) exceeded. "
-                    "Could not resolve all issues."
+                    "Could not resolve all issues.",
                 )
                 if self.start_sha:
                     self.logger.error(f"To see all changes made: git diff {self.start_sha}")
-                    self.logger.error(f"To revert all changes:   git checkout {self.start_sha} -- .")
+                    self.logger.error(
+                        f"To revert all changes:   git checkout {self.start_sha} -- .",
+                    )
                 return 1
 
             # Step 1: Run checks
@@ -422,11 +452,13 @@ class PiRunner:
                 if fix_attempt > self.settings.max_iters:
                     self.logger.error(
                         f"Maximum fix attempts ({self.settings.max_iters}) exhausted. "
-                        "Could not resolve check failures."
+                        "Could not resolve check failures.",
                     )
                     if self.start_sha:
                         self.logger.error(f"To see all changes made: git diff {self.start_sha}")
-                        self.logger.error(f"To revert all changes:   git checkout {self.start_sha} -- .")
+                        self.logger.error(
+                            f"To revert all changes:   git checkout {self.start_sha} -- .",
+                        )
                     return 1
 
                 # Check for oscillation
@@ -436,7 +468,7 @@ class PiRunner:
 
                 self.logger.info(
                     f"[Step 2A] Checks failed (fix attempt {fix_attempt}/{self.settings.max_iters}). "
-                    "Running pi to fix errors..."
+                    "Running pi to fix errors...",
                 )
 
                 # Filter checks log
@@ -461,8 +493,8 @@ class PiRunner:
 
                 # Calculate context size
                 changed_size = 0
-                for f in changed_files:
-                    changed_size += get_file_size(self.paths.project_root / f)
+                for filepath in changed_files:
+                    changed_size += get_file_size(self.paths.project_root / filepath)
 
                 context_mode = "push"
                 large_context_list = ""
@@ -471,19 +503,19 @@ class PiRunner:
                     context_mode = "pull"
                     self.logger.info(
                         f"Context size ({changed_size} bytes) exceeds threshold "
-                        f"({self.settings.auto_attach_threshold}). Switching to PULL mode."
+                        f"({self.settings.auto_attach_threshold}). Switching to PULL mode.",
                     )
                     large_context_list = (
                         "\n\nThe following files have changed but are too large to pre-load "
                         f"automatically ({changed_size} bytes total). You MUST use the 'read' tool "
                         "to inspect the ones relevant to the error:\n"
                     )
-                    for f in changed_files:
-                        large_context_list += f"- {f}\n"
+                    for filepath in changed_files:
+                        large_context_list += f"- {filepath}\n"
                 else:
                     self.logger.info(
                         f"Context size ({changed_size} bytes) is within limits. "
-                        "Pushing file contents to prompt."
+                        "Pushing file contents to prompt.",
                     )
 
                 # Build pi command
@@ -498,8 +530,8 @@ class PiRunner:
 
                 # Attach changed files in push mode
                 if context_mode == "push":
-                    for f in changed_files:
-                        pi_args.append(f"@{f}")
+                    for filepath in changed_files:
+                        pi_args.append(f"@{filepath}")
 
                 # Build prompt
                 prompt_parts = [
@@ -514,36 +546,40 @@ class PiRunner:
                 if self.paths.review_file.exists():
                     prompt_parts.append(
                         "I have attached .fix-die-repeat/review.md which contains history of "
-                        "previous iterations. Review it to avoid repeating mistakes."
+                        "previous iterations. Review it to avoid repeating mistakes.",
                     )
 
                 if self.paths.build_history_file.exists():
                     prompt_parts.append(
                         "I have attached .fix-die-repeat/build_history.md which contains a summary "
                         "of files you modified in previous attempts to fix the build. Use this to avoid "
-                        "repeating ineffective changes."
+                        "repeating ineffective changes.",
                     )
 
                 if context_mode == "push":
-                    prompt_parts.append("I have also attached the currently changed files for context.")
+                    prompt_parts.append(
+                        "I have also attached the currently changed files for context.",
+                    )
                 else:
                     prompt_parts.append(large_context_list)
 
                 if large_file_warning:
                     prompt_parts.append(large_file_warning)
 
-                prompt_parts.extend([
-                    "",
-                    "Your goal is to FIX the errors. Follow this plan:",
-                    "1. ANALYZE the log and identify the root cause.",
-                    "2. PLAN your fix.",
-                    "3. APPLY the fix using 'edit'.",
-                    "4. VERIFY with a quick targeted check (e.g., compile the affected file, "
-                    "run the specific failing test). You MAY run the checks script "
-                    f"(e.g., ./checks.sh or the command in `{self.settings.check_cmd}`) "
-                    "using the 'bash' tool to verify your fix. Prefer targeted invocations over "
-                    "running the full CI pipeline.",
-                ])
+                prompt_parts.extend(
+                    [
+                        "",
+                        "Your goal is to FIX the errors. Follow this plan:",
+                        "1. ANALYZE the log and identify the root cause.",
+                        "2. PLAN your fix.",
+                        "3. APPLY the fix using 'edit'.",
+                        "4. VERIFY with a quick targeted check (e.g., compile the affected file, "
+                        "run the specific failing test). You MAY run the checks script "
+                        f"(e.g., ./checks.sh or the command in `{self.settings.check_cmd}`) "
+                        "using the 'bash' tool to verify your fix. Prefer targeted invocations over "
+                        "running the full CI pipeline.",
+                    ],
+                )
 
                 prompt = "\n".join(prompt_parts)
 
@@ -558,12 +594,12 @@ class PiRunner:
                 if not stdout.strip():
                     self.logger.error(
                         "Pi reported success but NO files were modified. This suggests "
-                        "'edit' commands failed (e.g., text not found)."
+                        "'edit' commands failed (e.g., text not found).",
                     )
                     with self.paths.build_history_file.open("a") as f:
                         f.write(
                             f"## Iteration {self.iteration} fix attempt {fix_attempt}: "
-                            "FAILED to apply fixes (no files changed)\n\n"
+                            "FAILED to apply fixes (no files changed)\n\n",
                         )
                 else:
                     # Record history
@@ -574,7 +610,7 @@ class PiRunner:
 
                 # Re-run checks
                 self.logger.info(
-                    f"[Step 2A] Re-running {self.settings.check_cmd} after fix attempt {fix_attempt}..."
+                    f"[Step 2A] Re-running {self.settings.check_cmd} after fix attempt {fix_attempt}...",
                 )
                 checks_status, _ = self.run_checks()
 
@@ -589,12 +625,15 @@ class PiRunner:
                 self._fetch_pr_threads()
 
             # Step 4: Collect files for review
-            if not self.paths.review_current_file.exists() or not self.paths.review_current_file.read_text():
+            if (
+                not self.paths.review_current_file.exists()
+                or not self.paths.review_current_file.read_text()
+            ):
                 # Skip local review if we have PR threads to process
                 self._run_local_review(changed_files)
             else:
                 self.logger.info(
-                    f"[Step 4] Using PR threads from {self.paths.review_current_file} for review."
+                    f"[Step 4] Using PR threads from {self.paths.review_current_file} for review.",
                 )
                 self.logger.info("[Step 5] Skipping local file review generation.")
 
@@ -624,9 +663,13 @@ class PiRunner:
             return
 
         # Get PR info
-        returncode, pr_json, _ = run_command(f"gh pr view {branch} --json number,url,headRepository,headRepositoryOwner")
+        returncode, pr_json, _ = run_command(
+            f"gh pr view {branch} --json number,url,headRepository,headRepositoryOwner",
+        )
         if returncode != 0:
-            self.logger.info(f"No open PR found for {branch} or error fetching PR. Skipping PR review.")
+            self.logger.info(
+                f"No open PR found for {branch} or error fetching PR. Skipping PR review.",
+            )
             return
 
         # Parse PR info
@@ -642,9 +685,11 @@ class PiRunner:
 
         # Check cache
         cache_key = f"{repo_owner}/{repo_name}/{pr_number}"
-        if (self.paths.pr_threads_cache.exists()
+        if (
+            self.paths.pr_threads_cache.exists()
             and self.paths.pr_threads_hash_file.exists()
-            and self.paths.pr_threads_hash_file.read_text() == cache_key):
+            and self.paths.pr_threads_hash_file.read_text() == cache_key
+        ):
             self.logger.info("Using cached PR threads (unchanged)...")
             self.paths.review_current_file.write_text(self.paths.pr_threads_cache.read_text())
             thread_count = self.paths.review_current_file.read_text().count("--- Thread #")
@@ -654,7 +699,7 @@ class PiRunner:
         self.logger.info("Cache miss or invalid. Fetching fresh threads...")
 
         # GraphQL query
-        query = '''
+        query = """
             query($owner: String!, $repo: String!, $number: Int!) {
                 repository(owner: $owner, name: $repo) {
                     pullRequest(number: $number) {
@@ -675,10 +720,10 @@ class PiRunner:
                     }
                 }
             }
-        '''
+        """
 
         returncode, gql_result, _ = run_command(
-            f"gh api graphql -f query='{query}' -F owner={repo_owner} -F repo={repo_name} -F number={pr_number}"
+            f"gh api graphql -f query='{query}' -F owner={repo_owner} -F repo={repo_name} -F number={pr_number}",
         )
         if returncode != 0:
             self.logger.error("Failed to fetch threads via GraphQL.")
@@ -723,7 +768,9 @@ class PiRunner:
 
                 content = header + "\n".join(threads_output)
                 self.paths.review_current_file.write_text(content)
-                self.logger.info(f"Found {len(unresolved_threads)} unresolved threads. Added to review queue.")
+                self.logger.info(
+                    f"Found {len(unresolved_threads)} unresolved threads. Added to review queue.",
+                )
 
                 # Cache
                 self.paths.pr_threads_cache.write_text(content)
@@ -738,6 +785,7 @@ class PiRunner:
 
         Args:
             changed_files: List of changed files
+
         """
         self.logger.info("[Step 4] Collecting changed and staged files...")
 
@@ -763,22 +811,24 @@ class PiRunner:
         # Add pseudo-diff for untracked files
         returncode, new_files, _ = run_command("git ls-files --others --exclude-standard")
         if returncode == 0:
-            for f in new_files.strip().split("\n"):
-                if f and (self.paths.project_root / f).is_file():
-                    if not f.startswith(".fix-die-repeat") and not is_excluded_file(Path(f).name):
-                        diff_content += f"diff --git a/{f} b/{f}\n"
+            for new_file in new_files.strip().split("\n"):
+                if new_file and (self.paths.project_root / new_file).is_file():
+                    if not new_file.startswith(".fix-die-repeat") and not is_excluded_file(
+                        Path(new_file).name
+                    ):
+                        diff_content += f"diff --git a/{new_file} b/{new_file}\n"
                         diff_content += "new file mode 100644\n"
                         diff_content += "--- /dev/null\n"
-                        diff_content += f"+++ b/{f}\n"
+                        diff_content += f"+++ b/{new_file}\n"
 
-                        file_path = self.paths.project_root / f
+                        file_path = self.paths.project_root / new_file
                         try:
                             returncode, file_type, _ = run_command(f"file {file_path}")
                             if "text" in file_type.lower():
                                 for line in file_path.open():
                                     diff_content += f"+{line}"
                             else:
-                                diff_content += f"Binary file {f} differs\n"
+                                diff_content += f"Binary file {new_file} differs\n"
                         except Exception:
                             pass
 
@@ -800,7 +850,9 @@ class PiRunner:
                 "You MUST use the 'read' tool to inspect '.fix-die-repeat/changes.diff'.\n"
             )
         else:
-            self.logger.info(f"Review diff size ({diff_size} bytes) is within limits. Attaching changes.diff.")
+            self.logger.info(
+                f"Review diff size ({diff_size} bytes) is within limits. Attaching changes.diff.",
+            )
             pi_args.append(f"@{self.paths.diff_file}")
             review_prompt_prefix = (
                 "I have attached '.fix-die-repeat/changes.diff' which contains the changes "
@@ -823,7 +875,7 @@ class PiRunner:
             "\n"
             "IMPORTANT:\n"
             "1. ONLY report [NIT] issues if you also find [CRITICAL] issues.\n"
-            "2. If you only find [NIT] issues (no [CRITICAL] issues), treat this as \"no critical issues found\".\n"
+            '2. If you only find [NIT] issues (no [CRITICAL] issues), treat this as "no critical issues found".\n'
             "3. If you find [CRITICAL] issues, report BOTH [CRITICAL] and [NIT] issues.\n"
             "\n"
             "If you find [CRITICAL] issues, use the 'write' tool to save them to "
@@ -843,7 +895,10 @@ class PiRunner:
         timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         with self.paths.review_file.open("a") as f:
             f.write(f"## Iteration {self.iteration} - Review ({timestamp})\n")
-            if self.paths.review_current_file.exists() and self.paths.review_current_file.read_text():
+            if (
+                self.paths.review_current_file.exists()
+                and self.paths.review_current_file.read_text()
+            ):
                 f.write(self.paths.review_current_file.read_text())
             else:
                 f.write("_No issues found._\n")
@@ -854,17 +909,22 @@ class PiRunner:
         self.logger.info("[Step 6] Processing review results...")
 
         if not self.paths.review_current_file.exists():
-            self.logger.error(".fix-die-repeat/review_current.md was not created by pi. This is unexpected.")
+            self.logger.error(
+                ".fix-die-repeat/review_current.md was not created by pi. This is unexpected.",
+            )
             sys.exit(1)
 
         # Check if file is empty or only contains "no issues" messages
-        review_content = self.paths.review_current_file.read_text() if self.paths.review_current_file.exists() else ""
+        review_content = (
+            self.paths.review_current_file.read_text()
+            if self.paths.review_current_file.exists()
+            else ""
+        )
 
         if not review_content.strip() or "no critical issues found" in review_content.lower():
             # Count actual content lines (excluding headers and empty lines)
             content_lines = [
-                line for line in review_content.splitlines()
-                if line and not line.startswith("#")
+                line for line in review_content.splitlines() if line and not line.startswith("#")
             ]
 
             if len(content_lines) <= 1:
@@ -879,10 +939,10 @@ class PiRunner:
                 self.paths.start_sha_file.unlink(missing_ok=True)
 
                 end_time = int(time.time())
-                duration = end_time - self.script_start_time
+                duration = int(end_time - self.script_start_time)
                 self.logger.info(
                     f"[Step 7] Done! All checks passed and no review issues found. "
-                    f".fix-die-repeat/review.md retained. Session log: {self.session_log}"
+                    f".fix-die-repeat/review.md retained. Session log: {self.session_log}",
                 )
 
                 play_completion_sound()
@@ -900,7 +960,9 @@ class PiRunner:
                 sys.exit(0)
 
         # Issues found - fix them
-        self.logger.info("[Step 6A] Issues found in .fix-die-repeat/review_current.md. Running pi to fix them...")
+        self.logger.info(
+            "[Step 6A] Issues found in .fix-die-repeat/review_current.md. Running pi to fix them...",
+        )
 
         fix_attempt = 1
         max_fix_attempts = 3
@@ -939,7 +1001,7 @@ class PiRunner:
                 "DO NOT:\n"
                 "- Generate pseudo-code or execution plans\n"
                 "- Write explanations without making actual changes\n"
-                "- Create \"test stubs\" - only add tests if required by the issue\n"
+                '- Create "test stubs" - only add tests if required by the issue\n'
                 "- Use fictional APIs like System.cmd(), File.write(), or IO.puts()\n"
                 "- Attempt to run any command named 'fix-die-repeat'\n"
                 "- Call the 'resolve_pr_threads' tool directly\n"
@@ -965,7 +1027,7 @@ class PiRunner:
                 f.write(
                     f"### Iteration {self.iteration} - Resolution ({timestamp})\n"
                     f"- Fixes applied for .fix-die-repeat/review_current.md (attempt {fix_attempt}); "
-                    "verification pending.\n\n"
+                    "verification pending.\n\n",
                 )
 
             # Check if changes were made
@@ -974,12 +1036,12 @@ class PiRunner:
                 self.consecutive_toolless_attempts += 1
                 self.logger.error(
                     f"Pi reported success on attempt {fix_attempt} but NO files were modified. "
-                    "This suggests 'edit' commands failed (e.g., text not found)."
+                    "This suggests 'edit' commands failed (e.g., text not found).",
                 )
                 with self.paths.build_history_file.open("a") as f:
                     f.write(
                         f"## Iteration {self.iteration} fix attempt {fix_attempt}: "
-                        "FAILED to apply fixes (no files changed)\n\n"
+                        "FAILED to apply fixes (no files changed)\n\n",
                     )
 
                 if fix_attempt < max_fix_attempts:
@@ -1003,7 +1065,6 @@ class PiRunner:
             fix_attempt += 1
 
         # Continue to next iteration
-        return
 
     def _resolve_pr_threads(self) -> None:
         """Resolve PR threads that were fixed."""
@@ -1031,7 +1092,7 @@ class PiRunner:
             unsafe_ids = set(resolved_ids) - set(in_scope_ids)
             self.logger.warning(
                 f"WARNING: Model reported {len(unsafe_ids)} thread(s) NOT in scope: "
-                f"{', '.join(unsafe_ids)}"
+                f"{', '.join(unsafe_ids)}",
             )
             self.logger.info(f"Only resolving the {len(safe_resolved_ids)} in-scope thread(s).")
 
@@ -1041,7 +1102,9 @@ class PiRunner:
 
             self.logger.info(f"Calling resolve_pr_threads on safe IDs: {ids_json}")
             self.before_pi_call()
-            returncode, _stdout, _stderr = run_command(f"pi -p 'resolve_pr_threads(threadIds: {ids_json})'")
+            returncode, _stdout, _stderr = run_command(
+                f"pi -p 'resolve_pr_threads(threadIds: {ids_json})'",
+            )
 
             if returncode == 0:
                 self.logger.info(f"Successfully resolved {len(safe_resolved_ids)} thread(s).")
@@ -1054,12 +1117,18 @@ class PiRunner:
                     play_completion_sound()
                     sys.exit(0)
                 else:
-                    remaining_count = self.paths.review_current_file.read_text().count("--- Thread #")
-                    self.logger.info(f"{remaining_count} PR threads remain. Continuing to next iteration.")
+                    remaining_count = self.paths.review_current_file.read_text().count(
+                        "--- Thread #",
+                    )
+                    self.logger.info(
+                        f"{remaining_count} PR threads remain. Continuing to next iteration.",
+                    )
             else:
                 self.logger.warning("Failed to resolve some threads. Continuing to next iteration.")
         else:
-            self.logger.info("No in-scope threads were reported as resolved. Continuing to next iteration.")
+            self.logger.info(
+                "No in-scope threads were reported as resolved. Continuing to next iteration.",
+            )
 
         # Clear resolved threads file
         self.paths.pr_resolved_threads_file.unlink(missing_ok=True)

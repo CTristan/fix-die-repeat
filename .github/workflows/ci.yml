@@ -19,8 +19,11 @@ jobs:
         with:
           version: "latest"
 
+      - name: Create virtual environment
+        run: uv venv
+
       - name: Install ruff and mypy
         run: uv pip install ruff mypy
 
       - name: Run CI script
-        run: ./scripts/ci.sh
+        run: ./scripts/ci.sh --check-only

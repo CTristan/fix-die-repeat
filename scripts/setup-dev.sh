@@ -2,12 +2,11 @@
 set -euo pipefail
 
 # Setup script for containerized development
-# Installs the pre-commit hook and sets up the development environment
+# Installs pre-commit hooks and sets up the development environment
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-HOOK_SOURCE="$SCRIPT_DIR/pre-commit-hook.sh"
-HOOK_TARGET="$PROJECT_ROOT/.git/hooks/pre-commit"
+VENV_DIR="$PROJECT_ROOT/.venv"
 
 echo "🚀 Setting up development environment..."
 
@@ -18,20 +17,20 @@ if ! command -v uv &> /dev/null; then
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
+# Create venv if it doesn't exist
+if [ ! -d "$VENV_DIR" ]; then
+    echo "📦 Creating virtual environment..."
+    uv venv
+fi
+
 # Install development dependencies
 echo "📦 Installing development dependencies..."
-uv pip install ruff mypy pytest pytest-cov
+uv pip install ruff mypy pytest pytest-cov pre-commit
 
-# Install pre-commit hook
-echo "🪝 Installing pre-commit hook..."
-if [ -f "$HOOK_SOURCE" ]; then
-    cp "$HOOK_SOURCE" "$HOOK_TARGET"
-    chmod +x "$HOOK_TARGET"
-    echo "✅ Pre-commit hook installed at $HOOK_TARGET"
-else
-    echo "❌ Pre-commit hook source not found at $HOOK_SOURCE"
-    exit 1
-fi
+# Install pre-commit hooks (use venv's pre-commit)
+echo "🪝 Installing pre-commit hooks..."
+"$VENV_DIR/bin/pre-commit" install
+echo "✅ Pre-commit hooks installed"
 
 echo "✅ Development environment setup complete!"
 echo ""

@@ -27,6 +27,7 @@ class Logger:
             fdr_log: Path to fdr.log file
             session_log: Path to session log file
             debug: Enable debug mode
+
         """
         self.fdr_log = fdr_log
         self.session_log = session_log
@@ -38,6 +39,7 @@ class Logger:
         Args:
             message: Message to log
             level: Log level (INFO, DEBUG, ERROR, WARNING)
+
         """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_message = f"[{timestamp}] [fdr] [{level}] {message}"
@@ -87,6 +89,7 @@ def format_duration(total_seconds: int) -> str:
 
     Returns:
         Formatted duration string
+
     """
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
@@ -94,10 +97,9 @@ def format_duration(total_seconds: int) -> str:
 
     if hours > 0:
         return f"{hours}h {minutes}m {seconds}s"
-    elif minutes > 0:
+    if minutes > 0:
         return f"{minutes}m {seconds}s"
-    else:
-        return f"{seconds}s"
+    return f"{seconds}s"
 
 
 def run_command(
@@ -116,13 +118,14 @@ def run_command(
 
     Returns:
         Tuple of (exit_code, stdout, stderr)
+
     """
-    kwargs = {"cwd": cwd}
+    kwargs: dict[str, str | bytes | Path | int | None | bool] = {"cwd": cwd}  # type: ignore[assignment]
     if capture_output:
-        kwargs.update({"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True})
+        kwargs.update({"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True})  # type: ignore[dict-item]
 
     try:
-        result = subprocess.run(command, shell=True, **kwargs)
+        result = subprocess.run(command, shell=True, **kwargs)  # type: ignore[arg-type]
         if check and result.returncode != 0:
             raise subprocess.CalledProcessError(result.returncode, command)
         return (result.returncode, result.stdout or "", result.stderr or "")
@@ -138,6 +141,7 @@ def get_git_revision_hash(file_path: Path) -> str:
 
     Returns:
         Git hash
+
     """
     if not file_path.exists():
         return f"no_file_{file_path.name}"
@@ -165,6 +169,7 @@ def get_changed_files(
 
     Returns:
         List of changed file paths (relative to project root)
+
     """
     exclude_patterns = exclude_patterns or [
         "*.lock",
@@ -185,7 +190,9 @@ def get_changed_files(
 
     # Untracked files
     returncode, stdout, _ = run_command(
-        "git ls-files --others --exclude-standard", cwd=project_root, check=False
+        "git ls-files --others --exclude-standard",
+        cwd=project_root,
+        check=False,
     )
     if returncode == 0:
         files.update(stdout.strip().split("\n"))
@@ -229,6 +236,7 @@ def get_file_size(path: Path) -> int:
 
     Returns:
         File size in bytes (0 if file doesn't exist)
+
     """
     try:
         return path.stat().st_size
@@ -244,6 +252,7 @@ def get_file_line_count(path: Path) -> int:
 
     Returns:
         Number of lines (0 if file doesn't exist)
+
     """
     try:
         return sum(1 for _ in path.open(encoding="utf-8", errors="ignore"))
@@ -265,8 +274,9 @@ def detect_large_files(
 
     Returns:
         Warning message (empty if no large files found)
+
     """
-    warning_parts = []
+    warning_parts: list[str] = []
 
     for f in files:
         file_path = project_root / f
@@ -275,7 +285,7 @@ def detect_large_files(
             if lines > threshold_lines:
                 if not warning_parts:
                     warning_parts.append(
-                        "CRITICAL WARNING: The following files are >2000 lines and will be TRUNCATED by the 'read' tool:"
+                        "CRITICAL WARNING: The following files are >2000 lines and will be TRUNCATED by the 'read' tool:",
                     )
                 warning_parts.append(f"- {f} ({lines} lines)")
 
@@ -287,7 +297,7 @@ def detect_large_files(
                 "STRONGLY RECOMMENDED: Split these files into smaller files or modules to bring them under the 2000-line limit.",
                 "  - If the file contains tests at the bottom, move them to a separate test file (e.g., tests.rs, test_file.py, file.test.js).",
                 "  - If it is a large logic file, extract cohesive functionality into separate source files or subfolders.",
-            ]
+            ],
         )
 
     return "\n".join(warning_parts)
@@ -302,6 +312,7 @@ def is_excluded_file(filename: str, exclude_patterns: list[str] | None = None) -
 
     Returns:
         True if file should be excluded
+
     """
     exclude_patterns = exclude_patterns or [
         "*.lock",
@@ -349,6 +360,7 @@ def sanitize_ntfy_topic(text: str) -> str:
 
     Returns:
         Sanitized topic name
+
     """
     import re
 
@@ -371,6 +383,7 @@ def send_ntfy_notification(
         repo_name: Repository name
         ntfy_url: ntfy server URL
         logger: Logger instance for debug output
+
     """
     # Check if curl is available
     returncode, _, _ = run_command("which curl", check=False)

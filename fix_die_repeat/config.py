@@ -119,7 +119,7 @@ class Settings(BaseSettings):
         """Validate max_iters is a positive integer."""
         if self.max_iters <= 0:
             raise ValueError(
-                f"Invalid configuration: FDR_MAX_ITERS must be a positive integer (got '{self.max_iters}')"
+                f"Invalid configuration: FDR_MAX_ITERS must be a positive integer (got '{self.max_iters}')",
             )
 
 
@@ -147,6 +147,7 @@ def get_settings(
 
     Returns:
         Settings instance
+
     """
     # Get base settings from environment
     settings = Settings()
@@ -183,6 +184,7 @@ class Paths:
 
         Args:
             project_root: Project root directory (defaults to git root or cwd)
+
         """
         self.project_root = project_root or self._find_project_root()
         self.fdr_dir = self.project_root / ".fix-die-repeat"
@@ -209,6 +211,7 @@ class Paths:
 
         Returns:
             Path to project root
+
         """
         # Try to get git root first
         import subprocess

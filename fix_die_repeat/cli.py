@@ -105,6 +105,7 @@ def main(
 
       # Enable PR review mode
       fix-die-repeat --pr-review
+
     """
     try:
         # Get settings
