@@ -340,7 +340,34 @@ ruff format fix_die_repeat tests
 
 **Per-File Exceptions Policy**: If a rule exception is ever required, configure it on a per-file basis in `pyproject.toml` under `[tool.ruff.lint.per-file-ignores]`, not by adding to global `ignore`.
 
-**Each per-file ignore entry must include a comment for each individual rule code explaining why the exception was needed.** This ensures that future maintainers understand the rationale for each rule and can reevaluate whether each exception is still appropriate.
+**⚠️ CRITICAL: Per-file ignore comments MUST explain why we're ignoring the rule instead of fixing the underlying issue.**
+
+Each per-file ignore entry must include a comment for each individual rule code that:
+- Explains WHY the rule cannot be reasonably fixed (not just "this file is complex")
+- Provides justification for why an exception is appropriate
+- Allows future maintainers to reevaluate whether the exception is still valid
+
+**Comments that simply restate the rule (e.g., "# ignore too-many-branches") are NOT acceptable.** The comment must explain the tradeoff being made and why fixing the issue would be worse than ignoring it.
+
+Examples of acceptable comments:
+```toml
+[tool.ruff.lint.per-file-ignores]
+"fix_die_repeat/runner.py" = [
+    "PLR0913",  # Refactoring to reduce parameter count would require extracting multiple intermediate types with unclear abstraction boundaries
+    "PLR0915",  # Main loop has 12 distinct responsibilities; splitting would break the single-responsibility principle into artificial fragments
+]
+```
+
+Examples of UNACCEPTABLE comments:
+```toml
+[tool.ruff.lint.per-file-ignores]
+"fix_die_repeat/runner.py" = [
+    "PLR0913",  # Too many arguments - BAD: just restates the rule name
+    "PLR0915",  # This file is complex - BAD: vague, doesn't explain why it can't be fixed
+]
+```
+
+This ensures that future maintainers understand the rationale for each rule and can reevaluate whether each exception is still appropriate.
 
 **C901 (complex-structure) - NEVER IGNORE**: The C901 rule checks for functions with high McCabe complexity (cyclomatic complexity). This is a critical code quality metric - functions with high complexity are difficult to understand, test, and maintain, and are more likely to contain bugs.
 
@@ -379,6 +406,30 @@ mypy fix_die_repeat
 **Configuration**: `pyproject.toml` `[tool.mypy]`
 
 **Mode**: Loose - `disallow_untyped_defs = false`, `attr-defined` disabled.
+
+**Per-File Exceptions Policy**: If a type checking exception is required for a specific file, configure it using per-module `ignore_errors` in `pyproject.toml`.
+
+**⚠️ CRITICAL: Per-file ignore comments MUST explain why we're ignoring the rule instead of fixing the underlying issue.**
+
+Each per-module ignore must include a comment that:
+- Explains WHY the type error cannot be reasonably fixed (not just "this is third-party code")
+- Provides justification for why an exception is appropriate
+- Allows future maintainers to reevaluate whether the exception is still valid
+
+**Comments that simply state the module name (e.g., "# ignore mypy errors") are NOT acceptable.** The comment must explain the tradeoff being made.
+
+Examples:
+```toml
+[[tool.mypy.overrides]]
+module = "some_third_party_module"
+ignore_errors = true  # This package has no type stubs and fixing would require vendoring the entire library
+
+[[tool.mypy.overrides]]
+module = "fix_die_repeat.runner"
+ignore_errors = true  # Legacy module with circular imports; fixing requires architectural rewrite tracked in issue #42
+```
+
+This ensures that future maintainers understand the rationale for each exception and can reevaluate whether it's still valid or whether the code can now be properly typed.
 
 ### File Size Policy
 
