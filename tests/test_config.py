@@ -8,6 +8,11 @@ import pytest
 
 from fix_die_repeat.config import CliOptions, Paths, Settings, get_settings
 
+# Constants for default settings values
+DEFAULT_MAX_ITERS = 10
+DEFAULT_MAX_PR_THREADS = 5
+TEST_MAX_ITERS = 5
+
 
 class TestSettings:
     """Tests for Settings class."""
@@ -16,10 +21,10 @@ class TestSettings:
         """Test default settings values."""
         settings = Settings()
         assert settings.check_cmd == "./scripts/ci.sh"
-        assert settings.max_iters == 10
+        assert settings.max_iters == DEFAULT_MAX_ITERS
         assert settings.model is None
         assert settings.test_model is None
-        assert settings.max_pr_threads == 5
+        assert settings.max_pr_threads == DEFAULT_MAX_PR_THREADS
         assert not settings.archive_artifacts
         assert settings.compact_artifacts
         assert not settings.pr_review
@@ -35,7 +40,7 @@ class TestSettings:
 
         settings = Settings()
         assert settings.check_cmd == "make test"
-        assert settings.max_iters == 5
+        assert settings.max_iters == TEST_MAX_ITERS
         assert settings.model == "anthropic/claude-sonnet-4-5"
 
     def test_invalid_max_iters(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -60,7 +65,7 @@ class TestSettings:
         settings = get_settings(options)
 
         assert settings.check_cmd == "pytest"
-        assert settings.max_iters == 5
+        assert settings.max_iters == TEST_MAX_ITERS
         assert settings.model == "test-model"
         assert settings.archive_artifacts
         assert not settings.compact_artifacts

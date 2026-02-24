@@ -441,6 +441,36 @@ Common acceptable reasons for temporary local imports are:
 
 Even in those cases, do not add PLC0415 to ignore lists; prefer structural fixes and explicit documentation.
 
+**PLR2004 (magic-value-comparison) - NEVER IGNORE**: The PLR2004 rule checks for the use of unnamed numerical constants ("magic") values in comparisons.
+
+**PLR2004 MUST NEVER be ignored.** The use of "magic" values can make code harder to read and maintain, as readers will have to infer the meaning of the value from the context. Such values are discouraged by PEP 8. For convenience, this rule excludes a variety of common values from the "magic" value definition, such as `0`, `1`, `""`, and `"__main__"`.
+
+If PLR2004 fires, replace the magic value with a named constant:
+
+```python
+# Before: magic value (PLR2004 violation)
+def apply_discount(price: float) -> float:
+    if price <= 100:
+        return price / 2
+    else:
+        return price
+
+# After: named constant
+MAX_DISCOUNT = 100
+
+def apply_discount(price: float) -> float:
+    if price <= MAX_DISCOUNT:
+        return price / 2
+    else:
+        return price
+```
+
+Using named constants improves:
+- **Readability**: The constant name explains the meaning and purpose of the value
+- **Maintainability**: Changes to the value only need to be made in one place
+- **Self-documentation**: Code becomes clearer without needing additional comments
+- **Consistency**: The same constant can be reused across the codebase
+
 **Current state**: Per-file ruff ignores are configured for `runner.py`, `cli.py`, `config.py`, `utils.py`, `prompts.py`, and test files.
 
 To add a targeted exception (only when unavoidable), use:

@@ -8,6 +8,10 @@ from click.testing import CliRunner
 from fix_die_repeat import config, runner
 from fix_die_repeat.cli import main
 
+# Constants for CLI test values
+TEST_MAX_ITERS = 5
+KEYBOARD_INTERRUPT_EXIT_CODE = 130
+
 
 class TestCliMain:
     """Tests for CLI main command."""
@@ -126,7 +130,7 @@ class TestCliMain:
         # Create settings - should pick up env vars
         settings = config.Settings()
         assert settings.check_cmd == "make test"
-        assert settings.max_iters == 5
+        assert settings.max_iters == TEST_MAX_ITERS
         assert settings.model == "test-model"
         assert settings.pr_review
         assert settings.debug
@@ -235,7 +239,7 @@ class TestCliExceptions:
         result = cli_runner.invoke(main, catch_exceptions=False)
 
         # Should exit with code 130 (standard for KeyboardInterrupt)
-        assert result.exit_code == 130
+        assert result.exit_code == KEYBOARD_INTERRUPT_EXIT_CODE
         assert "Interrupted" in result.output
 
     def test_generic_exception(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

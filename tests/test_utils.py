@@ -22,6 +22,11 @@ from fix_die_repeat.utils import (
     send_ntfy_notification,
 )
 
+# Constants for utils test values
+HELLO_WORLD_SIZE = 13  # len("Hello, World!")
+TEST_FILE_LINES = 3
+COMMAND_NOT_FOUND_EXIT_CODE = 127
+
 
 class TestFormatDuration:
     """Tests for format_duration function."""
@@ -52,7 +57,7 @@ class TestGetFileSize:
         """Test getting size of existing file."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("Hello, World!")
-        assert get_file_size(test_file) == 13
+        assert get_file_size(test_file) == HELLO_WORLD_SIZE
 
     def test_nonexistent_file(self, tmp_path: Path) -> None:
         """Test getting size of non-existent file."""
@@ -66,7 +71,7 @@ class TestGetFileLineCount:
         """Test counting lines in existing file."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("line1\nline2\nline3")
-        assert get_file_line_count(test_file) == 3
+        assert get_file_line_count(test_file) == TEST_FILE_LINES
 
     def test_empty_file(self, tmp_path: Path) -> None:
         """Test counting lines in empty file."""
@@ -297,7 +302,7 @@ class TestRunCommand:
         """Test command not found error."""
         returncode, _stdout, stderr = run_command("nonexistent-command-xyz-123", check=False)
 
-        assert returncode == 127
+        assert returncode == COMMAND_NOT_FOUND_EXIT_CODE
         # The error message should contain "not found" or "command not found"
         assert "not found" in stderr.lower() or "command not found" in stderr.lower()
 

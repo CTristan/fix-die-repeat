@@ -68,7 +68,6 @@ lint.ignore = ["D203", "D213"]
     "TRY300",  # try/except structure preserves linear cleanup/return flow; adding else made control flow harder to scan.
 ]
 "tests/*.py" = [
-    "PLR2004",  # Literal values in tests improve readability by keeping expected outcomes inline with assertions.
     "S101",    # Pytest idioms rely on assert statements; replacing them reduces failure introspection quality.
     "S607",    # Test subprocess calls intentionally rely on PATH to mirror real user/runtime behavior.
     "SLF001",  # Tests exercise internal APIs intentionally when validating invariants not exposed publicly.

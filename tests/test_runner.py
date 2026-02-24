@@ -6,6 +6,15 @@ from unittest.mock import MagicMock, patch
 
 from fix_die_repeat.runner import PiRunner
 
+# Constants for runner test values
+TEST_PI_DELAY_SECONDS = 2
+EXPECTED_PI_INVOCATION_COUNT = 2
+EMERGENCY_COMPACT_LINES = 100
+REGULAR_COMPACT_LINES = 50
+FILTERED_CHECKS_LOG_SMALL_LINES = 100
+FILTERED_CHECKS_LOG_MAX_LINES = 300
+TEST_PR_NUMBER = 123
+
 
 class TestBeforePiCall:
     """Tests for before_pi_call method."""
@@ -30,7 +39,7 @@ class TestBeforePiCall:
     def test_subsequent_call_adds_delay(self, tmp_path: Path) -> None:
         """Test that subsequent calls add delay."""
         settings = MagicMock()
-        settings.pi_sequential_delay_seconds = 2
+        settings.pi_sequential_delay_seconds = TEST_PI_DELAY_SECONDS
         paths = MagicMock()
         paths.fdr_dir = tmp_path
         paths.pi_log = tmp_path / "pi.log"
@@ -42,8 +51,8 @@ class TestBeforePiCall:
 
         with patch("fix_die_repeat.runner.time.sleep") as mock_sleep:
             runner.before_pi_call()
-            mock_sleep.assert_called_once_with(2)
-            assert runner.pi_invocation_count == 2
+            mock_sleep.assert_called_once_with(TEST_PI_DELAY_SECONDS)
+            assert runner.pi_invocation_count == EXPECTED_PI_INVOCATION_COUNT
 
 
 class TestEmergencyCompaction:
@@ -69,8 +78,8 @@ class TestEmergencyCompaction:
         runner._emergency_compact()
 
         # Check they're truncated to 100 lines
-        assert get_file_line_count(paths.review_file) == 100
-        assert get_file_line_count(paths.build_history_file) == 100
+        assert get_file_line_count(paths.review_file) == EMERGENCY_COMPACT_LINES
+        assert get_file_line_count(paths.build_history_file) == EMERGENCY_COMPACT_LINES
 
     def test_emergency_compact_handles_nonexistent_files(self, tmp_path: Path) -> None:
         """Test emergency compaction handles missing files gracefully."""
@@ -223,8 +232,8 @@ class TestPerformEmergencyCompaction:
         assert runner.logger.info.called
 
         # Check truncation
-        assert get_file_line_count(paths.review_file) == 100
-        assert get_file_line_count(paths.build_history_file) == 100
+        assert get_file_line_count(paths.review_file) == EMERGENCY_COMPACT_LINES
+        assert get_file_line_count(paths.build_history_file) == EMERGENCY_COMPACT_LINES
 
 
 class TestPerformRegularCompaction:
@@ -255,8 +264,8 @@ class TestPerformRegularCompaction:
         assert runner.logger.info.called
 
         # Check truncation to 50 lines
-        assert get_file_line_count(paths.review_file) == 50
-        assert get_file_line_count(paths.build_history_file) == 50
+        assert get_file_line_count(paths.review_file) == REGULAR_COMPACT_LINES
+        assert get_file_line_count(paths.build_history_file) == REGULAR_COMPACT_LINES
 
 
 class TestCheckOscillation:
@@ -374,7 +383,7 @@ class TestCheckAndCompactArtifacts:
         result = runner.check_and_compact_artifacts()
 
         assert result is True
-        assert get_file_line_count(paths.review_file) == 100
+        assert get_file_line_count(paths.review_file) == EMERGENCY_COMPACT_LINES
 
     def test_regular_compaction_performed(self, tmp_path: Path) -> None:
         """Test regular compaction is performed when needed."""
@@ -399,7 +408,7 @@ class TestCheckAndCompactArtifacts:
         result = runner.check_and_compact_artifacts()
 
         assert result is True
-        assert get_file_line_count(paths.review_file) == 50
+        assert get_file_line_count(paths.review_file) == REGULAR_COMPACT_LINES
 
     def test_no_compaction_performed(self, tmp_path: Path) -> None:
         """Test no compaction when files are small."""
@@ -419,12 +428,12 @@ class TestCheckAndCompactArtifacts:
         runner.logger = MagicMock()
 
         # Create small files
-        paths.review_file.write_text("\n".join(["line"] * 100))
+        paths.review_file.write_text("\n".join(["line"] * EMERGENCY_COMPACT_LINES))
 
         result = runner.check_and_compact_artifacts()
 
         assert result is False
-        assert get_file_line_count(paths.review_file) == 100
+        assert get_file_line_count(paths.review_file) == EMERGENCY_COMPACT_LINES
 
 
 class TestFilterChecksLog:
@@ -445,14 +454,14 @@ class TestFilterChecksLog:
         runner.logger = MagicMock()
 
         # Create small log (under 300 lines)
-        paths.checks_log.write_text("\n".join(["line"] * 100))
+        paths.checks_log.write_text("\n".join(["line"] * FILTERED_CHECKS_LOG_SMALL_LINES))
 
         runner.filter_checks_log()
 
         # Should just copy it
         assert paths.checks_filtered_log.exists()
         content = paths.checks_filtered_log.read_text()
-        assert len(content.splitlines()) == 100
+        assert len(content.splitlines()) == FILTERED_CHECKS_LOG_SMALL_LINES
 
     def test_filter_checks_log_large_file(self, tmp_path: Path) -> None:
         """Test filtering when log exceeds threshold."""
@@ -482,7 +491,7 @@ class TestFilterChecksLog:
 
         # Should be filtered to ~300 lines max
         filtered_lines = paths.checks_filtered_log.read_text().splitlines()
-        assert len(filtered_lines) <= 300
+        assert len(filtered_lines) <= FILTERED_CHECKS_LOG_MAX_LINES
         # Should contain error lines
         assert any("ERROR" in line for line in filtered_lines)
 
@@ -1364,7 +1373,7 @@ class TestGetPrInfo:
             result = runner._get_pr_info("main")
 
             assert result is not None
-            assert result["number"] == 123
+            assert result["number"] == TEST_PR_NUMBER
             assert result["url"] == "https://github.com/test/repo/pull/123"
             assert result["repo_owner"] == "owner"
             assert result["repo_name"] == "repo"
