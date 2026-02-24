@@ -236,16 +236,13 @@ class PiRunner:
 
         return None
 
-    def check_and_compact_artifacts(self) -> bool:
-        """Check and compact large persistent artifacts.
+    def _check_compaction_needed(self) -> tuple[bool, bool]:
+        """Check if artifacts need compaction.
 
         Returns:
-            True if compaction was performed, False otherwise
+            Tuple of (needs_emergency, needs_compact)
 
         """
-        if not self.settings.compact_artifacts:
-            return False
-
         needs_compact = False
         needs_emergency = False
 
@@ -258,20 +255,21 @@ class PiRunner:
                 if line_count > self.settings.compact_threshold_lines:
                     needs_compact = True
 
-        if needs_emergency:
-            self.logger.info(
-                f"Emergency: artifacts exceed {self.settings.emergency_threshold_lines} lines. "
-                "Truncating to last 100 lines...",
-            )
-            for f in [self.paths.review_file, self.paths.build_history_file]:
-                if f.exists():
-                    lines = f.read_text().splitlines()[-100:]
-                    f.write_text("\n".join(lines))
-            return True
+        return needs_emergency, needs_compact
 
-        if not needs_compact:
-            return False
+    def _perform_emergency_compaction(self) -> None:
+        """Perform emergency compaction (truncate to 100 lines)."""
+        self.logger.info(
+            f"Emergency: artifacts exceed {self.settings.emergency_threshold_lines} lines. "
+            "Truncating to last 100 lines...",
+        )
+        for f in [self.paths.review_file, self.paths.build_history_file]:
+            if f.exists():
+                lines = f.read_text().splitlines()[-100:]
+                f.write_text("\n".join(lines))
 
+    def _perform_regular_compaction(self) -> None:
+        """Perform regular compaction (truncate to 50 lines)."""
         self.logger.info(
             f"Artifacts exceed {self.settings.compact_threshold_lines} lines. "
             "Compacting with pi...",
@@ -287,7 +285,27 @@ class PiRunner:
                 after = get_file_line_count(f)
                 self.logger.info(f"Compacted {f.name} from {before} to {after} lines")
 
-        return True
+    def check_and_compact_artifacts(self) -> bool:
+        """Check and compact large persistent artifacts.
+
+        Returns:
+            True if compaction was performed, False otherwise
+
+        """
+        if not self.settings.compact_artifacts:
+            return False
+
+        needs_emergency, needs_compact = self._check_compaction_needed()
+
+        if needs_emergency:
+            self._perform_emergency_compaction()
+            return True
+
+        if needs_compact:
+            self._perform_regular_compaction()
+            return True
+
+        return False
 
     def test_model(self) -> None:
         """Test model compatibility before running full loop."""
@@ -382,13 +400,8 @@ class PiRunner:
 
         return (returncode, output)
 
-    def run(self) -> int:
-        """Run the main fix-die-repeat loop.
-
-        Returns:
-            Exit code (0 for success, non-zero for failure)
-
-        """
+    def _setup_run(self) -> None:
+        """Initialize run environment."""
         self.script_start_time = time.time()
 
         # Setup paths
@@ -427,6 +440,231 @@ class PiRunner:
         # Compact large artifacts from previous runs
         self.check_and_compact_artifacts()
 
+    def _run_fix_attempt(
+        self,
+        fix_attempt: int,
+        changed_files: list[str],
+        context_mode: str,
+        large_context_list: str,
+        large_file_warning: str,
+    ) -> int:
+        """Run a single fix attempt.
+
+        Args:
+            fix_attempt: Current attempt number
+            changed_files: List of changed files
+            context_mode: Either "push" or "pull"
+            large_context_list: Formatted list of large files for pull mode
+            large_file_warning: Warning message for large files
+
+        Returns:
+            Exit code from pi command
+
+        """
+        oscillation_warning = self.check_oscillation()
+
+        self.logger.info(
+            f"[Step 2A] Checks failed (fix attempt {fix_attempt}/"
+            f"{self.settings.max_iters}). Running pi to fix errors...",
+        )
+
+        # Filter checks log
+        self.filter_checks_log()
+
+        # Build pi command
+        pi_args = ["-p", "--tools", "read,edit,write,bash,grep,find,ls"]
+        pi_args.append(f"@{self.paths.checks_filtered_log}")
+
+        # Add historical context
+        if self.paths.review_file.exists():
+            pi_args.append(f"@{self.paths.review_file}")
+        if self.paths.build_history_file.exists():
+            pi_args.append(f"@{self.paths.build_history_file}")
+
+        # Attach changed files in push mode
+        if context_mode == "push":
+            pi_args.extend(f"@{filepath}" for filepath in changed_files)
+
+        prompt = render_prompt(
+            "fix_checks.j2",
+            check_cmd=self.settings.check_cmd,
+            oscillation_warning=oscillation_warning,
+            include_review_history=self.paths.review_file.exists(),
+            include_build_history=self.paths.build_history_file.exists(),
+            context_mode=context_mode,
+            large_context_list=large_context_list,
+            large_file_warning=large_file_warning,
+        )
+
+        self.logger.info(f"Running pi to fix errors (attempt {fix_attempt})...")
+        returncode, _, _ = self.run_pi_safe(*pi_args, prompt)
+
+        if returncode != 0:
+            self.logger.info(f"pi could not produce a fix on attempt {fix_attempt}.")
+
+        # Check if changes were made
+        returncode, stdout, _ = run_command("git status --porcelain", check=False)
+        if not stdout.strip():
+            self.logger.error(
+                "Pi reported success but NO files were modified. This suggests "
+                "'edit' commands failed (e.g., text not found).",
+            )
+            with self.paths.build_history_file.open("a") as f:
+                f.write(
+                    f"## Iteration {self.iteration} fix attempt {fix_attempt}: "
+                    "FAILED to apply fixes (no files changed)\n\n",
+                )
+        else:
+            # Record history
+            returncode, stat_output, _ = run_command("git diff --stat")
+            with self.paths.build_history_file.open("a") as f:
+                f.write(f"## Iteration {self.iteration} fix attempt {fix_attempt}\n")
+                f.write(f"{stat_output}\n\n")
+
+        return returncode
+
+    def _prepare_fix_context(self) -> tuple[list[str], str, str, str]:
+        """Prepare context for fix attempts.
+
+        Returns:
+            Tuple of (changed_files, context_mode, large_context_list, large_file_warning)
+
+        """
+        # Get changed files
+        changed_files = get_changed_files(self.paths.project_root)
+
+        if not changed_files:
+            self.logger.info("No changed files found.")
+        else:
+            self.logger.info(f"Found {len(changed_files)} changed file(s)")
+
+        # Check for large files
+        large_file_warning = ""
+        if changed_files:
+            large_file_warning = detect_large_files(
+                changed_files,
+                self.paths.project_root,
+                self.settings.large_file_lines,
+            )
+
+        # Calculate context size
+        changed_size = 0
+        for filepath in changed_files:
+            changed_size += get_file_size(self.paths.project_root / filepath)
+
+        context_mode = "push"
+        large_context_list = ""
+
+        if changed_size > self.settings.auto_attach_threshold:
+            context_mode = "pull"
+            self.logger.info(
+                f"Context size ({changed_size} bytes) exceeds threshold "
+                f"({self.settings.auto_attach_threshold}). Switching to PULL mode.",
+            )
+            large_context_lines = [
+                "The following files have changed but are too large to pre-load "
+                f"automatically ({changed_size} bytes total). You MUST use the "
+                "'read' tool to inspect the ones relevant to the error:",
+            ]
+            large_context_lines.extend(f"- {filepath}" for filepath in changed_files)
+            large_context_list = "\n".join(large_context_lines)
+        else:
+            self.logger.info(
+                f"Context size ({changed_size} bytes) is within limits. "
+                "Pushing file contents to prompt.",
+            )
+
+        return changed_files, context_mode, large_context_list, large_file_warning
+
+    def _run_fix_loop(self) -> int:
+        """Run the inner fix loop until checks pass or max attempts reached.
+
+        Returns:
+            Exit code (0 for success, non-zero for failure)
+
+        """
+        # Step 1: Run checks
+        checks_status, _ = self.run_checks()
+
+        # Step 2: Inner fix loop - if checks failed, keep fixing
+        fix_attempt = 0
+        while checks_status != 0:
+            fix_attempt += 1
+
+            if fix_attempt > self.settings.max_iters:
+                self.logger.error(
+                    f"Maximum fix attempts ({self.settings.max_iters}) exhausted. "
+                    "Could not resolve check failures.",
+                )
+                if self.start_sha:
+                    self.logger.error(git_diff_instructions(self.start_sha))
+                    self.logger.error(git_checkout_instructions(self.start_sha))
+                return 1
+
+            # Prepare context
+            changed_files, context_mode, large_context_list, large_file_warning = (
+                self._prepare_fix_context()
+            )
+
+            # Run fix attempt
+            self._run_fix_attempt(
+                fix_attempt,
+                changed_files,
+                context_mode,
+                large_context_list,
+                large_file_warning,
+            )
+
+            # Re-run checks
+            self.logger.info(
+                f"[Step 2A] Re-running {self.settings.check_cmd} after "
+                f"fix attempt {fix_attempt}...",
+            )
+            checks_status, _ = self.run_checks()
+
+        self.logger.info("[Step 2B] Checks passed. Proceeding to review.")
+        return 0
+
+    def _run_review_phase(self, changed_files: list[str]) -> None:
+        """Run the review phase.
+
+        Args:
+            changed_files: List of changed files
+
+        """
+        # Step 3: Prepare review artifacts
+        self.logger.info("[Step 3] Preparing review artifacts...")
+        self.paths.review_current_file.unlink(missing_ok=True)
+
+        # Step 3.5: Check PR threads if enabled
+        if self.settings.pr_review:
+            self._fetch_pr_threads()
+
+        # Step 4: Collect files for review
+        if (
+            not self.paths.review_current_file.exists()
+            or not self.paths.review_current_file.read_text()
+        ):
+            # Skip local review if we have PR threads to process
+            self._run_local_review(changed_files)
+        else:
+            self.logger.info(
+                f"[Step 4] Using PR threads from {self.paths.review_current_file} for review.",
+            )
+            self.logger.info("[Step 5] Skipping local file review generation.")
+
+        # Step 6: Process review results
+        self._process_review_results()
+
+    def run(self) -> int:
+        """Run the main fix-die-repeat loop.
+
+        Returns:
+            Exit code (0 for success, non-zero for failure)
+
+        """
+        self._setup_run()
+
         # Main loop
         while True:
             self.iteration += 1
@@ -445,209 +683,66 @@ class PiRunner:
                     self.logger.error(git_checkout_instructions(self.start_sha))
                 return 1
 
-            # Step 1: Run checks
-            checks_status, _ = self.run_checks()
+            # Run fix loop
+            exit_code = self._run_fix_loop()
+            if exit_code != 0:
+                return exit_code
 
-            # Step 2: Inner fix loop - if checks failed, keep fixing
-            fix_attempt = 0
-            while checks_status != 0:
-                fix_attempt += 1
-
-                if fix_attempt > self.settings.max_iters:
-                    self.logger.error(
-                        f"Maximum fix attempts ({self.settings.max_iters}) exhausted. "
-                        "Could not resolve check failures.",
-                    )
-                    if self.start_sha:
-                        self.logger.error(git_diff_instructions(self.start_sha))
-                        self.logger.error(git_checkout_instructions(self.start_sha))
-                    return 1
-
-                # Check for oscillation
-                oscillation_warning = None
-                if checks_status != 0:
-                    oscillation_warning = self.check_oscillation()
-
-                self.logger.info(
-                    f"[Step 2A] Checks failed (fix attempt {fix_attempt}/"
-                    f"{self.settings.max_iters}). Running pi to fix errors...",
-                )
-
-                # Filter checks log
-                self.filter_checks_log()
-
-                # Get changed files
-                changed_files = get_changed_files(self.paths.project_root)
-
-                if not changed_files:
-                    self.logger.info("No changed files found.")
-                else:
-                    self.logger.info(f"Found {len(changed_files)} changed file(s)")
-
-                # Check for large files
-                large_file_warning = ""
-                if changed_files:
-                    large_file_warning = detect_large_files(
-                        changed_files,
-                        self.paths.project_root,
-                        self.settings.large_file_lines,
-                    )
-
-                # Calculate context size
-                changed_size = 0
-                for filepath in changed_files:
-                    changed_size += get_file_size(self.paths.project_root / filepath)
-
-                context_mode = "push"
-                large_context_list = ""
-
-                if changed_size > self.settings.auto_attach_threshold:
-                    context_mode = "pull"
-                    self.logger.info(
-                        f"Context size ({changed_size} bytes) exceeds threshold "
-                        f"({self.settings.auto_attach_threshold}). Switching to PULL mode.",
-                    )
-                    large_context_lines = [
-                        "The following files have changed but are too large to pre-load "
-                        f"automatically ({changed_size} bytes total). You MUST use the "
-                        "'read' tool to inspect the ones relevant to the error:",
-                    ]
-                    large_context_lines.extend(f"- {filepath}" for filepath in changed_files)
-                    large_context_list = "\n".join(large_context_lines)
-                else:
-                    self.logger.info(
-                        f"Context size ({changed_size} bytes) is within limits. "
-                        "Pushing file contents to prompt.",
-                    )
-
-                # Build pi command
-                pi_args = ["-p", "--tools", "read,edit,write,bash,grep,find,ls"]
-                pi_args.append(f"@{self.paths.checks_filtered_log}")
-
-                # Add historical context
-                if self.paths.review_file.exists():
-                    pi_args.append(f"@{self.paths.review_file}")
-                if self.paths.build_history_file.exists():
-                    pi_args.append(f"@{self.paths.build_history_file}")
-
-                # Attach changed files in push mode
-                if context_mode == "push":
-                    pi_args.extend(f"@{filepath}" for filepath in changed_files)
-
-                prompt = render_prompt(
-                    "fix_checks.j2",
-                    check_cmd=self.settings.check_cmd,
-                    oscillation_warning=oscillation_warning,
-                    include_review_history=self.paths.review_file.exists(),
-                    include_build_history=self.paths.build_history_file.exists(),
-                    context_mode=context_mode,
-                    large_context_list=large_context_list,
-                    large_file_warning=large_file_warning,
-                )
-
-                self.logger.info(f"Running pi to fix errors (attempt {fix_attempt})...")
-                returncode, _, _ = self.run_pi_safe(*pi_args, prompt)
-
-                if returncode != 0:
-                    self.logger.info(f"pi could not produce a fix on attempt {fix_attempt}.")
-
-                # Check if changes were made
-                returncode, stdout, _ = run_command("git status --porcelain", check=False)
-                if not stdout.strip():
-                    self.logger.error(
-                        "Pi reported success but NO files were modified. This suggests "
-                        "'edit' commands failed (e.g., text not found).",
-                    )
-                    with self.paths.build_history_file.open("a") as f:
-                        f.write(
-                            f"## Iteration {self.iteration} fix attempt {fix_attempt}: "
-                            "FAILED to apply fixes (no files changed)\n\n",
-                        )
-                else:
-                    # Record history
-                    returncode, stat_output, _ = run_command("git diff --stat")
-                    with self.paths.build_history_file.open("a") as f:
-                        f.write(f"## Iteration {self.iteration} fix attempt {fix_attempt}\n")
-                        f.write(f"{stat_output}\n\n")
-
-                # Re-run checks
-                self.logger.info(
-                    f"[Step 2A] Re-running {self.settings.check_cmd} after "
-                    f"fix attempt {fix_attempt}...",
-                )
-                checks_status, _ = self.run_checks()
-
-            self.logger.info("[Step 2B] Checks passed. Proceeding to review.")
-
-            # Step 3: Prepare review artifacts
-            self.logger.info("[Step 3] Preparing review artifacts...")
-            self.paths.review_current_file.unlink(missing_ok=True)
-
-            # Step 3.5: Check PR threads if enabled
-            if self.settings.pr_review:
-                self._fetch_pr_threads()
-
-            # Step 4: Collect files for review
-            if (
-                not self.paths.review_current_file.exists()
-                or not self.paths.review_current_file.read_text()
-            ):
-                # Skip local review if we have PR threads to process
-                self._run_local_review(changed_files)
-            else:
-                self.logger.info(
-                    f"[Step 4] Using PR threads from {self.paths.review_current_file} for review.",
-                )
-                self.logger.info("[Step 5] Skipping local file review generation.")
-
-            # Step 6: Process review results
-            self._process_review_results()
+            # Run review phase
+            changed_files = get_changed_files(self.paths.project_root)
+            self._run_review_phase(changed_files)
 
         # Should not reach here
         return 0
 
-    def _fetch_pr_threads(self) -> None:
-        """Fetch PR threads for PR review mode."""
-        self.logger.info("[Step 3.5] Checking for unresolved PR threads...")
+    def _get_branch_name(self) -> str | None:
+        """Get the current git branch name.
 
-        # Get branch name
+        Returns:
+            Branch name or None if not on a branch
+
+        """
         returncode, branch, _ = run_command("git branch --show-current")
         if returncode != 0 or not branch.strip():
-            self.logger.error("Not on a git branch. Skipping PR review.")
-            return
+            return None
+        return branch.strip()
 
-        branch = branch.strip()
-        self.logger.info(f"Fetching PR info for branch: {branch}")
+    def _get_pr_info(self, branch: str) -> dict | None:
+        """Get PR information for a branch.
 
-        # Check gh auth
-        returncode, _, _ = run_command("gh auth status")
-        if returncode != 0:
-            self.logger.error("GitHub CLI not authenticated. Skipping PR review.")
-            return
+        Args:
+            branch: Branch name
 
-        # Get PR info
+        Returns:
+            PR data dict or None if not found
+
+        """
+        import json
+
         returncode, pr_json, _ = run_command(
             f"gh pr view {branch} --json number,url,headRepository,headRepositoryOwner",
         )
         if returncode != 0:
-            self.logger.info(
-                f"No open PR found for {branch} or error fetching PR. Skipping PR review.",
-            )
-            return
-
-        # Parse PR info
-        import json
+            return None
 
         pr_data = json.loads(pr_json)
-        pr_number = pr_data.get("number")
-        pr_url = pr_data.get("url")
-        repo_owner = pr_data["headRepositoryOwner"]["login"]
-        repo_name = pr_data["headRepository"]["name"]
+        return {
+            "number": pr_data.get("number"),
+            "url": pr_data.get("url"),
+            "repo_owner": pr_data["headRepositoryOwner"]["login"],
+            "repo_name": pr_data["headRepository"]["name"],
+        }
 
-        self.logger.info(f"Found PR #{pr_number} ({pr_url}). Checking for cached threads...")
+    def _check_pr_threads_cache(self, cache_key: str) -> bool:
+        """Check if cached PR threads are valid and use them.
 
-        # Check cache
-        cache_key = f"{repo_owner}/{repo_name}/{pr_number}"
+        Args:
+            cache_key: Cache key to validate
+
+        Returns:
+            True if cache was used, False otherwise
+
+        """
         if (
             self.paths.pr_threads_cache.exists()
             and self.paths.pr_threads_hash_file.exists()
@@ -657,11 +752,28 @@ class PiRunner:
             self.paths.review_current_file.write_text(self.paths.pr_threads_cache.read_text())
             thread_count = self.paths.review_current_file.read_text().count("--- Thread #")
             self.logger.info(f"Found {thread_count} unresolved threads from cache.")
-            return
+            return True
+        return False
 
-        self.logger.info("Cache miss or invalid. Fetching fresh threads...")
+    def _fetch_pr_threads_gql(
+        self,
+        repo_owner: str,
+        repo_name: str,
+        pr_number: int,
+    ) -> list[dict] | None:
+        """Fetch PR threads via GraphQL.
 
-        # GraphQL query
+        Args:
+            repo_owner: Repository owner
+            repo_name: Repository name
+            pr_number: PR number
+
+        Returns:
+            Thread data list or None on failure
+
+        """
+        import json
+
         query = """
             query($owner: String!, $repo: String!, $number: Int!) {
                 repository(owner: $owner, name: $repo) {
@@ -690,54 +802,106 @@ class PiRunner:
             f"-F repo={repo_name} -F number={pr_number}",
         )
         if returncode != 0:
-            self.logger.error("Failed to fetch threads via GraphQL.")
-            return
-
-        # Parse and format threads
-        import json
+            return None
 
         try:
             data = json.loads(gql_result)
-            threads = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
-            unresolved_threads = [t for t in threads if not t.get("isResolved", True)]
-
-            if unresolved_threads:
-                threads_output = []
-                for i, thread in enumerate(unresolved_threads, 1):
-                    threads_output.append(f"--- Thread #{i} ---")
-                    threads_output.append(f"ID: {thread['id']}")
-                    threads_output.append(f"File: {thread.get('path', 'N/A')}")
-                    if thread.get("line"):
-                        threads_output.append(f"Line: {thread['line']}")
-
-                    for comment in thread["comments"]["nodes"]:
-                        author = comment["author"]["login"] if comment.get("author") else "unknown"
-                        body = comment["body"]
-                        threads_output.append(f"[{author}]: {body}")
-
-                    threads_output.append("")
-
-                header = render_prompt(
-                    "pr_threads_header.j2",
-                    unresolved_count=len(unresolved_threads),
-                    pr_number=pr_number,
-                    pr_url=pr_url,
-                )
-
-                content = f"{header}\n\n" + "\n".join(threads_output)
-                self.paths.review_current_file.write_text(content)
-                self.logger.info(
-                    f"Found {len(unresolved_threads)} unresolved threads. Added to review queue.",
-                )
-
-                # Cache
-                self.paths.pr_threads_cache.write_text(content)
-                self.paths.pr_threads_hash_file.write_text(cache_key)
-            else:
-                self.logger.info("No unresolved threads found.")
+            return data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
         except (json.JSONDecodeError, KeyError) as e:
-            # Custom Logger doesn't support .exception() method
             self.logger.error(f"Failed to parse PR thread data: {e}")
+            return None
+
+    def _format_pr_threads(self, threads: list, pr_number: int, pr_url: str) -> str:
+        """Format PR threads for display.
+
+        Args:
+            threads: List of thread data
+            pr_number: PR number
+            pr_url: PR URL
+
+        Returns:
+            Formatted thread content
+
+        """
+        threads_output = []
+        for i, thread in enumerate(threads, 1):
+            threads_output.append(f"--- Thread #{i} ---")
+            threads_output.append(f"ID: {thread['id']}")
+            threads_output.append(f"File: {thread.get('path', 'N/A')}")
+            if thread.get("line"):
+                threads_output.append(f"Line: {thread['line']}")
+
+            for comment in thread["comments"]["nodes"]:
+                author = comment["author"]["login"] if comment.get("author") else "unknown"
+                body = comment["body"]
+                threads_output.append(f"[{author}]: {body}")
+
+            threads_output.append("")
+
+        header = render_prompt(
+            "pr_threads_header.j2",
+            unresolved_count=len(threads),
+            pr_number=pr_number,
+            pr_url=pr_url,
+        )
+
+        return f"{header}\n\n" + "\n".join(threads_output)
+
+    def _fetch_pr_threads(self) -> None:
+        """Fetch PR threads for PR review mode."""
+        self.logger.info("[Step 3.5] Checking for unresolved PR threads...")
+
+        branch = self._get_branch_name()
+        if not branch:
+            self.logger.error("Not on a git branch. Skipping PR review.")
+            return
+
+        self.logger.info(f"Fetching PR info for branch: {branch}")
+
+        # Check gh auth
+        returncode, _, _ = run_command("gh auth status")
+        if returncode != 0:
+            self.logger.error("GitHub CLI not authenticated. Skipping PR review.")
+            return
+
+        pr_info = self._get_pr_info(branch)
+        if not pr_info:
+            self.logger.info(
+                f"No open PR found for {branch} or error fetching PR. Skipping PR review.",
+            )
+            return
+
+        pr_number = pr_info["number"]
+        pr_url = pr_info["url"]
+        repo_owner = pr_info["repo_owner"]
+        repo_name = pr_info["repo_name"]
+
+        self.logger.info(f"Found PR #{pr_number} ({pr_url}). Checking for cached threads...")
+
+        cache_key = f"{repo_owner}/{repo_name}/{pr_number}"
+        if self._check_pr_threads_cache(cache_key):
+            return
+
+        self.logger.info("Cache miss or invalid. Fetching fresh threads...")
+
+        threads = self._fetch_pr_threads_gql(repo_owner, repo_name, pr_number)
+        if threads is None:
+            return
+
+        unresolved_threads = [t for t in threads if not t.get("isResolved", True)]
+
+        if unresolved_threads:
+            content = self._format_pr_threads(unresolved_threads, pr_number, pr_url)
+            self.paths.review_current_file.write_text(content)
+            self.logger.info(
+                f"Found {len(unresolved_threads)} unresolved threads. Added to review queue.",
+            )
+
+            # Cache
+            self.paths.pr_threads_cache.write_text(content)
+            self.paths.pr_threads_hash_file.write_text(cache_key)
+        else:
+            self.logger.info("No unresolved threads found.")
 
     def _generate_diff(self) -> str:
         """Generate git diff for review.
@@ -833,7 +997,7 @@ class PiRunner:
 
         if returncode != 0:
             self.logger.info("pi review failed. Treating as no issues found.")
-            self.paths.review_current_file.touch()
+            self.paths.review_current_file.write_text("NO_ISSUES")
 
     def _build_review_prompt(self, diff_size: int, pi_args: list[str]) -> str:
         """Build review prompt based on diff size.
@@ -909,6 +1073,143 @@ class PiRunner:
         # Append review entry
         self._append_review_entry()
 
+    def _has_no_review_issues(self, review_content: str) -> bool:
+        """Check if review content indicates no issues.
+
+        Args:
+            review_content: Review file content
+
+        Returns:
+            True if no issues found
+
+        """
+        stripped = review_content.strip()
+
+        # Explicit marker for no issues
+        if stripped == "NO_ISSUES":
+            return True
+
+        # Empty file — treat as no issues but warn (ambiguous state)
+        if not stripped:
+            self.logger.warning(
+                "review_current.md is empty — expected 'NO_ISSUES' marker. "
+                "Treating as no issues, but this may indicate a problem.",
+            )
+            return True
+
+        # Legacy fallback for LLMs that ignored the instruction
+        if "no critical issues found" in stripped.lower():
+            # Count actual content lines (excluding headers and empty lines)
+            content_lines = [
+                line for line in review_content.splitlines() if line and not line.startswith("#")
+            ]
+            return len(content_lines) <= 1
+
+        return False
+
+    def _complete_success(self) -> None:
+        """Complete the run successfully."""
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with self.paths.review_file.open("a") as f:
+            f.write(f"### Iteration {self.iteration} - Resolution ({timestamp})\n")
+            f.write("- No issues found.\n\n")
+
+        # Done!
+        self.paths.review_current_file.unlink(missing_ok=True)
+        self.paths.start_sha_file.unlink(missing_ok=True)
+
+        end_time = int(time.time())
+        duration = int(end_time - self.script_start_time)
+        self.logger.info(
+            f"[Step 7] Done! All checks passed and no review issues found. "
+            f".fix-die-repeat/review.md retained. Session log: {self.session_log}",
+        )
+
+        play_completion_sound()
+
+        # Send notification
+        if self.settings.ntfy_enabled:
+            send_ntfy_notification(
+                exit_code=0,
+                duration_str=format_duration(duration),
+                repo_name=self.paths.project_root.name,
+                ntfy_url=self.settings.ntfy_url,
+                logger=self.logger,
+            )
+
+        sys.exit(0)
+
+    def _run_review_fix_attempt(self, fix_attempt: int, max_fix_attempts: int) -> bool:
+        """Run a single review fix attempt.
+
+        Args:
+            fix_attempt: Current attempt number
+            max_fix_attempts: Maximum attempts
+
+        Returns:
+            True if fix was successful, False to retry
+
+        """
+        self.logger.info(f"[Step 6A] Pi fix attempt {fix_attempt} of {max_fix_attempts}...")
+
+        pi_args = ["-p"]
+
+        if self.settings.model:
+            pi_args.extend(["--model", self.settings.model])
+
+        pi_args.append(f"@{self.paths.review_current_file}")
+
+        # Attach recent history
+        if self.paths.review_file.exists():
+            lines = self.paths.review_file.read_text().splitlines()[-50:]
+            self.paths.review_recent_file.write_text("\n".join(lines))
+            pi_args.append(f"@{self.paths.review_recent_file}")
+
+        # Build fix prompt
+        fix_prompt = render_prompt("resolve_review_issues.j2")
+
+        returncode, _, _ = self.run_pi_safe(*pi_args, fix_prompt)
+
+        if returncode != 0:
+            self.logger.info(f"pi fix failed on attempt {fix_attempt}.")
+
+        # Record resolution attempt
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with self.paths.review_file.open("a") as f:
+            f.write(
+                f"### Iteration {self.iteration} - Resolution ({timestamp})\n"
+                f"- Fixes applied for .fix-die-repeat/review_current.md "
+                f"(attempt {fix_attempt}); verification pending.\n\n",
+            )
+
+        # Check if changes were made
+        returncode, stdout, _ = run_command("git status --porcelain")
+        if not stdout.strip():
+            self.consecutive_toolless_attempts += 1
+            self.logger.error(
+                f"Pi reported success on attempt {fix_attempt} but NO files were modified. "
+                "This suggests 'edit' commands failed (e.g., text not found).",
+            )
+            with self.paths.build_history_file.open("a") as f:
+                f.write(
+                    f"## Iteration {self.iteration} fix attempt {fix_attempt}: "
+                    "FAILED to apply fixes (no files changed)\n\n",
+                )
+            return False
+
+        self.consecutive_toolless_attempts = 0
+        # Record history
+        returncode, stat_output, _ = run_command("git diff --stat")
+        with self.paths.build_history_file.open("a") as f:
+            f.write(f"## Iteration {self.iteration} Review Fixes (attempt {fix_attempt})\n")
+            f.write(f"{stat_output}\n\n")
+
+        # Check if PR threads were resolved
+        if self.settings.pr_review:
+            self._resolve_pr_threads()
+
+        return True
+
     def _process_review_results(self) -> None:
         """Process review results and fix issues if needed."""
         self.logger.info("[Step 6] Processing review results...")
@@ -920,49 +1221,11 @@ class PiRunner:
             sys.exit(1)
 
         # Check if file is empty or only contains "no issues" messages
-        review_content = (
-            self.paths.review_current_file.read_text()
-            if self.paths.review_current_file.exists()
-            else ""
-        )
+        review_content = self.paths.review_current_file.read_text()
 
-        if not review_content.strip() or "no critical issues found" in review_content.lower():
-            # Count actual content lines (excluding headers and empty lines)
-            content_lines = [
-                line for line in review_content.splitlines() if line and not line.startswith("#")
-            ]
-
-            if len(content_lines) <= 1:
-                self.logger.info("[Step 6B] No issues found in .fix-die-repeat/review_current.md.")
-                timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-                with self.paths.review_file.open("a") as f:
-                    f.write(f"### Iteration {self.iteration} - Resolution ({timestamp})\n")
-                    f.write("- No issues found.\n\n")
-
-                # Done!
-                self.paths.review_current_file.unlink(missing_ok=True)
-                self.paths.start_sha_file.unlink(missing_ok=True)
-
-                end_time = int(time.time())
-                duration = int(end_time - self.script_start_time)
-                self.logger.info(
-                    f"[Step 7] Done! All checks passed and no review issues found. "
-                    f".fix-die-repeat/review.md retained. Session log: {self.session_log}",
-                )
-
-                play_completion_sound()
-
-                # Send notification
-                if self.settings.ntfy_enabled:
-                    send_ntfy_notification(
-                        exit_code=0,
-                        duration_str=format_duration(duration),
-                        repo_name=self.paths.project_root.name,
-                        ntfy_url=self.settings.ntfy_url,
-                        logger=self.logger,
-                    )
-
-                sys.exit(0)
+        if self._has_no_review_issues(review_content):
+            self.logger.info("[Step 6B] No issues found in .fix-die-repeat/review_current.md.")
+            self._complete_success()
 
         # Issues found - fix them
         self.logger.info(
@@ -974,71 +1237,14 @@ class PiRunner:
         max_fix_attempts = 3
 
         while fix_attempt <= max_fix_attempts:
-            self.logger.info(f"[Step 6A] Pi fix attempt {fix_attempt} of {max_fix_attempts}...")
-
-            pi_args = ["-p"]
-
-            if self.settings.model:
-                pi_args.extend(["--model", self.settings.model])
-
-            pi_args.append(f"@{self.paths.review_current_file}")
-
-            # Attach recent history
-            if self.paths.review_file.exists():
-                lines = self.paths.review_file.read_text().splitlines()[-50:]
-                self.paths.review_recent_file.write_text("\n".join(lines))
-                pi_args.append(f"@{self.paths.review_recent_file}")
-
-            # Build fix prompt
-            fix_prompt = render_prompt("resolve_review_issues.j2")
-
-            returncode, _, _ = self.run_pi_safe(*pi_args, fix_prompt)
-
-            if returncode != 0:
-                self.logger.info(f"pi fix failed on attempt {fix_attempt}.")
-
-            # Record resolution attempt
-            timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-            with self.paths.review_file.open("a") as f:
-                f.write(
-                    f"### Iteration {self.iteration} - Resolution ({timestamp})\n"
-                    f"- Fixes applied for .fix-die-repeat/review_current.md "
-                    f"(attempt {fix_attempt}); verification pending.\n\n",
-                )
-
-            # Check if changes were made
-            returncode, stdout, _ = run_command("git status --porcelain")
-            if not stdout.strip():
-                self.consecutive_toolless_attempts += 1
-                self.logger.error(
-                    f"Pi reported success on attempt {fix_attempt} but NO files were modified. "
-                    "This suggests 'edit' commands failed (e.g., text not found).",
-                )
-                with self.paths.build_history_file.open("a") as f:
-                    f.write(
-                        f"## Iteration {self.iteration} fix attempt {fix_attempt}: "
-                        "FAILED to apply fixes (no files changed)\n\n",
-                    )
-
-                if fix_attempt < max_fix_attempts:
-                    self.logger.info(f"Retrying fix (attempt {fix_attempt + 1})...")
-                    fix_attempt += 1
-                    continue
+            success = self._run_review_fix_attempt(fix_attempt, max_fix_attempts)
+            if success:
+                break
+            if fix_attempt < max_fix_attempts:
+                self.logger.info(f"Retrying fix (attempt {fix_attempt + 1})...")
+                fix_attempt += 1
             else:
-                self.consecutive_toolless_attempts = 0
-                # Record history
-                returncode, stat_output, _ = run_command("git diff --stat")
-                with self.paths.build_history_file.open("a") as f:
-                    f.write(f"## Iteration {self.iteration} Review Fixes (attempt {fix_attempt})\n")
-                    f.write(f"{stat_output}\n\n")
-
-                # Check if PR threads were resolved
-                if self.settings.pr_review:
-                    self._resolve_pr_threads()
-
-                break  # Success!
-
-            fix_attempt += 1
+                fix_attempt += 1
 
         # Continue to next iteration
 

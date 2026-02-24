@@ -1,6 +1,7 @@
 """Tests for utils module."""
 
 from pathlib import Path
+from unittest.mock import patch
 
 from fix_die_repeat.utils import (
     Logger,
@@ -273,6 +274,60 @@ class TestGetChangedFiles:
         assert not is_excluded_file("Cargo.toml")
 
 
+class TestRunCommand:
+    """Tests for run_command function."""
+
+    def test_run_command_success(self) -> None:
+        """Test successful command execution."""
+        from fix_die_repeat.utils import run_command
+
+        returncode, stdout, _stderr = run_command("echo hello", check=False)
+
+        assert returncode == 0
+        assert "hello" in stdout
+
+    def test_run_command_failure(self) -> None:
+        """Test failed command execution."""
+        from fix_die_repeat.utils import run_command
+
+        returncode, _stdout, _stderr = run_command("exit 1", check=False)
+
+        assert returncode == 1
+
+    def test_run_command_with_check(self) -> None:
+        """Test command with check=True raises on failure."""
+        from subprocess import CalledProcessError
+
+        import pytest
+
+        from fix_die_repeat.utils import run_command
+
+        with pytest.raises(CalledProcessError):
+            run_command("exit 1", check=True)
+
+    def test_run_command_not_found(self) -> None:
+        """Test command not found error."""
+        from fix_die_repeat.utils import run_command
+
+        returncode, _stdout, stderr = run_command("nonexistent-command-xyz-123", check=False)
+
+        assert returncode == 127
+        # The error message should contain "not found" or "command not found"
+        assert "not found" in stderr.lower() or "command not found" in stderr.lower()
+
+    def test_run_command_with_cwd(self, tmp_path: Path) -> None:
+        """Test command with custom working directory."""
+        from fix_die_repeat.utils import run_command
+
+        # Create a test file in tmp_path
+        (tmp_path / "test.txt").write_text("content")
+
+        returncode, stdout, _ = run_command("ls test.txt", cwd=tmp_path, check=False)
+
+        assert returncode == 0
+        assert "test.txt" in stdout
+
+
 class TestPlayCompletionSound:
     """Tests for play_completion_sound function."""
 
@@ -282,3 +337,148 @@ class TestPlayCompletionSound:
 
         # Should not raise any exceptions (best-effort function)
         play_completion_sound()
+
+
+class TestSendNtfyNotification:
+    """Tests for send_ntfy_notification function."""
+
+    def test_send_ntfy_success(self, tmp_path: Path) -> None:
+        """Test sending notification successfully."""
+        from fix_die_repeat.utils import send_ntfy_notification
+
+        log_file = tmp_path / "test.log"
+        logger = Logger(fdr_log=log_file, session_log=None, debug=False)
+
+        # Mock curl to succeed
+        with patch("fix_die_repeat.utils.run_command") as mock_run:
+            mock_run.return_value = (0, "", "")
+
+            send_ntfy_notification(
+                exit_code=0,
+                duration_str="5m 30s",
+                repo_name="test-repo",
+                ntfy_url="http://localhost:2586",
+                logger=logger,
+            )
+
+            # Check that curl was called (at least for the 'which curl' check)
+            assert mock_run.called
+
+    def test_send_ntfy_curl_not_available(self, tmp_path: Path) -> None:
+        """Test notification when curl is not available."""
+        from fix_die_repeat.utils import send_ntfy_notification
+
+        log_file = tmp_path / "test.log"
+        logger = Logger(fdr_log=log_file, session_log=None, debug=False)
+
+        # Mock curl check to fail
+        with patch("fix_die_repeat.utils.run_command") as mock_run:
+            mock_run.return_value = (127, "", "")
+
+            send_ntfy_notification(
+                exit_code=0,
+                duration_str="5m 30s",
+                repo_name="test-repo",
+                ntfy_url="http://localhost:2586",
+                logger=logger,
+            )
+
+            # Should return early without trying to send
+            # Only the 'which curl' call
+            assert mock_run.call_count == 1
+
+    def test_send_ntfy_failure_exit_code(self, tmp_path: Path) -> None:
+        """Test notification for failed exit code."""
+        from fix_die_repeat.utils import send_ntfy_notification
+
+        log_file = tmp_path / "test.log"
+        logger = Logger(fdr_log=log_file, session_log=None, debug=False)
+
+        with patch("fix_die_repeat.utils.run_command") as mock_run:
+            mock_run.return_value = (0, "", "")
+
+            send_ntfy_notification(
+                exit_code=1,
+                duration_str="1m 0s",
+                repo_name="test-repo",
+                ntfy_url="http://localhost:2586",
+                logger=logger,
+            )
+
+            # Check that curl was called
+            assert mock_run.called
+
+
+class TestCollectGitFiles:
+    """Tests for _collect_git_files function."""
+
+    def test_collect_git_files_no_git(self, tmp_path: Path) -> None:
+        """Test collecting git files outside of git repo."""
+        from fix_die_repeat.utils import _collect_git_files
+
+        files = _collect_git_files(tmp_path)
+
+        # Should return empty set for non-git directory
+        assert isinstance(files, set)
+
+
+class TestIsExcludedFile:
+    """Tests for is_excluded_file function."""
+
+    def test_excluded_lock_file(self) -> None:
+        """Test that .lock files are excluded."""
+        from fix_die_repeat.utils import is_excluded_file
+
+        assert is_excluded_file("package.lock") is True
+        assert is_excluded_file("file.lock") is True
+
+    def test_excluded_lock_json(self) -> None:
+        """Test that -lock.json files are excluded."""
+        from fix_die_repeat.utils import is_excluded_file
+
+        assert is_excluded_file("package-lock.json") is True
+        assert is_excluded_file("npm-lock.json") is True
+
+    def test_excluded_lock_yaml(self) -> None:
+        """Test that -lock.yaml files are excluded."""
+        from fix_die_repeat.utils import is_excluded_file
+
+        assert is_excluded_file("composer-lock.yaml") is True
+        assert is_excluded_file("yarn-lock.yaml") is True
+
+    def test_excluded_go_sum(self) -> None:
+        """Test that go.sum is excluded."""
+        from fix_die_repeat.utils import is_excluded_file
+
+        assert is_excluded_file("go.sum") is True
+
+    def test_excluded_min_files(self) -> None:
+        """Test that .min.* files are excluded."""
+        from fix_die_repeat.utils import is_excluded_file
+
+        assert is_excluded_file("script.min.js") is True
+        assert is_excluded_file("style.min.css") is True
+
+    def test_not_excluded_normal_files(self) -> None:
+        """Test that normal files are not excluded."""
+        from fix_die_repeat.utils import is_excluded_file
+
+        assert is_excluded_file("package.json") is False
+        assert is_excluded_file("script.js") is False
+        assert is_excluded_file("style.css") is False
+        assert is_excluded_file("test.py") is False
+
+    def test_custom_exclude_patterns(self) -> None:
+        """Test with custom exclude patterns."""
+        from fix_die_repeat.utils import is_excluded_file
+
+        assert is_excluded_file("test.log", exclude_patterns=["*.log"]) is True
+        assert is_excluded_file("test.py", exclude_patterns=["*.log"]) is False
+
+    def test_case_insensitive_matching(self) -> None:
+        """Test that matching is case-insensitive."""
+        from fix_die_repeat.utils import is_excluded_file
+
+        assert is_excluded_file("PACKAGE.LOCK") is True
+        assert is_excluded_file("Package-Lock.Json") is True
+        assert is_excluded_file("SCRIPT.MIN.JS") is True

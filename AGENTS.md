@@ -264,10 +264,8 @@ pytest --cov=fix_die_repeat --cov-report=term-missing --cov-report=html
 - **Overall**: ~22%
 - **config.py**: ~86% (well tested)
 - **utils.py**: ~66% (good coverage)
-- **runner.py**: ~0% (main loop, needs integration tests)
+- **runner.py**: ~0% (main loop, needs tests)
 - **cli.py**: ~0% (CLI, needs tests)
-
-**Note**: Low coverage in `runner.py` and `cli.py` is expected — they're integration-heavy and require pi mocking or end-to-end testing.
 
 ### ⚠️ CRITICAL: Test Configuration Policy
 

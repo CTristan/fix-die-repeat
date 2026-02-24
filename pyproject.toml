@@ -36,7 +36,6 @@ lint.select = ["ALL"]
 [tool.ruff.lint.per-file-ignores]
 "fix_die_repeat/runner.py" = [
     "G004",    # Logging uses f-string for format string (custom Logger class)
-    "C901",    # check_oscillation() is complex (cyclomatic complexity)
     "PLR0912", # Too many branches in integration-heavy methods
     "PLR0915", # Too many statements in run() method
     "G201",    # Logging check exception with custom Logger
@@ -72,7 +71,6 @@ lint.select = ["ALL"]
     "PERF401", # Manual list comp preferred over join for clarity
     "SIM110",  # Complex logic that could be simplified but is clearer as-is
     "PLW1510", # subprocess.run without check (we handle return code)
-    "C901",    # Complex function in utility code
 ]
 "fix_die_repeat/prompts.py" = [
     "S701",    # Jinja2 autoescape disabled for code prompts
@@ -83,6 +81,7 @@ lint.select = ["ALL"]
     "PLC0415", # Import outside top-level in tests
     "PLR2004", # Magic values are acceptable in tests
     "S607",    # Starting process with partial path for test commands
+    "SLF001",  # Private member access is expected when testing internal methods
 ]
 
 [tool.ruff.lint.isort]
@@ -97,11 +96,3 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "--cov=fix_die_repeat --cov-report=term-missing --cov-report=xml --cov-fail-under=80"
-
-[tool.coverage.run]
-# Exclude integration-heavy modules that require pi subprocess mocking.
-# See AGENTS.md: "Low coverage in runner.py and cli.py is expected"
-omit = [
-    "fix_die_repeat/runner.py",  # Integration loop requiring pi subprocess mocking
-    "fix_die_repeat/cli.py",     # Click CLI entry point requiring extensive mocking
-]

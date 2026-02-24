@@ -167,6 +167,58 @@ def get_git_revision_hash(file_path: Path) -> str:
     return hashlib.sha256(file_path.read_bytes()).hexdigest()
 
 
+def _collect_git_files(project_root: Path) -> set[str]:
+    """Collect all changed files from git (staged, unstaged, untracked).
+
+    Args:
+        project_root: Project root directory
+
+    Returns:
+        Set of file paths
+
+    """
+    files = set()
+
+    # Staged and unstaged changes
+    for cmd in ["git diff --name-only", "git diff --cached --name-only"]:
+        returncode, stdout, _ = run_command(cmd, cwd=project_root, check=False)
+        if returncode == 0:
+            files.update(stdout.strip().split("\n"))
+
+    # Untracked files
+    returncode, stdout, _ = run_command(
+        "git ls-files --others --exclude-standard",
+        cwd=project_root,
+        check=False,
+    )
+    if returncode == 0:
+        files.update(stdout.strip().split("\n"))
+
+    return files
+
+
+def _should_exclude_file(basename: str, exclude_patterns: list[str]) -> bool:
+    """Check if a file should be excluded based on patterns.
+
+    Args:
+        basename: Name of the file
+        exclude_patterns: Patterns to check
+
+    Returns:
+        True if file should be excluded
+
+    """
+    for pattern in exclude_patterns:
+        if basename.lower() == pattern.lower().replace("*", ""):
+            if pattern.startswith("*"):
+                suffix = pattern[1:]
+                if basename.endswith(suffix):
+                    return True
+            elif basename == pattern:
+                return True
+    return False
+
+
 def get_changed_files(
     project_root: Path,
     exclude_patterns: list[str] | None = None,
@@ -189,23 +241,7 @@ def get_changed_files(
         "*.min.*",
     ]
 
-    # Get all changed files
-    files = set()
-
-    # Staged and unstaged changes
-    for cmd in ["git diff --name-only", "git diff --cached --name-only"]:
-        returncode, stdout, _ = run_command(cmd, cwd=project_root, check=False)
-        if returncode == 0:
-            files.update(stdout.strip().split("\n"))
-
-    # Untracked files
-    returncode, stdout, _ = run_command(
-        "git ls-files --others --exclude-standard",
-        cwd=project_root,
-        check=False,
-    )
-    if returncode == 0:
-        files.update(stdout.strip().split("\n"))
+    files = _collect_git_files(project_root)
 
     # Filter out non-existent files, .fix-die-repeat files, and excluded patterns
     result = []
@@ -217,22 +253,7 @@ def get_changed_files(
         if not file_path.is_file():
             continue
 
-        # Check exclude patterns
-        basename = file_path.name
-        excluded = False
-        for pattern in exclude_patterns:
-            if basename.lower() == pattern.lower().replace("*", ""):
-                # Simple match for patterns like "*.lock"
-                if pattern.startswith("*"):
-                    suffix = pattern[1:]
-                    if basename.endswith(suffix):
-                        excluded = True
-                        break
-                elif basename == pattern:
-                    excluded = True
-                    break
-
-        if not excluded:
+        if not _should_exclude_file(file_path.name, exclude_patterns):
             result.append(f)
 
     return result
