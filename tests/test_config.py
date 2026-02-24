@@ -3,7 +3,6 @@
 import os
 import subprocess
 from pathlib import Path
-from subprocess import CalledProcessError
 from unittest.mock import patch
 
 import pytest
@@ -231,17 +230,14 @@ class TestPaths:
         assert paths.run_timestamps_file == paths.fdr_dir / "run_timestamps.md"
 
     def test_find_project_root_git_fallback_to_cwd(self, tmp_path: Path) -> None:
-        """Test _find_project_root falls back to cwd when git command fails (line 190)."""
+        """Test _find_project_root falls back to cwd when git lookup fails."""
         no_git_dir = tmp_path / "no_git"
         no_git_dir.mkdir()
 
-        # Mock subprocess.run to raise CalledProcessError for git commands
         original_cwd = Path.cwd()
         try:
             os.chdir(no_git_dir)
-            with patch("fix_die_repeat.config.subprocess.run") as mock_run:
-                mock_run.side_effect = CalledProcessError(128, "git")
-
+            with patch("fix_die_repeat.config.run_command", return_value=(1, "", "git failed")):
                 # Create Paths - should fall back to cwd when git fails
                 paths = Paths()
 

@@ -122,21 +122,13 @@ def run_command(
         return (2, "", "No command provided")
 
     try:
-        if capture_output:
-            result = subprocess.run(
-                args,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                check=check,
-            )
-        else:
-            result = subprocess.run(
-                args,
-                cwd=cwd,
-                text=True,
-                check=check,
-            )
+        result = subprocess.run(  # noqa: S603  # args are tokenized argv with shell disabled.
+            args,
+            cwd=cwd,
+            capture_output=capture_output,
+            text=True,
+            check=check,
+        )
         return (result.returncode, result.stdout or "", result.stderr or "")
     except FileNotFoundError:
         return (127, "", f"Command not found: {args[0]}")

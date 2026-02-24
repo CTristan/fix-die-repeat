@@ -1,12 +1,13 @@
 """Configuration management for fix-die-repeat."""
 
 import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 import pydantic as pyd
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from fix_die_repeat.utils import run_command
 
 
 class Settings(BaseSettings):
@@ -240,17 +241,13 @@ class Paths:
         # Try to get git root first
         git_path = shutil.which("git")
         if git_path:
-            try:
-                result = subprocess.run(
-                    [git_path, "rev-parse", "--show-toplevel"],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-                return Path(result.stdout.strip())
-            except subprocess.CalledProcessError:
-                # Git failed, fall back to current directory
-                pass
+            returncode, stdout, _ = run_command(
+                [git_path, "rev-parse", "--show-toplevel"],
+                check=False,
+            )
+            if returncode == 0 and stdout.strip():
+                return Path(stdout.strip())
+
         # Fall back to current directory
         return Path.cwd()
 
