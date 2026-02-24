@@ -40,7 +40,6 @@ lint.ignore = ["COM812", "D203", "D213"]
     "D301",    # Keeping conventional Click docstrings avoids noisy rewrites that do not improve generated help.
 ]
 "fix_die_repeat/config.py" = [
-    "FBT002",  # Bool overrides are forwarded directly to preserve explicit precedence behavior in get_settings().
     "S607",    # Git commands rely on PATH resolution across developer environments, not hardcoded absolute paths.
 ]
 "fix_die_repeat/prompts.py" = [
