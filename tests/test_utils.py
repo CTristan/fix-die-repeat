@@ -67,6 +67,11 @@ class TestGetFileLineCount:
         """Test counting lines in non-existent file."""
         assert get_file_line_count(tmp_path / "nonexistent.txt") == 0
 
+    def test_directory_path(self, tmp_path: Path) -> None:
+        """Test counting lines when path is a directory (OSError case)."""
+        # A directory will raise OSError when trying to open as a file
+        assert get_file_line_count(tmp_path) == 0
+
 
 class TestDetectLargeFiles:
     """Tests for detect_large_files function."""
@@ -155,6 +160,54 @@ class TestLogger:
         assert "Debug message" in content
         assert "Normal debug message" not in content
 
+    def test_all_log_levels(self, tmp_path: Path) -> None:
+        """Test all logging levels (info, warning, error, debug)."""
+        log_file = tmp_path / "test.log"
+        logger = Logger(fdr_log=log_file, session_log=None, debug=True)
+
+        logger.info("Info message")
+        logger.warning("Warning message")
+        logger.error("Error message")
+        logger.debug_log("Debug message")
+
+        content = log_file.read_text()
+        assert "Info message" in content
+        assert "Warning message" in content
+        assert "Error message" in content
+        assert "Debug message" in content
+
+    def test_session_log(self, tmp_path: Path) -> None:
+        """Test that session_log also receives messages."""
+        fdr_log = tmp_path / "fdr.log"
+        session_log = tmp_path / "session.log"
+        logger = Logger(fdr_log=fdr_log, session_log=session_log, debug=False)
+
+        logger.info("Test message")
+
+        assert fdr_log.exists()
+        assert session_log.exists()
+        fdr_content = fdr_log.read_text()
+        session_content = session_log.read_text()
+        assert "Test message" in fdr_content
+        assert "Test message" in session_content
+
+    def test_file_write_error_handling(self, tmp_path: Path) -> None:
+        """Test that logger handles file write errors gracefully."""
+        from unittest.mock import MagicMock, patch
+
+        log_file = tmp_path / "test.log"
+
+        # Mock the file open to raise OSError
+        mock_open = MagicMock()
+        mock_open.return_value.__enter__.side_effect = OSError("Permission denied")
+
+        with patch.object(Path, "open", mock_open):
+            logger = Logger(fdr_log=log_file, session_log=None, debug=False)
+            # Should not raise exception despite file write error
+            logger.info("Test message")
+
+        # No exception means the OSError was caught and handled
+
 
 class TestGetGitRevisionHash:
     """Tests for get_git_revision_hash function."""
@@ -167,6 +220,7 @@ class TestGetGitRevisionHash:
         # Should return a fallback hash string
         assert result is not None
         assert isinstance(result, str)
+        assert "no_file_" in result
 
     def test_existing_file(self, tmp_path: Path) -> None:
         """Test getting hash of existing file."""
@@ -175,10 +229,26 @@ class TestGetGitRevisionHash:
         test_file = tmp_path / "test.txt"
         test_file.write_text("Hello, World!")
 
-        # This will use sha256 fallback if git is not available
+        # This will use git hash-object if available, or sha256 fallback
         result = get_git_revision_hash(test_file)
         assert result is not None
         assert isinstance(result, str)
+        # Git hash is 40 chars (SHA-1), sha256 is 64 chars
+        assert len(result) in (40, 64)
+
+    def test_file_content_affects_hash(self, tmp_path: Path) -> None:
+        """Test that different file content produces different hashes."""
+        from fix_die_repeat.utils import get_git_revision_hash
+
+        file1 = tmp_path / "file1.txt"
+        file2 = tmp_path / "file2.txt"
+        file1.write_text("content 1")
+        file2.write_text("content 2")
+
+        hash1 = get_git_revision_hash(file1)
+        hash2 = get_git_revision_hash(file2)
+
+        assert hash1 != hash2
 
 
 class TestGetChangedFiles:

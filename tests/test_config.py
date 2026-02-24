@@ -64,6 +64,12 @@ class TestSettings:
         assert settings.pr_review
         assert settings.debug
 
+    def test_get_settings_with_test_model(self) -> None:
+        """Test get_settings with test_model parameter."""
+        settings = get_settings(test_model="anthropic/claude-sonnet-4-5")
+
+        assert settings.test_model == "anthropic/claude-sonnet-4-5"
+
 
 class TestPaths:
     """Tests for Paths class."""
@@ -95,6 +101,59 @@ class TestPaths:
         assert paths.project_root == project_dir
         assert paths.fdr_dir == project_dir / ".fix-die-repeat"
 
+    def test_project_root_from_git(self, tmp_path: Path) -> None:
+        """Test that project root is found from git when not specified."""
+        # Create a temporary directory with a git repo
+        project_dir = tmp_path / "git_project"
+        project_dir.mkdir()
+
+        # Initialize git repo
+        import os
+        import subprocess
+
+        subprocess.run(["git", "init"], cwd=project_dir, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=project_dir,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test User"],
+            cwd=project_dir,
+            check=True,
+            capture_output=True,
+        )
+
+        # Change to git directory and create Paths without project_root
+        original_cwd = Path.cwd()
+        try:
+            os.chdir(project_dir)
+            paths = Paths()  # No project_root argument - should find git root
+            assert paths.project_root == project_dir
+            assert paths.fdr_dir == project_dir / ".fix-die-repeat"
+        finally:
+            os.chdir(original_cwd)
+
+    def test_project_root_without_git(self, tmp_path: Path) -> None:
+        """Test that project root falls back to cwd when not in a git repo."""
+        # Create a directory without git
+        no_git_dir = tmp_path / "no_git_project"
+        no_git_dir.mkdir()
+
+        # Change to this directory and create Paths without project_root
+        import os
+
+        original_cwd = Path.cwd()
+        try:
+            os.chdir(no_git_dir)
+            # Paths should find the project root (which falls back to cwd)
+            paths = Paths()  # No project_root argument
+            assert paths.project_root == no_git_dir
+            assert paths.fdr_dir == no_git_dir / ".fix-die-repeat"
+        finally:
+            os.chdir(original_cwd)
+
     def test_ensure_fdr_dir(self, tmp_path: Path) -> None:
         """Test that ensure_fdr_dir creates the directory."""
         paths = Paths(project_root=tmp_path)
@@ -108,6 +167,35 @@ class TestPaths:
         if gitignore.exists():
             content = gitignore.read_text()
             assert ".fix-die-repeat/" in content
+
+    def test_ensure_fdr_dir_updates_gitignore(self, tmp_path: Path) -> None:
+        """Test that ensure_fdr_dir adds .fix-die-repeat/ to existing gitignore."""
+        # Create a gitignore without .fix-die-repeat/
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text("*.pyc\n__pycache__/\n")
+
+        paths = Paths(project_root=tmp_path)
+        paths.ensure_fdr_dir()
+
+        # Verify .fix-die-repeat/ was added
+        content = gitignore.read_text()
+        assert "*.pyc" in content
+        assert "__pycache__/" in content
+        assert ".fix-die-repeat/" in content
+
+    def test_ensure_fdr_dir_does_not_duplicate_gitignore(self, tmp_path: Path) -> None:
+        """Test that ensure_fdr_dir doesn't add .fix-die-repeat/ if already present."""
+        # Create a gitignore with .fix-die-repeat/ already present
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text("*.pyc\n.fix-die-repeat/\n__pycache__/\n")
+
+        paths = Paths(project_root=tmp_path)
+        paths.ensure_fdr_dir()
+
+        # Verify .fix-die-repeat/ was not duplicated
+        content = gitignore.read_text()
+        count = content.count(".fix-die-repeat/")
+        assert count == 1, f".fix-die-repeat/ appears {count} times, expected 1"
 
     def test_path_properties(self, tmp_path: Path) -> None:
         """Test that all path properties are correctly set."""

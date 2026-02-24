@@ -269,6 +269,32 @@ pytest --cov=fix_die_repeat --cov-report=term-missing --cov-report=html
 
 **Note**: Low coverage in `runner.py` and `cli.py` is expected — they're integration-heavy and require pi mocking or end-to-end testing.
 
+### ⚠️ CRITICAL: Test Configuration Policy
+
+**NEVER modify test configuration settings, including coverage thresholds, without EXPLICIT human approval.**
+
+This includes but is not limited to:
+- Coverage threshold (`--cov-fail-under`)
+- pytest `addopts` in `[tool.pytest.ini_options]`
+- Coverage report options (`--cov-report`)
+- Test discovery patterns (`testpaths`, `python_files`, `python_classes`, `python_functions`)
+- Test command flags in `scripts/ci.sh`
+
+**Why this matters:**
+- Coverage thresholds are a quality gate intended to prevent regressions
+- Lowering thresholds to make CI pass undermines the entire purpose of testing
+- Changes to test configuration affect all future contributors and reviewers
+
+**What to do instead:**
+- If coverage drops below 80%, write MORE tests to raise it back up
+- If a module is genuinely difficult to test (e.g., `runner.py`), document why and seek approval to exclude it with `--cov-omit`
+- Never lower `--cov-fail-under` to make CI pass
+
+**Approval required:**
+- Any change to `[tool.pytest.ini_options]` requires explicit approval
+- Any change to pytest flags in `scripts/ci.sh` requires explicit approval
+- Any change to coverage configuration requires explicit approval
+
 ### Test Structure
 
 ```python
@@ -355,6 +381,78 @@ mypy fix_die_repeat
 **Configuration**: `pyproject.toml` `[tool.mypy]`
 
 **Mode**: Loose - `disallow_untyped_defs = false`, `attr-defined` disabled.
+
+### File Size Policy
+
+**CRITICAL: All code and documentation files must be kept under 2000 lines.**
+
+If ANY code file (`.py`, `.js`, `.ts`, `.rs`, etc.) or documentation file (`.md`, `.rst`, `.txt`) reaches 2000 lines or more, it **MUST** be refactored into separate files or compacted as necessary.
+
+**Why this matters:**
+- Large files are difficult to navigate, understand, and maintain
+- Code review becomes exponentially harder with large files
+- Merge conflicts are more frequent and harder to resolve in large files
+- Loading and processing large files slows down tooling and editor performance
+- Long files often indicate multiple responsibilities (violates Single Responsibility Principle)
+
+**When a file reaches the 2000-line threshold, take one of the following actions:**
+
+1. **For code files**:
+   - Split into logical modules (e.g., split `utils.py` into `utils.py`, `git_utils.py`, `file_utils.py`)
+   - Extract classes or groups of related functions into separate files
+   - Consider using packages/directories to organize related modules
+   - Keep cohesive functionality together but separate concerns
+
+2. **For documentation files**:
+   - Split into topical sections (e.g., split `AGENTS.md` into `AGENTS.md` + `ARCHITECTURE.md` + `WORKFLOW.md`)
+   - Move reference-style content to appendix documents
+   - Use includes or cross-references instead of duplicating content
+   - Preserve narrative flow while offloading details to separate files
+
+3. **For configuration or template files**:
+   - Extract reusable sections into separate files
+   - Use composition/includes where possible
+   - Consolidate similar entries into tables or lists
+
+**Examples:**
+
+```python
+# Before: runner.py at 2100 lines
+class PiRunner:
+    # ... 2100 lines ...
+
+# After: split into 3 files
+# runner.py (core loop, ~800 lines)
+# runner_review.py (review logic, ~700 lines)
+# runner_pr.py (PR-specific logic, ~600 lines)
+```
+
+```markdown
+<!-- Before: AGENTS.md at 2100 lines -->
+# AGENTS.md
+<!-- ... 2100 lines ... -->
+
+<!-- After: split into 3 files -->
+<!-- AGENTS.md (overview + quick start, ~800 lines) -->
+<!-- ARCHITECTURE.md (design decisions, ~700 lines) -->
+<!-- CONTRIBUTING.md (patterns + workflows, ~600 lines) -->
+```
+
+**Implementation:**
+- Use `wc -l <file>` or `rg -l "" -c <file>` to check line counts
+- When splitting files, maintain imports/exports appropriately
+- Update all references to moved code (imports, links)
+- Run full test suite after refactoring to ensure nothing broke
+
+**Exceptions:**
+- Generated files (e.g., auto-generated protocol buffers) are exempt
+- Third-party vendor files (e.g., minified JavaScript) are exempt
+- Data files (e.g., large JSON, CSV) are measured by readability, not line count
+
+**Monitoring:**
+- Agents should check file sizes before making large additions
+- Reviewers should flag files approaching 1500 lines for early intervention
+- CI can optionally add a check to flag files exceeding 2000 lines
 
 ### Combined Check
 

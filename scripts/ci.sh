@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# CI script that runs ruff and mypy checks
+# CI script that tests, lints, and type-checks the project
 #
 # Usage:
 #   ./scripts/ci.sh              # Run with auto-fix enabled (default)
@@ -17,12 +17,15 @@ fi
 if command -v uv &> /dev/null; then
     RUFF="uv run ruff"
     MYPY="uv run mypy"
+    PYTEST="uv run pytest"
 elif [ -f ".venv/bin/ruff" ]; then
     RUFF=".venv/bin/ruff"
     MYPY=".venv/bin/mypy"
+    PYTEST=".venv/bin/pytest"
 else
     RUFF="ruff"
     MYPY="mypy"
+    PYTEST="pytest"
 fi
 
 if [[ "$CHECK_ONLY" == "true" ]]; then
@@ -35,6 +38,9 @@ fi
 
 echo "🔎 Running mypy type checking..."
 $MYPY fix_die_repeat tests
+
+echo "🧪 Running tests with coverage..."
+$PYTEST
 
 if [[ "$CHECK_ONLY" == "true" ]]; then
     echo "📐 Running ruff format check..."

@@ -96,4 +96,12 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "--cov=fix_die_repeat --cov-report=term-missing --cov-report=html"
+addopts = "--cov=fix_die_repeat --cov-report=term-missing --cov-report=xml --cov-fail-under=80"
+
+[tool.coverage.run]
+# Exclude integration-heavy modules that require pi subprocess mocking.
+# See AGENTS.md: "Low coverage in runner.py and cli.py is expected"
+omit = [
+    "fix_die_repeat/runner.py",  # Integration loop requiring pi subprocess mocking
+    "fix_die_repeat/cli.py",     # Click CLI entry point requiring extensive mocking
+]
