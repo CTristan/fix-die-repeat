@@ -564,7 +564,8 @@ class TestPlayCompletionSoundFallback:
         with (
             patch("fix_die_repeat.utils.Path.exists", return_value=False),
             patch("fix_die_repeat.utils.run_command") as mock_run,
-            patch("builtins.print") as mock_print,
+            patch("fix_die_repeat.utils.sys.stdout.write") as mock_write,
+            patch("fix_die_repeat.utils.sys.stdout.flush") as mock_flush,
         ):
             play_completion_sound()
 
@@ -572,4 +573,5 @@ class TestPlayCompletionSoundFallback:
             ["canberra-gtk-play", "-i", "complete", "-d", "fix-die-repeat"],
             check=False,
         )
-        mock_print.assert_called_once()
+        mock_write.assert_called_once_with("\a")
+        mock_flush.assert_called_once()

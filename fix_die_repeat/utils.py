@@ -6,6 +6,7 @@ import logging
 import re
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 from rich.console import Console
@@ -352,7 +353,8 @@ def play_completion_sound() -> None:
     run_command(["canberra-gtk-play", "-i", "complete", "-d", "fix-die-repeat"], check=False)
 
     # Last resort
-    print("\a", end="", flush=True)
+    sys.stdout.write("\a")
+    sys.stdout.flush()
 
 
 def sanitize_ntfy_topic(text: str) -> str:

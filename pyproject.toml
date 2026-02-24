@@ -40,7 +40,6 @@ lint.ignore = ["COM812", "D203", "D213"]
     "D301",    # Keeping conventional Click docstrings avoids noisy rewrites that do not improve generated help.
 ]
 "fix_die_repeat/utils.py" = [
-    "T201",    # BEL terminal notifications require direct print output; replacing with logging drops sound behavior.
     "TRY300",  # try/except structure preserves linear cleanup/return flow; adding else made control flow harder to scan.
 ]
 "tests/*.py" = [
