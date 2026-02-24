@@ -1,6 +1,7 @@
 """Tests for utils module."""
 
 import hashlib
+import sys
 from pathlib import Path
 from subprocess import CalledProcessError
 from unittest.mock import MagicMock, patch
@@ -28,6 +29,7 @@ from fix_die_repeat.utils import (
 HELLO_WORLD_SIZE = 13  # len("Hello, World!")
 TEST_FILE_LINES = 3
 COMMAND_NOT_FOUND_EXIT_CODE = 127
+COMMAND_SYNTAX_EXIT_CODE = 2
 
 
 class TestFormatDuration:
@@ -291,16 +293,29 @@ class TestRunCommand:
         assert returncode == 0
         assert "hello" in stdout
 
+    def test_run_command_success_with_argv(self) -> None:
+        """Test successful command execution with argv list input."""
+        returncode, stdout, _stderr = run_command(
+            [sys.executable, "-c", "print('hello')"],
+            check=False,
+        )
+
+        assert returncode == 0
+        assert "hello" in stdout
+
     def test_run_command_failure(self) -> None:
         """Test failed command execution."""
-        returncode, _stdout, _stderr = run_command("exit 1", check=False)
+        returncode, _stdout, _stderr = run_command(
+            [sys.executable, "-c", "import sys; sys.exit(1)"],
+            check=False,
+        )
 
         assert returncode == 1
 
     def test_run_command_with_check(self) -> None:
         """Test command with check=True raises on failure."""
         with pytest.raises(CalledProcessError):
-            run_command("exit 1", check=True)
+            run_command([sys.executable, "-c", "import sys; sys.exit(1)"], check=True)
 
     def test_run_command_not_found(self) -> None:
         """Test command not found error."""
@@ -309,6 +324,13 @@ class TestRunCommand:
         assert returncode == COMMAND_NOT_FOUND_EXIT_CODE
         # The error message should contain "not found" or "command not found"
         assert "not found" in stderr.lower() or "command not found" in stderr.lower()
+
+    def test_run_command_invalid_syntax(self) -> None:
+        """Test invalid command syntax is returned as a command error."""
+        returncode, _stdout, stderr = run_command('echo "unclosed', check=False)
+
+        assert returncode == COMMAND_SYNTAX_EXIT_CODE
+        assert "invalid command syntax" in stderr.lower()
 
     def test_run_command_with_cwd(self, tmp_path: Path) -> None:
         """Test command with custom working directory."""
@@ -547,7 +569,7 @@ class TestPlayCompletionSoundFallback:
             play_completion_sound()
 
         mock_run.assert_called_with(
-            "canberra-gtk-play -i complete -d 'fix-die-repeat'",
+            ["canberra-gtk-play", "-i", "complete", "-d", "fix-die-repeat"],
             check=False,
         )
         mock_print.assert_called_once()

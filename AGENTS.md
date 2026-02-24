@@ -176,9 +176,11 @@ returncode, stdout, stderr = run_command(
 )
 ```
 
-- Uses `subprocess.run()` with `text=True` for string output
+- Uses `subprocess.run()` with `text=True` and `shell=False`
+- Accepts either a command string (tokenized via `shlex.split`) or argv list
 - Returns tuple of `(exit_code, stdout, stderr)`
 - `capture_output=True` redirects stdout/stderr, `check=False` doesn't raise on failure
+- Shell operators (`|`, `&&`, redirection) require explicit wrapping (for example: `bash -lc '...'`)
 
 ### 2. Context Management
 

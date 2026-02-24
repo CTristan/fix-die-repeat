@@ -2,6 +2,7 @@
 
 import json
 import re
+import shlex
 import sys
 import time
 from datetime import UTC, datetime
@@ -86,13 +87,13 @@ class PiRunner:
         """
         self.before_pi_call()
 
-        cmd = "pi " + " ".join(args)
-        returncode, stdout, stderr = run_command(cmd, cwd=self.paths.project_root)
+        cmd_args = ["pi", *args]
+        returncode, stdout, stderr = run_command(cmd_args, cwd=self.paths.project_root)
 
         # Log output
         if self.paths.pi_log:
             with self.paths.pi_log.open("a", encoding="utf-8") as f:
-                f.write(f"Command: {cmd}\n")
+                f.write(f"Command: {shlex.join(cmd_args)}\n")
                 f.write(f"Exit code: {returncode}\n")
                 if stdout:
                     f.write(f"STDOUT:\n{stdout}\n")
@@ -328,9 +329,16 @@ class PiRunner:
         # Create test prompt
         self.before_pi_call()
         returncode, _stdout, _stderr = run_command(
-            f"pi -p --model {self.settings.test_model} "
-            f"\"Write 'MODEL TEST OK' to file {test_file}. "
-            'Do NOT use any other tools or generate pseudo-code."',
+            [
+                "pi",
+                "-p",
+                "--model",
+                self.settings.test_model,
+                (
+                    f"Write 'MODEL TEST OK' to file {test_file}. "
+                    "Do NOT use any other tools or generate pseudo-code."
+                ),
+            ],
             cwd=self.paths.project_root,
         )
 
@@ -1316,7 +1324,7 @@ class PiRunner:
             self.logger.info("Calling resolve_pr_threads on safe IDs: %s", ids_json)
             self.before_pi_call()
             returncode, _stdout, _stderr = run_command(
-                f"pi -p 'resolve_pr_threads(threadIds: {ids_json})'",
+                ["pi", "-p", f"resolve_pr_threads(threadIds: {ids_json})"],
             )
 
             if returncode == 0:

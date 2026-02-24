@@ -4,6 +4,7 @@ import fnmatch
 import hashlib
 import logging
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -90,16 +91,20 @@ def format_duration(total_seconds: int) -> str:
 
 
 def run_command(
-    command: str,
+    command: str | list[str],
     cwd: Path | None = None,
     *,
     capture_output: bool = True,
     check: bool = False,
 ) -> tuple[int, str, str]:
-    """Run a shell command.
+    """Run a command without invoking a shell.
+
+    String commands are tokenized with ``shlex.split``. If shell features
+    (pipes, redirection, ``&&``) are required, wrap explicitly via something
+    like ``bash -lc '...'``.
 
     Args:
-        command: Command to run
+        command: Command to run as a string or argv list
         cwd: Working directory
         capture_output: Capture stdout and stderr
         check: Raise exception on non-zero exit code
@@ -109,10 +114,17 @@ def run_command(
 
     """
     try:
+        args = shlex.split(command) if isinstance(command, str) else command
+    except ValueError as exc:
+        return (2, "", f"Invalid command syntax: {exc}")
+
+    if not args:
+        return (2, "", "No command provided")
+
+    try:
         if capture_output:
             result = subprocess.run(
-                command,
-                shell=True,
+                args,
                 cwd=cwd,
                 capture_output=True,
                 text=True,
@@ -120,15 +132,14 @@ def run_command(
             )
         else:
             result = subprocess.run(
-                command,
-                shell=True,
+                args,
                 cwd=cwd,
                 text=True,
                 check=check,
             )
         return (result.returncode, result.stdout or "", result.stderr or "")
     except FileNotFoundError:
-        return (127, "", f"Command not found: {command.split(maxsplit=1)[0]}")
+        return (127, "", f"Command not found: {args[0]}")
 
 
 def get_git_revision_hash(file_path: Path) -> str:
@@ -145,7 +156,7 @@ def get_git_revision_hash(file_path: Path) -> str:
         return f"no_file_{file_path.name}"
 
     try:
-        git_returncode, stdout, _ = run_command(f"git hash-object {file_path}", check=False)
+        git_returncode, stdout, _ = run_command(["git", "hash-object", str(file_path)], check=False)
         if git_returncode == 0:
             return stdout.strip()
     except OSError:
@@ -335,18 +346,18 @@ def play_completion_sound() -> None:
     for sound in ["Purr", "Tink", "Pop", "Glass"]:
         sound_file = Path(f"/System/Library/Sounds/{sound}.aiff")
         if sound_file.exists():
-            run_command(f"afplay {sound_file}", check=False)
+            run_command(["afplay", str(sound_file)], check=False)
             return
 
     # Linux - paplay
     for sound in ["complete.oga", "service-login.oga", "message.oga"]:
         sound_file = Path(f"/usr/share/sounds/freedesktop/stereo/{sound}")
         if sound_file.exists():
-            run_command(f"paplay {sound_file}", check=False)
+            run_command(["paplay", str(sound_file)], check=False)
             return
 
     # Linux - canberra-gtk-play
-    run_command("canberra-gtk-play -i complete -d 'fix-die-repeat'", check=False)
+    run_command(["canberra-gtk-play", "-i", "complete", "-d", "fix-die-repeat"], check=False)
 
     # Last resort
     print("\a", end="", flush=True)
@@ -384,7 +395,7 @@ def send_ntfy_notification(
 
     """
     # Check if curl is available
-    returncode, _, _ = run_command("which curl", check=False)
+    returncode, _, _ = run_command(["which", "curl"], check=False)
     if returncode != 0:
         return
 
@@ -403,11 +414,21 @@ def send_ntfy_notification(
 
     # Send notification (ignore errors)
     run_command(
-        f"curl -sS -X POST '{ntfy_url}/{topic}' "
-        f"-H 'Title: {title}' "
-        f"-H 'Tags: {tags}' "
-        f"-H 'Priority: {priority}' "
-        f"-d '{message}'",
+        [
+            "curl",
+            "-sS",
+            "-X",
+            "POST",
+            f"{ntfy_url}/{topic}",
+            "-H",
+            f"Title: {title}",
+            "-H",
+            f"Tags: {tags}",
+            "-H",
+            f"Priority: {priority}",
+            "-d",
+            message,
+        ],
         check=False,
     )
 

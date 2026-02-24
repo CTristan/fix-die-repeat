@@ -43,7 +43,7 @@ lint.ignore = ["COM812", "D203", "D213"]
     "S603",  # False positive: uses absolute path from shutil.which() with hardcoded git arguments, not untrusted input.
 ]
 "fix_die_repeat/utils.py" = [
-    "S602",    # shell=True is required for user-supplied shell commands and compatibility with existing workflows.
+    "S603",    # run_command executes trusted local CLI tools and user-configured check_cmd values with shell disabled.
     "T201",    # BEL terminal notifications require direct print output; replacing with logging drops sound behavior.
     "TRY300",  # try/except structure preserves linear cleanup/return flow; adding else made control flow harder to scan.
 ]

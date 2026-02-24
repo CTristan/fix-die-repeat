@@ -1,5 +1,6 @@
 """Tests for runner module."""
 
+import sys
 from contextlib import suppress
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -1669,7 +1670,7 @@ class TestRunChecks:
     def test_run_checks_failure(self, tmp_path: Path) -> None:
         """Test running checks that fail."""
         settings = MagicMock()
-        settings.check_cmd = "exit 1"
+        settings.check_cmd = f'{sys.executable} -c "import sys; sys.exit(1)"'
         paths = MagicMock()
         paths.project_root = tmp_path
         paths.checks_log = tmp_path / "checks.log"
