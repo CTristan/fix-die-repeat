@@ -22,6 +22,7 @@ This is a living document for coding agents (pi, assistants, etc.) working on **
 - **Package Manager**: uv
 - **CLI**: Click
 - **Configuration**: Pydantic + pydantic-settings
+- **Prompt Templates**: Jinja2
 - **Terminal Output**: Rich (colors for errors/warnings)
 - **Testing**: pytest, pytest-cov
 - **Linting**: ruff
@@ -37,11 +38,14 @@ fix-die-repeat/
 │   ├── __init__.py         # Version and package init
 │   ├── cli.py             # Click-based CLI interface
 │   ├── config.py          # Pydantic settings and path management
+│   ├── prompts.py         # Jinja template rendering helpers
 │   ├── runner.py          # Core PiRunner class - main loop
-│   └── utils.py          # Utility functions (logging, git, file ops)
+│   ├── utils.py           # Utility functions (logging, git, file ops)
+│   └── templates/         # Prompt templates consumed by prompts.py
 ├── tests/                  # Test suite
 │   ├── __init__.py
 │   ├── test_config.py    # Settings and Paths tests
+│   ├── test_prompts.py   # Prompt rendering tests
 │   └── test_utils.py     # Utility function tests
 ├── pyproject.toml          # uv configuration, dependencies, tooling
 ├── README.md              # User documentation
@@ -144,6 +148,21 @@ Custom logger with dual output (console + file).
 - `warning(message)` - Warning logging (bold yellow, both outputs)
 - `error(message)` - Error logging (bold red, both outputs, also to stderr)
 - `debug_log(message)` - Debug logging (dim, both outputs, only if debug mode)
+
+### Prompt Rendering (`prompts.py` + `templates/*.j2`)
+
+Prompt text is stored in Jinja templates under `fix_die_repeat/templates/` and rendered via `render_prompt()`.
+
+**Why**:
+- Keeps long prompts out of Python control flow logic
+- Makes prompt updates safer and easier to review
+- Avoids broad lint rule exceptions for long inline strings
+
+**Current templates**:
+- `fix_checks.j2` - Prompt for check-failure fix attempts
+- `local_review.j2` - Prompt for local review of generated diff
+- `resolve_review_issues.j2` - Prompt for applying review fixes
+- `pr_threads_header.j2` - Header/instructions for fetched PR thread context
 
 ---
 
@@ -295,7 +314,16 @@ ruff format fix_die_repeat tests
 
 **Configuration**: `pyproject.toml` `[tool.ruff]`
 
-**Ignored Errors**: `E501` (line too long) is ignored for `runner.py`, `config.py`, `utils.py` - some strings are unavoidably long.
+**Per-File Exceptions Policy**: If a rule exception is ever required, configure it on a per-file basis in `pyproject.toml` under `[tool.ruff.lint.per-file-ignores]`, not by adding to global `ignore`.
+
+**Current state**: No per-file ruff ignores are configured.
+
+To add a targeted exception (only when unavoidable), use:
+
+```toml
+[tool.ruff.lint.per-file-ignores]
+"path/to/file.py" = ["RULE_CODE"]
+```
 
 ### MyPy (Type Checking)
 
@@ -491,6 +519,7 @@ self.logger.debug_log("Debug message")  # Only shown in debug mode
 ## Dependencies and Why They're Used
 
 - **click** - CLI framework (industry standard, well-documented)
+- **jinja2** - Prompt templating (keeps long prompts out of Python code)
 - **pydantic** - Configuration validation (robust, type-safe)
 - **pydantic-settings** - Environment variable support (complements pydantic)
 - **rich** - Terminal output with colors (cross-platform, clean API)
@@ -556,6 +585,6 @@ with pi's tools before running the full loop.
 
 ---
 
-**Last Updated**: 2025-02-23
+**Last Updated**: 2026-02-23
 **Python Version**: 3.12
 **pi Version Tested**: Latest (assumes tool compatibility)

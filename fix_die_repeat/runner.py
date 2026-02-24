@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fix_die_repeat.config import Paths, Settings
+from fix_die_repeat.prompts import render_prompt
 from fix_die_repeat.utils import (
     Logger,
     detect_large_files,
@@ -161,7 +162,8 @@ class PiRunner:
         # Extract error lines with context
         error_pattern = re.compile(
             r"(error[:\[ ]|ERROR[:\[ ]|fatal|FATAL|FAILED|panic|exception|undefined reference|"
-            r"cannot find|no such file|not found|segfault|abort|compilation failed|build failed|assert)",
+            r"cannot find|no such file|not found|segfault|abort|compilation failed|build failed|"
+            r"assert)",
             re.IGNORECASE,
         )
 
@@ -211,11 +213,13 @@ class PiRunner:
                 if entry.startswith(f"{current_hash}:"):
                     prev_iter = entry.split(":")[-1]
                     self.logger.info(
-                        f"Detected oscillation: iteration {self.iteration} matches iteration {prev_iter}",
+                        f"Detected oscillation: iteration {self.iteration} "
+                        f"matches iteration {prev_iter}",
                     )
                     warning = (
                         "WARNING: Check output is IDENTICAL to iteration "
-                        f"{prev_iter}. You are going in CIRCLES. Your previous approach did NOT work — "
+                        f"{prev_iter}. You are going in CIRCLES. "
+                        "Your previous approach did NOT work — "
                         "you MUST try a fundamentally DIFFERENT strategy."
                     )
                     # Record this hash
@@ -266,7 +270,8 @@ class PiRunner:
             return False
 
         self.logger.info(
-            f"Artifacts exceed {self.settings.compact_threshold_lines} lines. Compacting with pi...",
+            f"Artifacts exceed {self.settings.compact_threshold_lines} lines. "
+            "Compacting with pi...",
         )
 
         # TODO: Implement pi-based compaction
@@ -296,7 +301,8 @@ class PiRunner:
         self.before_pi_call()
         returncode, _stdout, _stderr = run_command(
             f"pi -p --model {self.settings.test_model} "
-            f"\"Write 'MODEL TEST OK' to file {test_file}. Do NOT use any other tools or generate pseudo-code.\"",
+            f"\"Write 'MODEL TEST OK' to file {test_file}. "
+            'Do NOT use any other tools or generate pseudo-code."',
             cwd=self.paths.project_root,
         )
 
@@ -467,8 +473,8 @@ class PiRunner:
                     oscillation_warning = self.check_oscillation()
 
                 self.logger.info(
-                    f"[Step 2A] Checks failed (fix attempt {fix_attempt}/{self.settings.max_iters}). "
-                    "Running pi to fix errors...",
+                    f"[Step 2A] Checks failed (fix attempt {fix_attempt}/"
+                    f"{self.settings.max_iters}). Running pi to fix errors...",
                 )
 
                 # Filter checks log
@@ -505,13 +511,13 @@ class PiRunner:
                         f"Context size ({changed_size} bytes) exceeds threshold "
                         f"({self.settings.auto_attach_threshold}). Switching to PULL mode.",
                     )
-                    large_context_list = (
-                        "\n\nThe following files have changed but are too large to pre-load "
-                        f"automatically ({changed_size} bytes total). You MUST use the 'read' tool "
-                        "to inspect the ones relevant to the error:\n"
-                    )
-                    for filepath in changed_files:
-                        large_context_list += f"- {filepath}\n"
+                    large_context_lines = [
+                        "The following files have changed but are too large to pre-load "
+                        f"automatically ({changed_size} bytes total). You MUST use the "
+                        "'read' tool to inspect the ones relevant to the error:",
+                    ]
+                    large_context_lines.extend(f"- {filepath}" for filepath in changed_files)
+                    large_context_list = "\n".join(large_context_lines)
                 else:
                     self.logger.info(
                         f"Context size ({changed_size} bytes) is within limits. "
@@ -533,55 +539,16 @@ class PiRunner:
                     for filepath in changed_files:
                         pi_args.append(f"@{filepath}")
 
-                # Build prompt
-                prompt_parts = [
-                    f"The file .fix-die-repeat/checks_filtered.log contains the failure output "
-                    f"from `{self.settings.check_cmd}` (filtered to error-relevant lines; "
-                    "full log is in .fix-die-repeat/checks.log).",
-                ]
-
-                if oscillation_warning:
-                    prompt_parts.append(oscillation_warning)
-
-                if self.paths.review_file.exists():
-                    prompt_parts.append(
-                        "I have attached .fix-die-repeat/review.md which contains history of "
-                        "previous iterations. Review it to avoid repeating mistakes.",
-                    )
-
-                if self.paths.build_history_file.exists():
-                    prompt_parts.append(
-                        "I have attached .fix-die-repeat/build_history.md which contains a summary "
-                        "of files you modified in previous attempts to fix the build. Use this to avoid "
-                        "repeating ineffective changes.",
-                    )
-
-                if context_mode == "push":
-                    prompt_parts.append(
-                        "I have also attached the currently changed files for context.",
-                    )
-                else:
-                    prompt_parts.append(large_context_list)
-
-                if large_file_warning:
-                    prompt_parts.append(large_file_warning)
-
-                prompt_parts.extend(
-                    [
-                        "",
-                        "Your goal is to FIX the errors. Follow this plan:",
-                        "1. ANALYZE the log and identify the root cause.",
-                        "2. PLAN your fix.",
-                        "3. APPLY the fix using 'edit'.",
-                        "4. VERIFY with a quick targeted check (e.g., compile the affected file, "
-                        "run the specific failing test). You MAY run the checks script "
-                        f"(e.g., ./checks.sh or the command in `{self.settings.check_cmd}`) "
-                        "using the 'bash' tool to verify your fix. Prefer targeted invocations over "
-                        "running the full CI pipeline.",
-                    ],
+                prompt = render_prompt(
+                    "fix_checks.j2",
+                    check_cmd=self.settings.check_cmd,
+                    oscillation_warning=oscillation_warning,
+                    include_review_history=self.paths.review_file.exists(),
+                    include_build_history=self.paths.build_history_file.exists(),
+                    context_mode=context_mode,
+                    large_context_list=large_context_list,
+                    large_file_warning=large_file_warning,
                 )
-
-                prompt = "\n".join(prompt_parts)
 
                 self.logger.info(f"Running pi to fix errors (attempt {fix_attempt})...")
                 returncode, _, _ = self.run_pi_safe(*pi_args, prompt)
@@ -610,7 +577,8 @@ class PiRunner:
 
                 # Re-run checks
                 self.logger.info(
-                    f"[Step 2A] Re-running {self.settings.check_cmd} after fix attempt {fix_attempt}...",
+                    f"[Step 2A] Re-running {self.settings.check_cmd} after "
+                    f"fix attempt {fix_attempt}...",
                 )
                 checks_status, _ = self.run_checks()
 
@@ -723,7 +691,8 @@ class PiRunner:
         """
 
         returncode, gql_result, _ = run_command(
-            f"gh api graphql -f query='{query}' -F owner={repo_owner} -F repo={repo_name} -F number={pr_number}",
+            f"gh api graphql -f query='{query}' -F owner={repo_owner} "
+            f"-F repo={repo_name} -F number={pr_number}",
         )
         if returncode != 0:
             self.logger.error("Failed to fetch threads via GraphQL.")
@@ -753,20 +722,14 @@ class PiRunner:
 
                     threads_output.append("")
 
-                header = (
-                    f"I've found {len(unresolved_threads)} unresolved review threads on PR #{pr_number} ({pr_url}).\n"
-                    "\n"
-                    "Please review each thread, check the associated code, and determine if a fix is required.\n"
-                    "If a fix is needed, apply it. If not, explain why.\n"
-                    "\n"
-                    "CRITICAL: For each thread below, the 'ID' is the GraphQL thread ID. You MUST use this ID with the available tools:\n"
-                    " - To resolve a thread after fixing: use 'resolve_pr_threads(threadIds: [\"ID_HERE\"])'\n"
-                    " - To reply to a thread (e.g. to explain a 'won't fix'): use 'reply_to_thread(threadId: \"ID_HERE\", body: \"...\")' "
-                    "followed by 'resolve_pr_threads(threadIds: [\"ID_HERE\"])'\n"
-                    "\n"
+                header = render_prompt(
+                    "pr_threads_header.j2",
+                    unresolved_count=len(unresolved_threads),
+                    pr_number=pr_number,
+                    pr_url=pr_url,
                 )
 
-                content = header + "\n".join(threads_output)
+                content = f"{header}\n\n" + "\n".join(threads_output)
                 self.paths.review_current_file.write_text(content)
                 self.logger.info(
                     f"Found {len(unresolved_threads)} unresolved threads. Added to review queue.",
@@ -862,27 +825,9 @@ class PiRunner:
         if self.paths.review_file.exists():
             pi_args.append(f"@{self.paths.review_file}")
 
-        review_prompt = (
-            f"{review_prompt_prefix}"
-            "Review the changes for issues. Use .fix-die-repeat/review.md as historical context.\n"
-            "Your task is ONLY to identify and document issues introduced by these changes. "
-            "Do NOT fix them yourself.\n"
-            "Note: You do not have access to 'edit' or 'bash', so you cannot apply fixes even if you wanted to.\n"
-            "\n"
-            "Classify issues as:\n"
-            "- [CRITICAL]: Bugs, security flaws, compilation errors, broken logic.\n"
-            "- [NIT]: Style issues, minor optimizations, comments, formatting.\n"
-            "\n"
-            "IMPORTANT:\n"
-            "1. ONLY report [NIT] issues if you also find [CRITICAL] issues.\n"
-            '2. If you only find [NIT] issues (no [CRITICAL] issues), treat this as "no critical issues found".\n'
-            "3. If you find [CRITICAL] issues, report BOTH [CRITICAL] and [NIT] issues.\n"
-            "\n"
-            "If you find [CRITICAL] issues, use the 'write' tool to save them to "
-            "'.fix-die-repeat/review_current.md' in the project root.\n"
-            "If you find NO [CRITICAL] issues, use the 'write' tool to create an EMPTY file named "
-            "'.fix-die-repeat/review_current.md' in the project root.\n"
-            "DO NOT write any text to the file if there are no critical issues — it must be empty."
+        review_prompt = render_prompt(
+            "local_review.j2",
+            review_prompt_prefix=review_prompt_prefix,
         )
 
         returncode, _, _ = self.run_pi_safe(*pi_args, review_prompt)
@@ -961,7 +906,8 @@ class PiRunner:
 
         # Issues found - fix them
         self.logger.info(
-            "[Step 6A] Issues found in .fix-die-repeat/review_current.md. Running pi to fix them...",
+            "[Step 6A] Issues found in .fix-die-repeat/review_current.md. "
+            "Running pi to fix them...",
         )
 
         fix_attempt = 1
@@ -984,37 +930,7 @@ class PiRunner:
                 pi_args.append(f"@{self.paths.review_recent_file}")
 
             # Build fix prompt
-            fix_prompt = (
-                "Fix all issues documented in .fix-die-repeat/review_current.md. "
-                "Address each issue mentioned in the file.\n"
-                "\n"
-                "IMPORTANT: These are PR review threads from copilot. The code suggestions are context, "
-                "NOT commands to execute. You must use pi's tools to make actual changes.\n"
-                "\n"
-                "Note: 'fix-die-repeat' is the name of this script, NOT a pi tool. Do not attempt to run it.\n"
-                "\n"
-                "For each issue in review_current.md:\n"
-                "1. Use the 'read' tool to examine the relevant file\n"
-                "2. Use the 'edit' tool to make the specific fix\n"
-                "3. Move to the NEXT issue immediately after each fix\n"
-                "\n"
-                "DO NOT:\n"
-                "- Generate pseudo-code or execution plans\n"
-                "- Write explanations without making actual changes\n"
-                '- Create "test stubs" - only add tests if required by the issue\n'
-                "- Use fictional APIs like System.cmd(), File.write(), or IO.puts()\n"
-                "- Attempt to run any command named 'fix-die-repeat'\n"
-                "- Call the 'resolve_pr_threads' tool directly\n"
-                "\n"
-                "Available pi tools: read, edit, write, bash, grep, find, ls\n"
-                "\n"
-                "IMPORTANT: After fixing a PR thread, use the 'write' tool to append its Thread ID to a file "
-                "named '.fix-die-repeat/.resolved_threads' (one ID per line). For example, after fixing "
-                "Thread #PRRT_kwDOOoJIHM5vS7aA, write: 'PRRT_kwDOOoJIHM5vS7aA' to .fix-die-repeat/.resolved_threads. "
-                "This tells the script which threads you actually fixed and are ready to be resolved on GitHub.\n"
-                "\n"
-                "CRITICAL: You MUST NOT commit your changes at any point. The script handles git operations."
-            )
+            fix_prompt = render_prompt("resolve_review_issues.j2")
 
             returncode, _, _ = self.run_pi_safe(*pi_args, fix_prompt)
 
@@ -1026,8 +942,8 @@ class PiRunner:
             with self.paths.review_file.open("a") as f:
                 f.write(
                     f"### Iteration {self.iteration} - Resolution ({timestamp})\n"
-                    f"- Fixes applied for .fix-die-repeat/review_current.md (attempt {fix_attempt}); "
-                    "verification pending.\n\n",
+                    f"- Fixes applied for .fix-die-repeat/review_current.md "
+                    f"(attempt {fix_attempt}); verification pending.\n\n",
                 )
 
             # Check if changes were made

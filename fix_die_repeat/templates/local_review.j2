@@ -1,0 +1,16 @@
+{{ review_prompt_prefix }}Review the changes for issues. Use .fix-die-repeat/review.md as historical context.
+Your task is ONLY to identify and document issues introduced by these changes. Do NOT fix them yourself.
+Note: You do not have access to 'edit' or 'bash', so you cannot apply fixes even if you wanted to.
+
+Classify issues as:
+- [CRITICAL]: Bugs, security flaws, compilation errors, broken logic.
+- [NIT]: Style issues, minor optimizations, comments, formatting.
+
+IMPORTANT:
+1. ONLY report [NIT] issues if you also find [CRITICAL] issues.
+2. If you only find [NIT] issues (no [CRITICAL] issues), treat this as "no critical issues found".
+3. If you find [CRITICAL] issues, report BOTH [CRITICAL] and [NIT] issues.
+
+If you find [CRITICAL] issues, use the 'write' tool to save them to '.fix-die-repeat/review_current.md' in the project root.
+If you find NO [CRITICAL] issues, use the 'write' tool to create an EMPTY file named '.fix-die-repeat/review_current.md' in the project root.
+DO NOT write any text to the file if there are no critical issues — it must be empty.

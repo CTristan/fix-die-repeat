@@ -398,8 +398,10 @@ pytest && ruff check --fix fix_die_repeat tests && ruff format fix_die_repeat te
 fix_die_repeat/
 ├── cli.py          # CLI — uses Click
 ├── config.py       # Settings and paths — uses Pydantic
+├── prompts.py      # Jinja template renderer for pi prompts
 ├── runner.py       # Main loop — orchestrates check/fix/review
-└── utils.py        # Utilities — logging, git, file operations
+├── utils.py        # Utilities — logging, git, file operations
+└── templates/      # Prompt templates used by runner (Jinja2)
 ```
 
 ### Dependencies
@@ -407,6 +409,7 @@ fix_die_repeat/
 | Package | Purpose |
 |---------|----------|
 | click | CLI framework |
+| jinja2 | Prompt templating |
 | pydantic | Configuration validation |
 | pydantic-settings | Environment variable support |
 | rich | Console output with colors |

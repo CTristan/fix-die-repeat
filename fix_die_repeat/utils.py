@@ -120,9 +120,17 @@ def run_command(
         Tuple of (exit_code, stdout, stderr)
 
     """
-    kwargs: dict[str, str | bytes | Path | int | None | bool] = {"cwd": cwd}  # type: ignore[assignment]
+    kwargs: dict[str, str | bytes | Path | int | None | bool] = {
+        "cwd": cwd,
+    }  # type: ignore[assignment]
     if capture_output:
-        kwargs.update({"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True})  # type: ignore[dict-item]
+        kwargs.update(  # type: ignore[dict-item]
+            {
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.PIPE,
+                "text": True,
+            },
+        )
 
     try:
         result = subprocess.run(command, shell=True, **kwargs)  # type: ignore[arg-type]
@@ -285,7 +293,8 @@ def detect_large_files(
             if lines > threshold_lines:
                 if not warning_parts:
                     warning_parts.append(
-                        "CRITICAL WARNING: The following files are >2000 lines and will be TRUNCATED by the 'read' tool:",
+                        "CRITICAL WARNING: The following files are >2000 lines and "
+                        "will be TRUNCATED by the 'read' tool:",
                     )
                 warning_parts.append(f"- {f} ({lines} lines)")
 
@@ -293,10 +302,14 @@ def detect_large_files(
         warning_parts.extend(
             [
                 "",
-                "[CRITICAL]: You CANNOT see the bottom of these files. If errors occur there, you are flying blind.",
-                "STRONGLY RECOMMENDED: Split these files into smaller files or modules to bring them under the 2000-line limit.",
-                "  - If the file contains tests at the bottom, move them to a separate test file (e.g., tests.rs, test_file.py, file.test.js).",
-                "  - If it is a large logic file, extract cohesive functionality into separate source files or subfolders.",
+                "[CRITICAL]: You CANNOT see the bottom of these files. If errors "
+                "occur there, you are flying blind.",
+                "STRONGLY RECOMMENDED: Split these files into smaller files or "
+                "modules to bring them under the 2000-line limit.",
+                "  - If the file contains tests at the bottom, move them to a "
+                "separate test file (e.g., tests.rs, test_file.py, file.test.js).",
+                "  - If it is a large logic file, extract cohesive functionality "
+                "into separate source files or subfolders.",
             ],
         )
 

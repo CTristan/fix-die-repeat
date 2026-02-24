@@ -1,0 +1,8 @@
+I've found {{ unresolved_count }} unresolved review threads on PR #{{ pr_number }} ({{ pr_url }}).
+
+Please review each thread, check the associated code, and determine if a fix is required.
+If a fix is needed, apply it. If not, explain why.
+
+CRITICAL: For each thread below, the 'ID' is the GraphQL thread ID. You MUST use this ID with the available tools:
+ - To resolve a thread after fixing: use 'resolve_pr_threads(threadIds: ["ID_HERE"])'
+ - To reply to a thread (e.g. to explain a 'won't fix'): use 'reply_to_thread(threadId: "ID_HERE", body: "...")' followed by 'resolve_pr_threads(threadIds: ["ID_HERE"])'
