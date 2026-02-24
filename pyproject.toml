@@ -43,10 +43,8 @@ lint.ignore = ["COM812", "D203", "D213"]
     "S603",  # False positive: uses absolute path from shutil.which() with hardcoded git arguments, not untrusted input.
 ]
 "fix_die_repeat/runner.py" = [
-    "G004",    # Custom Logger expects preformatted strings; deferred %-format logging APIs are not available here.
-    "TD002",   # Requiring author tags on every TODO adds noise without improving ownership in this small codebase.
-    "TD003",   # Requiring issue links for every TODO is impractical for exploratory notes kept near the code.
-    "TRY400",  # We cannot use logging.exception because the project uses a custom logger without that API.
+    "TD002",  # Requiring author tags on every TODO adds noise without improving ownership in this small codebase.
+    "TD003",  # Requiring issue links for every TODO is impractical for exploratory notes kept near the code.
 ]
 "fix_die_repeat/utils.py" = [
     "FBT001",  # Utility API exposes explicit bool switches; changing signature style would reduce call-site clarity.

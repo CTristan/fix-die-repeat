@@ -55,9 +55,7 @@ class TestRunPi:
             mock_run.return_value = (1, "", "boom")
             runner.run_pi("-p", "boom")
 
-        assert any(
-            "pi exited with code 1" in call.args[0] for call in runner.logger.error.call_args_list
-        )
+        runner.logger.error.assert_any_call("pi exited with code %s", 1)
 
     def test_run_pi_safe_capacity_error(self, tmp_path: Path) -> None:
         """Test run_pi_safe triggers model skip on 503 errors."""

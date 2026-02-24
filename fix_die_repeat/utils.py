@@ -2,86 +2,69 @@
 
 import fnmatch
 import hashlib
+import logging
 import re
 import subprocess
-from datetime import datetime
 from pathlib import Path
 
 from rich.console import Console
-from rich.text import Text
+from rich.logging import RichHandler
 
 from fix_die_repeat.messages import build_large_file_warning
 
 console = Console()
+LOG_FORMAT = "[%(asctime)s] [fdr] [%(levelname)s] %(message)s"
+LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+LOGGER_NAME = "fix_die_repeat"
 
 
-class Logger:
-    """Thread-safe logger with file and console output."""
+def configure_logger(
+    fdr_log: Path | None = None,
+    session_log: Path | None = None,
+    debug: bool = False,
+) -> logging.Logger:
+    """Configure and return the project logger.
 
-    def __init__(
-        self,
-        fdr_log: Path | None = None,
-        session_log: Path | None = None,
-        debug: bool = False,
-    ) -> None:
-        """Initialize logger.
+    Args:
+        fdr_log: Path to fdr.log file
+        session_log: Path to session log file
+        debug: Enable debug mode
 
-        Args:
-            fdr_log: Path to fdr.log file
-            session_log: Path to session log file
-            debug: Enable debug mode
+    Returns:
+        Configured logger instance
 
-        """
-        self.fdr_log = fdr_log
-        self.session_log = session_log
-        self.debug = debug
+    """
+    logger = logging.getLogger(LOGGER_NAME)
+    logger.setLevel(logging.DEBUG if debug else logging.INFO)
+    logger.propagate = False
 
-    def log(self, message: str, level: str = "INFO") -> None:
-        """Log a message.
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        handler.close()
 
-        Args:
-            message: Message to log
-            level: Log level (INFO, DEBUG, ERROR, WARNING)
+    formatter = logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
 
-        """
-        timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
-        log_message = f"[{timestamp}] [fdr] [{level}] {message}"
+    rich_handler = RichHandler(
+        console=console,
+        show_time=False,
+        show_level=False,
+        show_path=False,
+        markup=False,
+        rich_tracebacks=True,
+    )
+    rich_handler.setLevel(logging.DEBUG if debug else logging.INFO)
+    rich_handler.setFormatter(formatter)
+    logger.addHandler(rich_handler)
 
-        # Console output
-        if level == "ERROR":
-            console.print(Text(log_message, style="bold red"))
-        elif level == "WARNING":
-            console.print(Text(log_message, style="bold yellow"))
-        elif level == "DEBUG" and self.debug:
-            console.print(Text(log_message, style="dim"))
-        else:
-            console.print(log_message)
+    for log_file in (fdr_log, session_log):
+        if not log_file:
+            continue
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
+        file_handler.setLevel(logging.DEBUG if debug else logging.INFO)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
 
-        # File output
-        for log_file in [self.fdr_log, self.session_log]:
-            if log_file:
-                try:
-                    with log_file.open("a", encoding="utf-8") as f:
-                        f.write(log_message + "\n")
-                except OSError:
-                    pass
-
-    def debug_log(self, message: str) -> None:
-        """Log a debug message (only if debug mode is enabled)."""
-        if self.debug:
-            self.log(message, level="DEBUG")
-
-    def error(self, message: str) -> None:
-        """Log an error message."""
-        self.log(message, level="ERROR")
-
-    def warning(self, message: str) -> None:
-        """Log a warning message."""
-        self.log(message, level="WARNING")
-
-    def info(self, message: str) -> None:
-        """Log an info message."""
-        self.log(message, level="INFO")
+    return logger
 
 
 def format_duration(total_seconds: int) -> str:
@@ -384,7 +367,7 @@ def send_ntfy_notification(
     duration_str: str,
     repo_name: str,
     ntfy_url: str,
-    logger: Logger | None = None,
+    logger: logging.Logger | None = None,
 ) -> None:
     """Send ntfy notification (best-effort).
 
@@ -425,4 +408,4 @@ def send_ntfy_notification(
     )
 
     if logger:
-        logger.debug_log(f"Sent ntfy notification to {ntfy_url}/{topic}")
+        logger.debug("Sent ntfy notification to %s/%s", ntfy_url, topic)

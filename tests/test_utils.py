@@ -8,9 +8,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fix_die_repeat.utils import (
-    Logger,
     _collect_git_files,
     _should_exclude_file,
+    configure_logger,
     detect_large_files,
     format_duration,
     get_changed_files,
@@ -151,13 +151,13 @@ class TestSanitizeNtfyTopic:
         assert sanitize_ntfy_topic("test@repo#123") == "test-repo-123"
 
 
-class TestLogger:
-    """Tests for Logger class."""
+class TestConfigureLogger:
+    """Tests for configure_logger function."""
 
     def test_log_to_file(self, tmp_path: Path) -> None:
         """Test logging to file."""
         log_file = tmp_path / "test.log"
-        logger = Logger(fdr_log=log_file, session_log=None, debug=False)
+        logger = configure_logger(fdr_log=log_file, session_log=None, debug=False)
 
         logger.info("Test message")
 
@@ -165,28 +165,35 @@ class TestLogger:
         content = log_file.read_text()
         assert "Test message" in content
 
-    def test_debug_logging(self, tmp_path: Path) -> None:
-        """Test that debug messages only appear when debug is enabled."""
+    def test_debug_logging_enabled(self, tmp_path: Path) -> None:
+        """Test that debug messages appear when debug is enabled."""
         log_file = tmp_path / "test.log"
-        logger_debug = Logger(fdr_log=log_file, session_log=None, debug=True)
-        logger_normal = Logger(fdr_log=log_file, session_log=None, debug=False)
+        logger = configure_logger(fdr_log=log_file, session_log=None, debug=True)
 
-        logger_debug.debug_log("Debug message")
-        logger_normal.debug_log("Normal debug message")
+        logger.debug("Debug message")
 
         content = log_file.read_text()
         assert "Debug message" in content
+
+    def test_debug_logging_disabled(self, tmp_path: Path) -> None:
+        """Test that debug messages are hidden when debug is disabled."""
+        log_file = tmp_path / "test.log"
+        logger = configure_logger(fdr_log=log_file, session_log=None, debug=False)
+
+        logger.debug("Normal debug message")
+
+        content = log_file.read_text()
         assert "Normal debug message" not in content
 
     def test_all_log_levels(self, tmp_path: Path) -> None:
         """Test all logging levels (info, warning, error, debug)."""
         log_file = tmp_path / "test.log"
-        logger = Logger(fdr_log=log_file, session_log=None, debug=True)
+        logger = configure_logger(fdr_log=log_file, session_log=None, debug=True)
 
         logger.info("Info message")
         logger.warning("Warning message")
         logger.error("Error message")
-        logger.debug_log("Debug message")
+        logger.debug("Debug message")
 
         content = log_file.read_text()
         assert "Info message" in content
@@ -198,7 +205,7 @@ class TestLogger:
         """Test that session_log also receives messages."""
         fdr_log = tmp_path / "fdr.log"
         session_log = tmp_path / "session.log"
-        logger = Logger(fdr_log=fdr_log, session_log=session_log, debug=False)
+        logger = configure_logger(fdr_log=fdr_log, session_log=session_log, debug=False)
 
         logger.info("Test message")
 
@@ -209,20 +216,15 @@ class TestLogger:
         assert "Test message" in fdr_content
         assert "Test message" in session_content
 
-    def test_file_write_error_handling(self, tmp_path: Path) -> None:
-        """Test that logger handles file write errors gracefully."""
+    def test_lazy_formatting_args(self, tmp_path: Path) -> None:
+        """Test lazy formatting arguments for standard logger compatibility."""
         log_file = tmp_path / "test.log"
+        logger = configure_logger(fdr_log=log_file, session_log=None, debug=False)
 
-        # Mock the file open to raise OSError
-        mock_open = MagicMock()
-        mock_open.return_value.__enter__.side_effect = OSError("Permission denied")
+        logger.info("Value %s", "42")
 
-        with patch.object(Path, "open", mock_open):
-            logger = Logger(fdr_log=log_file, session_log=None, debug=False)
-            # Should not raise exception despite file write error
-            logger.info("Test message")
-
-        # No exception means the OSError was caught and handled
+        content = log_file.read_text()
+        assert "Value 42" in content
 
 
 class TestGetGitRevisionHash:
@@ -338,7 +340,7 @@ class TestSendNtfyNotification:
     def test_send_ntfy_success(self, tmp_path: Path) -> None:
         """Test sending notification successfully."""
         log_file = tmp_path / "test.log"
-        logger = Logger(fdr_log=log_file, session_log=None, debug=False)
+        logger = configure_logger(fdr_log=log_file, session_log=None, debug=False)
 
         # Mock curl to succeed
         with patch("fix_die_repeat.utils.run_command") as mock_run:
@@ -358,7 +360,7 @@ class TestSendNtfyNotification:
     def test_send_ntfy_curl_not_available(self, tmp_path: Path) -> None:
         """Test notification when curl is not available."""
         log_file = tmp_path / "test.log"
-        logger = Logger(fdr_log=log_file, session_log=None, debug=False)
+        logger = configure_logger(fdr_log=log_file, session_log=None, debug=False)
 
         # Mock curl check to fail
         with patch("fix_die_repeat.utils.run_command") as mock_run:
@@ -379,7 +381,7 @@ class TestSendNtfyNotification:
     def test_send_ntfy_failure_exit_code(self, tmp_path: Path) -> None:
         """Test notification for failed exit code."""
         log_file = tmp_path / "test.log"
-        logger = Logger(fdr_log=log_file, session_log=None, debug=False)
+        logger = configure_logger(fdr_log=log_file, session_log=None, debug=False)
 
         with patch("fix_die_repeat.utils.run_command") as mock_run:
             mock_run.return_value = (0, "", "")

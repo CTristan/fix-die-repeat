@@ -1552,7 +1552,7 @@ class TestFetchPrThreadsGql:
             result = runner._fetch_pr_threads_gql("owner", "repo", 123)
 
             assert result is None
-            assert runner.logger.error.called
+            assert runner.logger.exception.called
 
 
 class TestHasNoReviewIssues:

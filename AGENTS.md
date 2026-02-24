@@ -134,20 +134,15 @@ Centralized path management for `.fix-die-repeat/` directory.
 - `run_timestamps_file` - Start/end timestamps of run
 - `session_log` - Combined output (or timestamped if debug mode)
 
-### `Logger` (utils.py)
+### Logging (`configure_logger` in utils.py)
 
-Custom logger with dual output (console + file).
+Uses Python's standard `logging` module with `RichHandler` for console output.
 
 **Features**:
-- Uses Rich for colored console output (bold red for errors, bold yellow for warnings, dim for debug)
-- File logging to both `fdr_log` and `session_log`
-- Debug messages only shown when `debug=True`
-
-**Methods**:
-- `info(message)` - Standard logging (white, both outputs)
-- `warning(message)` - Warning logging (bold yellow, both outputs)
-- `error(message)` - Error logging (bold red, both outputs, also to stderr)
-- `debug_log(message)` - Debug logging (dim, both outputs, only if debug mode)
+- Standard `logging.Logger` instance configured by `configure_logger(...)`
+- Rich-colored console output plus file handlers for both `fdr_log` and `session_log`
+- Supports lazy formatting (`logger.info("... %s", value)`) for G004 compliance
+- Supports `logger.exception(...)` in exception handlers
 
 ### Prompt Rendering (`prompts.py` + `templates/*.j2`)
 
@@ -750,7 +745,7 @@ Always use logger instance:
 self.logger.info("Information message")
 self.logger.warning("Warning message")
 self.logger.error("Error message")
-self.logger.debug_log("Debug message")  # Only shown in debug mode
+self.logger.debug("Debug details: %s", detail)
 ```
 
 ---
