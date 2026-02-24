@@ -42,9 +42,6 @@ lint.ignore = ["COM812", "D203", "D213"]
 "fix_die_repeat/config.py" = [
     "S603",  # False positive: uses absolute path from shutil.which() with hardcoded git arguments, not untrusted input.
 ]
-"fix_die_repeat/prompts.py" = [
-    "S701",    # Autoescape must stay off because we render plain-text prompts where escaping would corrupt content.
-]
 "fix_die_repeat/runner.py" = [
     "DTZ005",  # Local wall-clock timestamps are intentional for human-readable run logs and local debugging context.
     "FIX002",  # TODOs document known follow-up work inline; moving all notes elsewhere loses implementation context.
