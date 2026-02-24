@@ -394,6 +394,7 @@ Refactoring for lower complexity improves:
 3. **Use builder patterns** for complex object construction
 4. **Apply default arguments** or keyword-only arguments to clarify required vs. optional parameters
 5. **Use `@typing.override` decorator** if the function must override a parent class method with a fixed signature
+6. **Use `**kwargs` for framework callbacks** when a framework (e.g., Click) injects one parameter per decorator — capture them with `**kwargs` and map into a typed object via a helper function
 
 Example of grouping related arguments:
 
@@ -416,6 +417,69 @@ class Vector(NamedTuple):
 def calculate_position(pos: Vector, vel: Vector, time: float) -> Vector:
     return Vector(*(p + v * time for p, v in zip(pos, vel)))
 ```
+
+Example of using `**kwargs` for Click callbacks:
+
+```python
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class CliOptions:
+    name: str | None = None
+    count: int | None = None
+    verbose: bool = False
+    debug: bool = False
+    output: str | None = None
+    format: str | None = None
+
+def _build_cli_options(kwargs: dict[str, str | int | bool | None]) -> CliOptions:
+    """Map Click's kwargs dict into a typed dataclass.
+
+    Click guarantees value types via each option's ``type=`` parameter,
+    so the casts below are safe.
+    """
+    name = kwargs.get("name")
+    count = kwargs.get("count")
+    output = kwargs.get("output")
+    fmt = kwargs.get("format")
+    return CliOptions(
+        name=str(name) if name is not None else None,
+        count=int(count) if count is not None else None,
+        verbose=bool(kwargs.get("verbose", False)),
+        debug=bool(kwargs.get("debug", False)),
+        output=str(output) if output is not None else None,
+        format=str(fmt) if fmt is not None else None,
+    )
+
+# Before: PLR0913 violation — one param per @click.option
+@click.command()
+@click.option("--name")
+@click.option("--count", type=int)
+@click.option("--verbose", is_flag=True)
+@click.option("--debug", is_flag=True)
+@click.option("--output")
+@click.option("--format")
+def main(name, count, verbose, debug, output, format):  # 6 args!
+    ...
+
+# After: capture with **kwargs, build typed object
+@click.command()
+@click.option("--name")
+@click.option("--count", type=int)
+@click.option("--verbose", is_flag=True)
+@click.option("--debug", is_flag=True)
+@click.option("--output")
+@click.option("--format")
+def main(**kwargs: str | int | bool | None) -> None:  # 1 param
+    options = _build_cli_options(kwargs)
+    ...
+```
+
+**Key notes for the `**kwargs` + Click pattern:**
+- Use `str | int | bool | None` as the kwargs type annotation to avoid ANN401 (`Any` disallowed)
+- `dict.get()` returns the full union type, so use explicit casts (`str(val)`, `int(val)`) with `is not None` guards to satisfy mypy
+- Click guarantees runtime types via each option's `type=` parameter, making the casts safe
+- The `_build_cli_options` helper keeps conversion logic testable and out of the callback
 
 Refactoring to reduce argument count improves:
 - **Readability**: Related parameters are clearly grouped together

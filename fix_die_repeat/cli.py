@@ -68,17 +68,7 @@ console = Console()
     envvar="FDR_DEBUG",
 )
 @click.version_option()
-def main(
-    check_cmd: str | None,
-    max_iters: int | None,
-    model: str | None,
-    max_pr_threads: int | None,
-    archive_artifacts: bool,
-    no_compact: bool,
-    pr_review: bool,
-    test_model: str | None,
-    debug: bool,
-) -> None:
+def main(**kwargs: str | int | bool | None) -> None:
     """Automated check, review, and fix loop using pi.
 
     \f
@@ -108,19 +98,9 @@ def main(
       fix-die-repeat --pr-review
 
     """
+    debug = bool(kwargs.get("debug", False))
     try:
-        # Create CLI options object
-        options = CliOptions(
-            check_cmd=check_cmd,
-            max_iters=max_iters,
-            model=model,
-            max_pr_threads=max_pr_threads,
-            archive_artifacts=archive_artifacts or None,
-            no_compact=no_compact,
-            pr_review=pr_review,
-            test_model=test_model,
-            debug=debug,
-        )
+        options = _build_cli_options(kwargs)
         _run_main(options)
 
     except ValueError as e:
@@ -134,6 +114,43 @@ def main(
         if debug:
             console.print(traceback.format_exc())
         sys.exit(1)
+
+
+def _build_cli_options(kwargs: dict[str, str | int | bool | None]) -> CliOptions:
+    """Build CliOptions from Click's keyword arguments.
+
+    Click passes each @click.option value as a keyword argument. This
+    function maps them into the CliOptions dataclass so downstream code
+    works with a typed object instead of a raw dict.
+
+    Click guarantees value types via each option's ``type=`` parameter,
+    so the casts below are safe.
+
+    Args:
+        kwargs: Keyword arguments injected by Click decorators
+
+    Returns:
+        CliOptions with CLI-provided overrides
+
+    """
+    check_cmd = kwargs.get("check_cmd")
+    max_iters = kwargs.get("max_iters")
+    model = kwargs.get("model")
+    max_pr_threads = kwargs.get("max_pr_threads")
+    test_model = kwargs.get("test_model")
+    archive_flag = kwargs.get("archive_artifacts")
+
+    return CliOptions(
+        check_cmd=str(check_cmd) if check_cmd is not None else None,
+        max_iters=int(max_iters) if max_iters is not None else None,
+        model=str(model) if model is not None else None,
+        max_pr_threads=int(max_pr_threads) if max_pr_threads is not None else None,
+        archive_artifacts=bool(archive_flag) if archive_flag else None,
+        no_compact=bool(kwargs.get("no_compact", False)),
+        pr_review=bool(kwargs.get("pr_review", False)),
+        test_model=str(test_model) if test_model is not None else None,
+        debug=bool(kwargs.get("debug", False)),
+    )
 
 
 def _run_main(options: CliOptions) -> int:
