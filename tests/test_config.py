@@ -1,19 +1,42 @@
 """Tests for config module."""
 
 import os
-import subprocess
+import shutil
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from fix_die_repeat.config import CliOptions, Paths, Settings, get_settings
+from fix_die_repeat.utils import run_command
 
 # Constants for default settings values
 DEFAULT_MAX_ITERS = 10
 DEFAULT_MAX_PR_THREADS = 5
 TEST_MAX_ITERS = 5
 TEST_MAX_PR_THREADS = 10
+
+
+def _git_executable() -> str:
+    """Return the absolute path to the git executable, or skip if unavailable."""
+    git_path = shutil.which("git")
+    if git_path is None:
+        pytest.skip("git executable is required for this test")
+    return git_path
+
+
+def _run_git_command(project_dir: Path, *args: str) -> None:
+    """Run a git command and assert success."""
+    git_executable = _git_executable()
+    returncode, _stdout, stderr = run_command([git_executable, *args], cwd=project_dir, check=False)
+    assert returncode == 0, stderr
+
+
+def _init_git_repo(project_dir: Path) -> None:
+    """Initialize a git repository for path-discovery tests."""
+    _run_git_command(project_dir, "init")
+    _run_git_command(project_dir, "config", "user.email", "test@example.com")
+    _run_git_command(project_dir, "config", "user.name", "Test User")
 
 
 class TestSettings:
@@ -99,19 +122,7 @@ class TestPaths:
         project_dir.mkdir()
 
         # Initialize git repo
-        subprocess.run(["git", "init"], cwd=project_dir, check=True, capture_output=True)
-        subprocess.run(
-            ["git", "config", "user.email", "test@example.com"],
-            cwd=project_dir,
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "config", "user.name", "Test User"],
-            cwd=project_dir,
-            check=True,
-            capture_output=True,
-        )
+        _init_git_repo(project_dir)
 
         paths = Paths(project_root=project_dir)
         assert paths.project_root == project_dir
@@ -124,19 +135,7 @@ class TestPaths:
         project_dir.mkdir()
 
         # Initialize git repo
-        subprocess.run(["git", "init"], cwd=project_dir, check=True, capture_output=True)
-        subprocess.run(
-            ["git", "config", "user.email", "test@example.com"],
-            cwd=project_dir,
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "config", "user.name", "Test User"],
-            cwd=project_dir,
-            check=True,
-            capture_output=True,
-        )
+        _init_git_repo(project_dir)
 
         # Change to git directory and create Paths without project_root
         original_cwd = Path.cwd()

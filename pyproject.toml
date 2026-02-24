@@ -41,7 +41,6 @@ lint.ignore = ["COM812", "D203", "D213"]
 ]
 "tests/*.py" = [
     "S101",    # Pytest idioms rely on assert statements; replacing them reduces failure introspection quality.
-    "S607",    # Test subprocess calls intentionally rely on PATH to mirror real user/runtime behavior.
     "SLF001",  # Tests exercise internal APIs intentionally when validating invariants not exposed publicly.
 ]
 
