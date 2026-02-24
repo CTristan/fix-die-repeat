@@ -1,6 +1,7 @@
 """Command-line interface for fix-die-repeat."""
 
 import sys
+import traceback
 
 import click
 from rich.console import Console
@@ -113,7 +114,7 @@ def main(
             check_cmd=check_cmd,
             max_iters=max_iters,
             model=model,
-            archive_artifacts=archive_artifacts if archive_artifacts else None,
+            archive_artifacts=archive_artifacts or None,
             no_compact=no_compact,
             pr_review=pr_review,
             test_model=test_model,
@@ -143,8 +144,6 @@ def main(
     except Exception as e:
         console.print(f"[red]Unexpected error: {e}[/red]")
         if debug:
-            import traceback
-
             console.print(traceback.format_exc())
         sys.exit(1)
 

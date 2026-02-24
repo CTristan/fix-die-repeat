@@ -31,7 +31,59 @@ build-backend = "hatchling.build"
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-lint.select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "RUF"]
+lint.select = ["ALL"]
+
+[tool.ruff.lint.per-file-ignores]
+"fix_die_repeat/runner.py" = [
+    "G004",    # Logging uses f-string for format string (custom Logger class)
+    "C901",    # check_oscillation() is complex (cyclomatic complexity)
+    "PLR0912", # Too many branches in integration-heavy methods
+    "PLR0915", # Too many statements in run() method
+    "G201",    # Logging check exception with custom Logger
+    "DTZ005",  # datetime.now() without timezone is acceptable for timestamps
+    "PLC0415", # Import outside top-level for dynamic imports
+    "TD002",   # TODO comments without author are acceptable
+    "TD003",   # TODO comments without issue link are acceptable
+    "FIX002",  # TODO comments are acceptable for future improvements
+    "TRY400",  # Bare except in logging error handler
+]
+"fix_die_repeat/cli.py" = [
+    "BLE001",  # Blind except in Click CLI entry point
+    "PLR0913", # Too many arguments in main() function (Click options)
+    "FBT001",  # Boolean positional args in function def (Click options)
+    "FBT002",  # Boolean positional args in function call (Click options)
+    "D301",    # Docstring triple quotes style (Click convention)
+]
+"fix_die_repeat/config.py" = [
+    "PLR0913", # Too many arguments in get_settings() function
+    "FBT001",  # Boolean positional args in function def (settings overrides)
+    "FBT002",  # Boolean positional args in function call
+    "PLC0415", # Import outside top-level for dynamic imports
+    "S607",    # Starting process with partial path (git commands)
+]
+"fix_die_repeat/utils.py" = [
+    "FBT001",  # Boolean positional args in function def (API defaults)
+    "FBT002",  # Boolean positional args in function call
+    "PLC0415", # Import outside top-level for dynamic imports
+    "S602",    # subprocess.call with shell=True (git commands require it)
+    "T201",    # print statement used for terminal bell
+    "DTZ005",  # datetime.now() without timezone is acceptable for timestamps
+    "TRY300",  # try except without else pattern in error handling
+    "PERF401", # Manual list comp preferred over join for clarity
+    "SIM110",  # Complex logic that could be simplified but is clearer as-is
+    "PLW1510", # subprocess.run without check (we handle return code)
+    "C901",    # Complex function in utility code
+]
+"fix_die_repeat/prompts.py" = [
+    "S701",    # Jinja2 autoescape disabled for code prompts
+    "ANN401",  # Any type annotation for **kwargs
+]
+"tests/*.py" = [
+    "S101",    # assert usage is expected in tests
+    "PLC0415", # Import outside top-level in tests
+    "PLR2004", # Magic values are acceptable in tests
+    "S607",    # Starting process with partial path for test commands
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["fix_die_repeat"]

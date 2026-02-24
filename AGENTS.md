@@ -316,13 +316,18 @@ ruff format fix_die_repeat tests
 
 **Per-File Exceptions Policy**: If a rule exception is ever required, configure it on a per-file basis in `pyproject.toml` under `[tool.ruff.lint.per-file-ignores]`, not by adding to global `ignore`.
 
-**Current state**: No per-file ruff ignores are configured.
+**Each per-file ignore entry must include a comment for each individual rule code explaining why the exception was needed.** This ensures that future maintainers understand the rationale for each rule and can reevaluate whether each exception is still appropriate.
+
+**Current state**: Per-file ruff ignores are configured for `runner.py`, `cli.py`, `config.py`, `utils.py`, `prompts.py`, and test files.
 
 To add a targeted exception (only when unavoidable), use:
 
 ```toml
 [tool.ruff.lint.per-file-ignores]
-"path/to/file.py" = ["RULE_CODE"]
+"path/to/file.py" = [
+    "RULE_CODE_1",  # Reason for this specific rule
+    "RULE_CODE_2",  # Reason for this specific rule
+]
 ```
 
 ### MyPy (Type Checking)

@@ -536,8 +536,7 @@ class PiRunner:
 
                 # Attach changed files in push mode
                 if context_mode == "push":
-                    for filepath in changed_files:
-                        pi_args.append(f"@{filepath}")
+                    pi_args.extend(f"@{filepath}" for filepath in changed_files)
 
                 prompt = render_prompt(
                     "fix_checks.j2",
@@ -741,7 +740,145 @@ class PiRunner:
             else:
                 self.logger.info("No unresolved threads found.")
         except (json.JSONDecodeError, KeyError) as e:
+            # Custom Logger doesn't support .exception() method
             self.logger.error(f"Failed to parse PR thread data: {e}")
+
+    def _generate_diff(self) -> str:
+        """Generate git diff for review.
+
+        Returns:
+            Diff content as string
+
+        """
+        diff_content = ""
+        if self.start_sha:
+            _returncode, diff_output, _ = run_command(f"git diff {self.start_sha}")
+            diff_content += diff_output
+        else:
+            _returncode, diff_output, _ = run_command("git diff HEAD")
+            diff_content += diff_output
+        return diff_content
+
+    def _add_untracked_files_diff(self, diff_content: str) -> str:
+        """Add pseudo-diff for untracked files.
+
+        Args:
+            diff_content: Existing diff content
+
+        Returns:
+            Diff content with untracked files added
+
+        """
+        returncode, new_files, _ = run_command("git ls-files --others --exclude-standard")
+        if returncode != 0:
+            return diff_content
+
+        for new_file in new_files.strip().split("\n"):
+            if not new_file or not (self.paths.project_root / new_file).is_file():
+                continue
+            if new_file.startswith(".fix-die-repeat") or is_excluded_file(Path(new_file).name):
+                continue
+
+            diff_content += self._create_pseudo_diff(new_file)
+
+        return diff_content
+
+    def _create_pseudo_diff(self, filepath: str) -> str:
+        """Create pseudo-diff for a single untracked file.
+
+        Args:
+            filepath: Path to the untracked file
+
+        Returns:
+            Pseudo-diff content
+
+        """
+        file_path = self.paths.project_root / filepath
+        pseudo_diff = (
+            f"diff --git a/{filepath} b/{filepath}\n"
+            "new file mode 100644\n"
+            "--- /dev/null\n"
+            f"+++ b/{filepath}\n"
+        )
+
+        try:
+            _returncode, file_type, _ = run_command(f"file {file_path}")
+            if "text" in file_type.lower():
+                for line in file_path.open():
+                    pseudo_diff += f"+{line}"
+            else:
+                pseudo_diff += f"Binary file {filepath} differs\n"
+        except OSError:
+            self.logger.debug_log(f"Failed to read file {filepath} for diff")
+
+        return pseudo_diff + "\n"
+
+    def _run_pi_review(self, diff_size: int) -> None:
+        """Run pi to review changes.
+
+        Args:
+            diff_size: Size of the diff in bytes
+
+        """
+        self.logger.info("[Step 5] Running pi to review files...")
+
+        pi_args = ["-p", "--tools", "read,write,grep,find,ls"]
+        review_prompt_prefix = self._build_review_prompt(diff_size, pi_args)
+
+        if self.paths.review_file.exists():
+            pi_args.append(f"@{self.paths.review_file}")
+
+        review_prompt = render_prompt(
+            "local_review.j2",
+            review_prompt_prefix=review_prompt_prefix,
+        )
+
+        returncode, _, _ = self.run_pi_safe(*pi_args, review_prompt)
+
+        if returncode != 0:
+            self.logger.info("pi review failed. Treating as no issues found.")
+            self.paths.review_current_file.touch()
+
+    def _build_review_prompt(self, diff_size: int, pi_args: list[str]) -> str:
+        """Build review prompt based on diff size.
+
+        Args:
+            diff_size: Size of the diff in bytes
+            pi_args: List to append diff file to if within threshold
+
+        Returns:
+            Review prompt prefix
+
+        """
+        if diff_size > self.settings.auto_attach_threshold:
+            self.logger.info("Review diff size exceeds threshold. Switching to PULL mode.")
+            return (
+                f"The changes are too large to attach automatically ({diff_size} bytes). "
+                "You MUST use the 'read' tool to inspect '.fix-die-repeat/changes.diff'.\n"
+            )
+
+        self.logger.info(
+            f"Review diff size ({diff_size} bytes) is within limits. Attaching changes.diff.",
+        )
+        pi_args.append(f"@{self.paths.diff_file}")
+        return (
+            "I have attached '.fix-die-repeat/changes.diff' which contains the changes "
+            "made in this session.\n"
+        )
+
+    def _append_review_entry(self) -> None:
+        """Append review entry to review file."""
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with self.paths.review_file.open("a") as f:
+            f.write(f"## Iteration {self.iteration} - Review ({timestamp})\n")
+            if (
+                self.paths.review_current_file.exists()
+                and self.paths.review_current_file.read_text()
+            ):
+                f.write(self.paths.review_current_file.read_text())
+            else:
+                f.write("_No issues found._\n")
+            f.write("\n")
 
     def _run_local_review(self, changed_files: list[str]) -> None:
         """Run local file review.
@@ -763,91 +900,18 @@ class PiRunner:
         # Generate diff
         self.logger.info("[Step 5] Generating diff for review...")
 
-        diff_content = ""
-        if self.start_sha:
-            returncode, diff_output, _ = run_command(f"git diff {self.start_sha}")
-            diff_content += diff_output
-        else:
-            returncode, diff_output, _ = run_command("git diff HEAD")
-            diff_content += diff_output
-
-        # Add pseudo-diff for untracked files
-        returncode, new_files, _ = run_command("git ls-files --others --exclude-standard")
-        if returncode == 0:
-            for new_file in new_files.strip().split("\n"):
-                if new_file and (self.paths.project_root / new_file).is_file():
-                    if not new_file.startswith(".fix-die-repeat") and not is_excluded_file(
-                        Path(new_file).name
-                    ):
-                        diff_content += f"diff --git a/{new_file} b/{new_file}\n"
-                        diff_content += "new file mode 100644\n"
-                        diff_content += "--- /dev/null\n"
-                        diff_content += f"+++ b/{new_file}\n"
-
-                        file_path = self.paths.project_root / new_file
-                        try:
-                            returncode, file_type, _ = run_command(f"file {file_path}")
-                            if "text" in file_type.lower():
-                                for line in file_path.open():
-                                    diff_content += f"+{line}"
-                            else:
-                                diff_content += f"Binary file {new_file} differs\n"
-                        except Exception:
-                            pass
-
-                        diff_content += "\n"
+        diff_content = self._generate_diff()
+        diff_content = self._add_untracked_files_diff(diff_content)
 
         self.paths.diff_file.write_text(diff_content)
         diff_size = get_file_size(self.paths.diff_file)
         self.logger.info(f"Generated review diff size: {diff_size} bytes")
 
         # Run pi review
-        self.logger.info("[Step 5] Running pi to review files...")
-
-        pi_args = ["-p", "--tools", "read,write,grep,find,ls"]
-
-        if diff_size > self.settings.auto_attach_threshold:
-            self.logger.info("Review diff size exceeds threshold. Switching to PULL mode.")
-            review_prompt_prefix = (
-                f"The changes are too large to attach automatically ({diff_size} bytes). "
-                "You MUST use the 'read' tool to inspect '.fix-die-repeat/changes.diff'.\n"
-            )
-        else:
-            self.logger.info(
-                f"Review diff size ({diff_size} bytes) is within limits. Attaching changes.diff.",
-            )
-            pi_args.append(f"@{self.paths.diff_file}")
-            review_prompt_prefix = (
-                "I have attached '.fix-die-repeat/changes.diff' which contains the changes "
-                "made in this session.\n"
-            )
-
-        if self.paths.review_file.exists():
-            pi_args.append(f"@{self.paths.review_file}")
-
-        review_prompt = render_prompt(
-            "local_review.j2",
-            review_prompt_prefix=review_prompt_prefix,
-        )
-
-        returncode, _, _ = self.run_pi_safe(*pi_args, review_prompt)
-
-        if returncode != 0:
-            self.logger.info("pi review failed. Treating as no issues found.")
-            self.paths.review_current_file.touch()
+        self._run_pi_review(diff_size)
 
         # Append review entry
-        timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-        with self.paths.review_file.open("a") as f:
-            f.write(f"## Iteration {self.iteration} - Review ({timestamp})\n")
-            if (
-                self.paths.review_current_file.exists()
-                and self.paths.review_current_file.read_text()
-            ):
-                f.write(self.paths.review_current_file.read_text())
-            else:
-                f.write("_No issues found._\n")
-            f.write("\n")
+        self._append_review_entry()
 
     def _process_review_results(self) -> None:
         """Process review results and fix issues if needed."""
@@ -989,7 +1053,7 @@ class PiRunner:
             return
 
         resolved_ids = self.paths.pr_resolved_threads_file.read_text().strip().split("\n")
-        resolved_ids = [id for id in resolved_ids if id]
+        resolved_ids = [thread_id for thread_id in resolved_ids if thread_id]
 
         if not resolved_ids:
             self.logger.info("No threads were reported as resolved. Continuing to next iteration.")

@@ -138,7 +138,7 @@ def run_command(
             raise subprocess.CalledProcessError(result.returncode, command)
         return (result.returncode, result.stdout or "", result.stderr or "")
     except FileNotFoundError:
-        return (127, "", f"Command not found: {command.split()[0]}")
+        return (127, "", f"Command not found: {command.split(maxsplit=1)[0]}")
 
 
 def get_git_revision_hash(file_path: Path) -> str:
@@ -155,10 +155,10 @@ def get_git_revision_hash(file_path: Path) -> str:
         return f"no_file_{file_path.name}"
 
     try:
-        returncode, stdout, _ = run_command(f"git hash-object {file_path}", check=False)
-        if returncode == 0:
+        git_returncode, stdout, _ = run_command(f"git hash-object {file_path}", check=False)
+        if git_returncode == 0:
             return stdout.strip()
-    except Exception:
+    except OSError:
         pass
 
     # Fallback to sha256
@@ -335,11 +335,7 @@ def is_excluded_file(filename: str, exclude_patterns: list[str] | None = None) -
         "*.min.*",
     ]
 
-    for pattern in exclude_patterns:
-        if fnmatch.fnmatch(filename.lower(), pattern.lower()):
-            return True
-
-    return False
+    return any(fnmatch.fnmatch(filename.lower(), pattern.lower()) for pattern in exclude_patterns)
 
 
 def play_completion_sound() -> None:

@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from fix_die_repeat.utils import (
     Logger,
     detect_large_files,
@@ -133,7 +131,7 @@ class TestSanitizeNtfyTopic:
 class TestLogger:
     """Tests for Logger class."""
 
-    def test_log_to_file(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    def test_log_to_file(self, tmp_path: Path) -> None:
         """Test logging to file."""
         log_file = tmp_path / "test.log"
         logger = Logger(fdr_log=log_file, session_log=None, debug=False)
@@ -144,7 +142,7 @@ class TestLogger:
         content = log_file.read_text()
         assert "Test message" in content
 
-    def test_debug_logging(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    def test_debug_logging(self, tmp_path: Path) -> None:
         """Test that debug messages only appear when debug is enabled."""
         log_file = tmp_path / "test.log"
         logger_debug = Logger(fdr_log=log_file, session_log=None, debug=True)
@@ -194,7 +192,7 @@ class TestGetChangedFiles:
         # Should return empty list or handle gracefully
         assert isinstance(files, list)
 
-    def test_excluded_patterns(self, tmp_path: Path) -> None:
+    def test_excluded_patterns(self) -> None:
         """Test that excluded patterns are filtered out."""
         from fix_die_repeat.utils import is_excluded_file
 

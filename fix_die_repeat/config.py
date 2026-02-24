@@ -118,10 +118,11 @@ class Settings(BaseSettings):
     def validate_max_iters(self) -> None:
         """Validate max_iters is a positive integer."""
         if self.max_iters <= 0:
-            raise ValueError(
-                "Invalid configuration: FDR_MAX_ITERS must be a positive integer "
-                f"(got '{self.max_iters}')",
+            message = (
+                f"Invalid configuration: FDR_MAX_ITERS must be a positive integer "
+                f"(got '{self.max_iters}')"
             )
+            raise ValueError(message)
 
 
 def get_settings(
