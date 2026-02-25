@@ -22,6 +22,7 @@ def _git_executable() -> str:
     git_path = shutil.which("git")
     if git_path is None:
         pytest.skip("git executable is required for this test")
+    assert git_path is not None  # pytest.skip() raises, so this is never None
     return git_path
 
 
