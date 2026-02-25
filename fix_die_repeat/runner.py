@@ -1499,13 +1499,35 @@ class PiRunner:
             self.logger.info(pr_threads_safe_only_message(len(safe_resolved_ids)))
 
         if safe_resolved_ids:
-            # Build JSON array
-            ids_json = json.dumps(list(safe_resolved_ids))
+            # Build GraphQL mutation to resolve review threads
+            mutation = """
+                mutation($threadIds: [ID!]!) {
+                    resolveReviewThread(input: {threadIds: $threadIds}) {
+                        threadIds
+                    }
+                }
+            """
+            mutation_single_line = " ".join(
+                line.strip() for line in mutation.splitlines() if line.strip()
+            )
+            variables = json.dumps({"threadIds": list(safe_resolved_ids)})
 
-            self.logger.info("Calling resolve_pr_threads on safe IDs: %s", ids_json)
-            self.before_pi_call()
-            returncode, _stdout, _stderr = run_command(
-                ["pi", "-p", f"resolve_pr_threads(threadIds: {ids_json})"],
+            self.logger.info(
+                "Resolving %s PR thread(s) via gh GraphQL: %s",
+                len(safe_resolved_ids),
+                variables,
+            )
+            returncode, gql_result, _ = run_command(
+                [
+                    "gh",
+                    "api",
+                    "graphql",
+                    "-f",
+                    f"query={mutation_single_line}",
+                    "-f",
+                    f"variables={variables}",
+                ],
+                cwd=self.paths.project_root,
             )
 
             if returncode == 0:
@@ -1533,7 +1555,13 @@ class PiRunner:
                     remaining_count,
                 )
             else:
-                self.logger.warning("Failed to resolve some threads. Continuing to next iteration.")
+                self.logger.warning(
+                    "Failed to resolve some threads (gh exit code %s). "
+                    "Continuing to next iteration.",
+                    returncode,
+                )
+                if gql_result:
+                    self.logger.debug("GraphQL error response: %s", gql_result)
         else:
             self.logger.info(
                 "No in-scope threads were reported as resolved. Continuing to next iteration.",
