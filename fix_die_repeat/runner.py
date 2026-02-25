@@ -55,6 +55,9 @@ class PiRunner:
         self.last_git_state = ""
         self.consecutive_toolless_attempts = 0
 
+        # Ensure .fix-die-repeat directory exists before creating logger
+        self.paths.ensure_fdr_dir()
+
         # Determine session log path
         if self.settings.debug:
             session_timestamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
