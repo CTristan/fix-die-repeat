@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: ['main', 'develop']
+  pull_request:
+    branches: ['main', 'develop']
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Create virtual environment
+        run: uv venv
+
+      - name: Install package with dev dependencies
+        run: uv pip install -e ".[dev]"
+
+      - name: Run CI script
+        run: ./scripts/ci.sh --check-only

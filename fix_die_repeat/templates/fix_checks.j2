@@ -1,0 +1,24 @@
+The file .fix-die-repeat/checks_filtered.log contains the failure output from `{{ check_cmd }}` (filtered to error-relevant lines; full log is in .fix-die-repeat/checks.log).
+{% if oscillation_warning %}
+{{ oscillation_warning }}
+{% endif %}
+{% if include_review_history %}
+I have attached .fix-die-repeat/review.md which contains history of previous iterations. Review it to avoid repeating mistakes.
+{% endif %}
+{% if include_build_history %}
+I have attached .fix-die-repeat/build_history.md which contains a summary of files you modified in previous attempts to fix the build. Use this to avoid repeating ineffective changes.
+{% endif %}
+{% if context_mode == "push" %}
+I have also attached the currently changed files for context.
+{% else %}
+{{ large_context_list }}
+{% endif %}
+{% if large_file_warning %}
+{{ large_file_warning }}
+{% endif %}
+
+Your goal is to FIX the errors. Follow this plan:
+1. ANALYZE the log and identify the root cause.
+2. PLAN your fix.
+3. APPLY the fix using 'edit'.
+4. VERIFY with a quick targeted check (e.g., compile the affected file, run the specific failing test). You MAY run the checks script (e.g., ./checks.sh or the command in `{{ check_cmd }}`) using the 'bash' tool to verify your fix. Prefer targeted invocations over running the full CI pipeline.

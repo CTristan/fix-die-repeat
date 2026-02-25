@@ -1,0 +1,10 @@
+# See https://pre-commit.com for more information
+repos:
+  - repo: local
+    hooks:
+      - id: project-ci
+        name: project-ci
+        entry: ./scripts/ci.sh
+        language: system
+        pass_filenames: false
+        always_run: true
