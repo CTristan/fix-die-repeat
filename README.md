@@ -48,18 +48,10 @@ This installs `fix-die-repeat` as a command on your PATH.
 ### Dev Install (editable)
 
 ```bash
-uv pip install -e .
+uv sync --all-extras
 ```
 
-Use this if you're developing on the project or want to run directly from the source directory.
-
-### Dev Install with testing tools
-
-```bash
-uv pip install -e ".[dev]"
-```
-
-Also installs pytest, ruff, and mypy.
+This installs the project in editable mode along with all dev dependencies (pytest, ruff, mypy, etc.) into a managed virtual environment. Use `uv run <command>` to invoke tools within it.
 
 ---
 
@@ -189,11 +181,17 @@ All state is stored in `.fix-die-repeat/`:
 | `build_history.md` | `git diff --stat` for changes made each iteration |
 | `checks.log` | Full output from check command |
 | `checks_filtered.log` | Error-relevant lines extracted from checks.log |
-| `checks_hashes` | History of check output hashes (for oscillation detection) |
+| `.checks_hashes` | History of check output hashes (for oscillation detection) |
 | `pi.log` | All pi invocations and their output |
 | `fdr.log` | *Fix-Die-Repeat* internal logging |
 | `session.log` | Combined output for current run (timestamped if debug mode) |
+| `changes.diff` | Git diff of all changes (used for review phase) |
+| `run_timestamps.md` | Start/end timestamps of each run |
 | `.start_sha` | Git commit SHA before any changes (for rollback) |
+| `.pr_threads_cache` | Cached PR threads markdown (avoids refetching) |
+| `.pr_threads_hash` | Cache key for PR threads (owner/repo/number) |
+| `.pr_thread_ids_in_scope` | Thread IDs from the original PR fetch (one per line) |
+| `.resolved_threads` | Thread IDs pi claimed to have fixed (one per line) |
 
 The `.fix-die-repeat/` directory is added to `.gitignore` automatically on first run.
 
@@ -371,38 +369,38 @@ git checkout <start-sha> -- .
 ### Install Dev Dependencies
 
 ```bash
-uv pip install -e ".[dev]"
+uv sync --all-extras
 ```
 
 ### Run Tests
 
 ```bash
-pytest
+uv run pytest
 ```
 
 ### Run Tests with Coverage
 
 ```bash
-pytest --cov=fix_die_repeat --cov-report=term-missing --cov-report=html
+uv run pytest --cov=fix_die_repeat --cov-report=term-missing --cov-report=html
 ```
 
 ### Lint
 
 ```bash
-ruff check fix_die_repeat tests
-ruff format fix_die_repeat tests
+uv run ruff check fix_die_repeat tests
+uv run ruff format fix_die_repeat tests
 ```
 
 ### Type Check
 
 ```bash
-mypy fix_die_repeat
+uv run mypy fix_die_repeat
 ```
 
 ### All Checks
 
 ```bash
-pytest && ruff check --fix fix_die_repeat tests && ruff format fix_die_repeat tests && mypy fix_die_repeat
+uv run pytest && uv run ruff check --fix fix_die_repeat tests && uv run ruff format fix_die_repeat tests && uv run mypy fix_die_repeat
 ```
 
 ---
@@ -413,6 +411,7 @@ pytest && ruff check --fix fix_die_repeat tests && ruff format fix_die_repeat te
 fix_die_repeat/
 ├── cli.py          # CLI — uses Click
 ├── config.py       # Settings and paths — uses Pydantic
+├── messages.py     # Constants and message generators for user-facing text
 ├── prompts.py      # Jinja template renderer for pi prompts
 ├── runner.py       # Main loop — orchestrates check/fix/review
 ├── utils.py        # Utilities — logging, git, file operations
@@ -440,20 +439,6 @@ fix_die_repeat/
 
 ---
 
-## Comparison to Original Bash Script
-
-The Python rewrite maintains feature parity with the original `~/.local/bin/fix-die-repeat` bash script, with these changes:
-
-| Aspect | Original | Python |
-|---------|-----------|---------|
-| Language | Bash | Python 3.12+ |
-| Configuration | Shell variables | Pydantic with env var support |
-| Logging | Echo to files | Structured logging with Rich |
-| Error handling | `set -euo pipefail` | Python exceptions |
-| Type hints | None | Full type hints throughout |
-
----
-
 ## Troubleshooting
 
 ### pi not found
@@ -474,7 +459,7 @@ Note: an empty `review_current.md` is treated as an ambiguous legacy fallback an
 
 ### "Edit commands failed" but files show as changed
 
-This typically means pi tried to edit but the old text didn't match exactly (whitespace, encoding differences). The tool will retry up to 3 times.
+This typically means pi tried to edit but the old text didn't match exactly (whitespace, encoding differences). The tool will retry once automatically via `run_pi_safe()`.
 
 ### Oscillation warning
 

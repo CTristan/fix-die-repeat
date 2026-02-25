@@ -1499,53 +1499,67 @@ class PiRunner:
             self.logger.info(pr_threads_safe_only_message(len(safe_resolved_ids)))
 
         if safe_resolved_ids:
-            # Build GraphQL mutation to resolve review threads
+            # Build GraphQL mutation to resolve a single review thread
+            # Note: resolveReviewThread only accepts one threadId at a time
             mutation = """
-                mutation($threadIds: [ID!]!) {
-                    resolveReviewThread(input: {threadIds: $threadIds}) {
-                        threadIds
+                mutation($threadId: ID!) {
+                    resolveReviewThread(input: {threadId: $threadId}) {
+                        thread {
+                            id
+                        }
                     }
                 }
             """
             mutation_single_line = " ".join(
                 line.strip() for line in mutation.splitlines() if line.strip()
             )
-            variables = json.dumps({"threadIds": list(safe_resolved_ids)})
+
+            # Resolve each thread individually (GitHub API limitation)
+            resolved_count = 0
+            for thread_id in safe_resolved_ids:
+                variables = json.dumps({"threadId": thread_id})
+                self.logger.info(
+                    "Resolving PR thread %s via gh GraphQL",
+                    thread_id,
+                )
+                returncode, gql_result, _ = run_command(
+                    [
+                        "gh",
+                        "api",
+                        "graphql",
+                        "-f",
+                        f"query={mutation_single_line}",
+                        "-f",
+                        f"variables={variables}",
+                    ],
+                    cwd=self.paths.project_root,
+                )
+
+                if returncode == 0:
+                    resolved_count += 1
+                else:
+                    self.logger.warning(
+                        "Failed to resolve thread %s (exit code: %s)",
+                        thread_id,
+                        returncode,
+                    )
 
             self.logger.info(
-                "Resolving %s PR thread(s) via gh GraphQL: %s",
+                "Successfully resolved %s of %s thread(s).",
+                resolved_count,
                 len(safe_resolved_ids),
-                variables,
             )
-            returncode, gql_result, _ = run_command(
-                [
-                    "gh",
-                    "api",
-                    "graphql",
-                    "-f",
-                    f"query={mutation_single_line}",
-                    "-f",
-                    f"variables={variables}",
-                ],
-                cwd=self.paths.project_root,
-            )
+            # Invalidate cache and refetch
+            self.paths.pr_threads_hash_file.unlink(missing_ok=True)
+            self.fetch_pr_threads()
 
-            if returncode == 0:
-                self.logger.info(
-                    "Successfully resolved %s thread(s).",
-                    len(safe_resolved_ids),
-                )
-                # Invalidate cache and refetch
-                self.paths.pr_threads_hash_file.unlink(missing_ok=True)
-                self.fetch_pr_threads()
-
-                if (
-                    not self.paths.review_current_file.exists()
-                    or not self.paths.review_current_file.read_text().strip()
-                ):
-                    self.logger.info("All PR threads have been resolved! Exiting successfully.")
-                    play_completion_sound()
-                    sys.exit(0)
+            if (
+                not self.paths.review_current_file.exists()
+                or not self.paths.review_current_file.read_text().strip()
+            ):
+                self.logger.info("All PR threads have been resolved! Exiting successfully.")
+                play_completion_sound()
+                sys.exit(0)
 
                 remaining_count = self.paths.review_current_file.read_text().count(
                     "--- Thread #",
