@@ -87,6 +87,13 @@ class Settings(BaseSettings):
         description="ntfy server URL",
     )
 
+    # Confidence threshold
+    confidence_threshold: float = pyd.Field(
+        default=0.8,
+        alias="FDR_CONFIDENCE_THRESHOLD",
+        description="Minimum confidence threshold (0-1) before triggering interactive mode",
+    )
+
     # Thresholds
     auto_attach_threshold: int = pyd.Field(
         default=200 * 1024,
@@ -229,6 +236,7 @@ class Paths:
         self.pr_resolved_threads_file = self.fdr_dir / ".resolved_threads"
         self.diff_file = self.fdr_dir / "changes.diff"
         self.run_timestamps_file = self.fdr_dir / "run_timestamps.md"
+        self.low_confidence_concerns_file = self.fdr_dir / "low_confidence_concerns.md"
 
     @staticmethod
     def _find_project_root() -> Path:

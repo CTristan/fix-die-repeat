@@ -19,6 +19,8 @@ from fix_die_repeat.utils import (
     get_file_size,
     get_git_revision_hash,
     is_excluded_file,
+    launch_interactive_pi,
+    parse_confidence,
     play_completion_sound,
     run_command,
     sanitize_ntfy_topic,
@@ -585,3 +587,113 @@ class TestPlayCompletionSoundFallback:
         )
         mock_write.assert_called_once_with("\a")
         mock_flush.assert_called_once()
+
+
+class TestParseConfidence:
+    """Tests for parse_confidence function."""
+
+    def test_parse_confidence_high_value(self) -> None:
+        """Test parsing high confidence value."""
+        text = "Here is my answer.\nCONFIDENCE=0.95"
+        assert parse_confidence(text) == 0.95
+
+    def test_parse_confidence_low_value(self) -> None:
+        """Test parsing low confidence value."""
+        text = "I'm not sure about this.\nCONFIDENCE=0.45"
+        assert parse_confidence(text) == 0.45
+
+    def test_parse_confidence_integer_value(self) -> None:
+        """Test parsing integer confidence value."""
+        text = "Done.\nCONFIDENCE=1"
+        assert parse_confidence(text) == 1.0
+
+    def test_parse_confidence_zero(self) -> None:
+        """Test parsing zero confidence."""
+        text = "I have no idea.\nCONFIDENCE=0"
+        assert parse_confidence(text) == 0.0
+
+    def test_parse_confidence_missing(self) -> None:
+        """Test when confidence footer is missing."""
+        text = "Here is my answer without confidence."
+        assert parse_confidence(text) == 1.0
+
+    def test_parse_confidence_uses_last_match(self) -> None:
+        """Test that the last CONFIDENCE line is used."""
+        text = "First thought CONFIDENCE=0.3\nRevised thought CONFIDENCE=0.7"
+        assert parse_confidence(text) == 0.7
+
+    def test_parse_confidence_with_extra_content(self) -> None:
+        """Test parsing confidence from full response."""
+        text = """
+        I've analyzed the code and found several issues.
+
+        1. Missing error handling
+        2. Off-by-one error in loop
+        3. Unused variable
+
+        I'm confident these are the root causes.
+        CONFIDENCE=0.87
+        """
+        assert parse_confidence(text) == 0.87
+
+    def test_parse_confidence_invalid_format(self) -> None:
+        """Test handling of malformed confidence line."""
+        text = "Here is my answer.\nCONFIDENCE=invalid"
+        # Should return default when parsing fails
+        result = parse_confidence(text)
+        assert result == 1.0
+
+    def test_parse_confidence_multiple_mentions(self) -> None:
+        """Test with multiple confidence mentions in text."""
+        text = """
+        My initial confidence was CONFIDENCE=0.5
+        After deeper analysis, my confidence is CONFIDENCE=0.8
+        Final assessment CONFIDENCE=0.85
+        """
+        assert parse_confidence(text) == 0.85
+
+
+class TestLaunchInteractivePi:
+    """Tests for launch_interactive_pi function."""
+
+    @patch("fix_die_repeat.utils.run_command")
+    def test_launch_interactive_pi_with_prompt(self, mock_run: MagicMock) -> None:
+        """Test launching interactive pi with a prompt."""
+        launch_interactive_pi("What should I do?", cwd=None)
+
+        mock_run.assert_called_once_with(
+            ["pi", "What should I do?"],
+            cwd=None,
+            capture_output=False,
+            check=False,
+        )
+
+    @patch("fix_die_repeat.utils.run_command")
+    def test_launch_interactive_pi_without_prompt(self, mock_run: MagicMock) -> None:
+        """Test launching interactive pi without a prompt."""
+        launch_interactive_pi("", cwd=None)
+
+        mock_run.assert_called_once_with(
+            ["pi"],
+            cwd=None,
+            capture_output=False,
+            check=False,
+        )
+
+    @patch("fix_die_repeat.utils.run_command")
+    def test_launch_interactive_pi_with_cwd(
+        self,
+        mock_run: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test launching interactive pi with custom working directory."""
+        test_path = tmp_path / "test"
+        test_path.mkdir()
+        launch_interactive_pi("Help me", cwd=test_path)
+
+        mock_run.assert_called_once_with(
+            ["pi", "Help me"],
+            cwd=test_path,
+            capture_output=False,
+            check=False,
+        )

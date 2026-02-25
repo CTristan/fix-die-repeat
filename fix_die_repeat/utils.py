@@ -14,6 +14,8 @@ from rich.logging import RichHandler
 
 from fix_die_repeat.messages import build_large_file_warning
 
+CONFIDENCE_PATTERN = re.compile(r"CONFIDENCE=(\d*\.?\d+)")
+
 console = Console()
 LOG_FORMAT = "[%(asctime)s] [fdr] [%(levelname)s] %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -422,3 +424,47 @@ def send_ntfy_notification(
 
     if logger:
         logger.debug("Sent ntfy notification to %s/%s", ntfy_url, topic)
+
+
+def parse_confidence(text: str) -> float:
+    """Parse confidence value from pi output.
+
+    Looks for CONFIDENCE=<number> in the text. The last occurrence
+    is used to account for any intermediate mentions.
+
+    Args:
+        text: Text to search for confidence value
+
+    Returns:
+        Confidence value between 0 and 1. Returns 1.0 if not found.
+
+    """
+    matches = list(CONFIDENCE_PATTERN.finditer(text))
+    if not matches:
+        return 1.0
+
+    # Use last match
+    last_match = matches[-1]
+    try:
+        return float(last_match.group(1))
+    except (ValueError, IndexError):
+        return 1.0
+
+
+def launch_interactive_pi(
+    prompt: str,
+    cwd: Path | None = None,
+) -> None:
+    """Launch an interactive pi session.
+
+    Args:
+        prompt: Initial prompt for the session
+        cwd: Working directory for the session
+
+    """
+    cmd_args = ["pi"]
+    if prompt:
+        cmd_args.append(prompt)
+
+    # Run without capturing output for interactive mode
+    run_command(cmd_args, cwd=cwd, capture_output=False, check=False)

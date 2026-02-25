@@ -27,6 +27,8 @@ from fix_die_repeat.utils import (
     get_file_size,
     get_git_revision_hash,
     is_excluded_file,
+    launch_interactive_pi,
+    parse_confidence,
     play_completion_sound,
     run_command,
     send_ntfy_notification,
@@ -71,12 +73,38 @@ class PiRunner:
             session_log=self.session_log,
             debug=self.settings.debug,
         )
+        self.last_prompt = ""  # Track last prompt sent to pi for context
 
     def before_pi_call(self) -> None:
         """Add delay between sequential pi calls to reduce lock contention."""
         if self.pi_invocation_count > 0:
             time.sleep(self.settings.pi_sequential_delay_seconds)
         self.pi_invocation_count += 1
+
+    def handle_low_confidence(self, context: str) -> None:
+        """Handle low confidence by launching interactive pi for human clarification.
+
+        Args:
+            context: Context description for the interactive session
+
+        """
+        self.logger.warning(
+            "Confidence below threshold (%s). Launching interactive session...",
+            self.settings.confidence_threshold,
+        )
+
+        prompt = render_prompt(
+            "ask_clarifying_questions.j2",
+            context=context,
+        )
+
+        self.logger.info(
+            "Launching interactive pi to ask clarifying questions. "
+            "Answer the questions and exit pi to resume the loop.",
+        )
+        launch_interactive_pi(prompt, cwd=self.paths.project_root)
+
+        self.logger.info("Interactive session closed. Resuming loop...")
 
     def run_pi(self, *args: str) -> tuple[int, str, str]:
         """Run pi command with logging.
@@ -112,7 +140,7 @@ class PiRunner:
         return (returncode, stdout, stderr)
 
     def run_pi_safe(self, *args: str) -> tuple[int, str, str]:
-        """Run pi with single retry on failure.
+        """Run pi with single retry on failure and confidence checking.
 
         Args:
             *args: Arguments to pass to pi
@@ -121,9 +149,29 @@ class PiRunner:
             Tuple of (exit_code, stdout, stderr)
 
         """
+        # Store prompt for context (last argument is the actual prompt text)
+        if args:
+            self.last_prompt = args[-1]
+
         returncode, stdout, stderr = self.run_pi(*args)
 
+        # Check confidence on success
         if returncode == 0:
+            confidence = parse_confidence(stdout)
+            self.logger.debug(
+                "Detected confidence: %s (threshold: %s)",
+                confidence,
+                self.settings.confidence_threshold,
+            )
+            if confidence < self.settings.confidence_threshold:
+                # Launch interactive session for clarification
+                self.handle_low_confidence(
+                    context=(
+                        "pi completed with low confidence. "
+                        f"Confidence was {confidence:.2f}, "
+                        f"threshold is {self.settings.confidence_threshold}."
+                    ),
+                )
             return (returncode, stdout, stderr)
 
         # Detect capacity error (503)
@@ -521,6 +569,7 @@ class PiRunner:
             context_mode=context_mode,
             large_context_list=large_context_list,
             large_file_warning=large_file_warning,
+            threshold=self.settings.confidence_threshold,
         )
 
         self.logger.info("Running pi to fix errors (attempt %s)...", fix_attempt)
@@ -1027,6 +1076,7 @@ class PiRunner:
             unresolved_count=len(threads),
             pr_number=pr_number,
             pr_url=pr_url,
+            threshold=self.settings.confidence_threshold,
         )
 
         return f"{header}\n\n" + "\n".join(threads_output)
@@ -1197,6 +1247,7 @@ class PiRunner:
         review_prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix=review_prompt_prefix,
+            threshold=self.settings.confidence_threshold,
         )
 
         returncode, _, _ = self.run_pi_safe(*pi_args, review_prompt)
@@ -1378,7 +1429,10 @@ class PiRunner:
             pi_args.append(f"@{self.paths.review_recent_file}")
 
         # Build fix prompt
-        fix_prompt = render_prompt("resolve_review_issues.j2")
+        fix_prompt = render_prompt(
+            "resolve_review_issues.j2",
+            threshold=self.settings.confidence_threshold,
+        )
 
         returncode, _, _ = self.run_pi_safe(*pi_args, fix_prompt)
 

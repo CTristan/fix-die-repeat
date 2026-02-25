@@ -14,7 +14,8 @@ Fix. Die. Repeat. runs a loop:
 2. **If checks fail** → invokes pi to fix the errors
 3. **If checks pass** → invokes pi to review your changes
 4. **If review finds issues** → invokes pi to fix them
-5. **Repeats** until checks pass and review finds no issues
+5. **If pi reports low confidence** (<80% by default) → launches an interactive pi session to ask you clarifying questions
+6. **Repeats** until checks pass and review finds no issues
 
 ## Installation
 
@@ -126,6 +127,7 @@ fix-die-repeat
 | `FDR_DEBUG` | Enable debug mode | `0` |
 | `FDR_NTFY_ENABLED` | Enable ntfy notifications | `1` |
 | `FDR_NTFY_URL` | ntfy server URL | `http://localhost:2586` |
+| `FDR_CONFIDENCE_THRESHOLD` | Minimum confidence (0-1) before triggering interactive mode | `0.8` |
 
 ---
 
@@ -146,6 +148,14 @@ fix-die-repeat
    - If pi finds [CRITICAL] issues, write them to `.fix-die-repeat/review_current.md`
    - If pi finds no issues, write the explicit `NO_ISSUES` marker to `.fix-die-repeat/review_current.md`
 4. **Resolution Phase** (if review found issues):
+   - Invoke pi with `review_current.md` to fix issues
+   - If in PR review mode, track which threads were resolved
+   - Loop back to check phase
+5. **Confidence Check**: After each successful pi invocation, check the output for a `CONFIDENCE=` footer:
+   - If confidence is below the threshold (default 0.8), launch an interactive pi session
+   - The interactive session asks clarifying questions to help proceed with higher confidence
+   - After you answer and exit the interactive session, the loop automatically resumes
+   - Loop back to check phase
    - Invoke pi with `review_current.md` to fix issues
    - If in PR review mode, track which threads were resolved
    - Loop back to check phase
@@ -471,6 +481,29 @@ Ensure:
 - You're on a branch that has an associated PR
 - Run `gh pr view --web` to verify the PR exists
 - Run `gh auth status` to verify you're authenticated
+
+### "Low confidence detected" message
+
+When pi reports confidence below the threshold (default 0.8), the tool launches an interactive pi session to ask you clarifying questions. This is intentional behavior to get human guidance when pi is uncertain.
+
+**What happens**:
+1. An interactive pi session opens with context about the low-confidence situation
+2. Pi asks one clarifying question at a time
+3. Answer the questions asked by pi
+4. Exit the interactive session (Ctrl+C twice or `/quit`)
+5. The fix-die-repeat loop automatically resumes and re-runs checks
+
+**To adjust the threshold**:
+```bash
+export FDR_CONFIDENCE_THRESHOLD=0.7  # Lower threshold to 70%
+fix-die-repeat
+```
+
+**To disable interactive mode**, set threshold to 0:
+```bash
+export FDR_CONFIDENCE_THRESHOLD=0  # Never trigger interactive mode
+fix-die-repeat
+```
 
 ---
 

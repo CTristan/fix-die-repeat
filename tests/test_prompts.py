@@ -20,6 +20,7 @@ class TestRenderPrompt:
             context_mode="pull",
             large_context_list="- app.py\n- tests/test_app.py",
             large_file_warning="CRITICAL WARNING: large file",
+            threshold=0.8,
         )
 
         assert "`pytest`" in prompt
@@ -28,6 +29,7 @@ class TestRenderPrompt:
         assert ".fix-die-repeat/build_history.md" in prompt
         assert "- app.py" in prompt
         assert "CRITICAL WARNING: large file" in prompt
+        assert "below 0.8" in prompt
 
     def test_fix_checks_template_without_optional_sections(self) -> None:
         """Render fix_checks prompt without optional sections."""
@@ -40,12 +42,14 @@ class TestRenderPrompt:
             context_mode="push",
             large_context_list="",
             large_file_warning="",
+            threshold=0.7,
         )
 
         assert "`./scripts/ci.sh`" in prompt
         assert ".fix-die-repeat/review.md" not in prompt
         assert ".fix-die-repeat/build_history.md" not in prompt
         assert "I have also attached the currently changed files for context." in prompt
+        assert "below 0.7" in prompt
 
     def test_missing_template_context_raises(self) -> None:
         """Raise when required template variables are missing."""

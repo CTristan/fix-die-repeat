@@ -100,6 +100,7 @@ Configuration with environment variable support via Pydantic.
 - `pi_sequential_delay_seconds`: `1`
 - `ntfy_enabled`: `True`
 - `ntfy_url`: `"http://localhost:2586"`
+- `confidence_threshold`: `0.8` - Minimum confidence threshold (0-1) before triggering interactive mode
 
 **Optional/Null Defaults**:
 - `model`: `None`
@@ -158,6 +159,7 @@ Prompt text is stored in Jinja templates under `fix_die_repeat/templates/` and r
 - `local_review.j2` - Prompt for local review of generated diff
 - `resolve_review_issues.j2` - Prompt for applying review fixes
 - `pr_threads_header.j2` - Header/instructions for fetched PR thread context
+- `ask_clarifying_questions.j2` - Prompt for interactive clarification when confidence is low
 
 ---
 
@@ -240,6 +242,25 @@ if current_review_hash == last_review_hash and current_git_state == last_git_sta
         logger.error("No progress made after 3 iterations in PR review mode.")
         sys.exit(1)
 ```
+
+### 7. Confidence-Based Interactive Mode
+
+After each successful pi invocation, the runner parses the output for a confidence footer (`CONFIDENCE=<number>` where number is 0-1). If confidence is below the threshold (default 0.8), an interactive pi session is launched to ask clarifying questions:
+
+```python
+# In run_pi_safe(), after successful pi call
+confidence = parse_confidence(stdout)
+if confidence < self.settings.confidence_threshold:
+    self.handle_low_confidence(
+        context=f"Confidence was {confidence:.2f}, threshold is {self.settings.confidence_threshold}."
+    )
+```
+
+The interactive session uses the `ask_clarifying_questions.j2` template to prompt the human for guidance one question at a time. After the user answers and exits the interactive pi session, the fix-die-repeat loop **automatically resumes** and re-runs checks to validate any changes made during the interactive session.
+
+**Why**: This enables human-in-the-loop workflows while maintaining automation. It's designed for future Slack integration where the human may respond asynchronously via a chat interface, and the loop can continue without manual restart.
+
+**Prompts**: All pi prompts now require a `CONFIDENCE=` footer as a machine-parseable signal. The `parse_confidence()` utility function extracts the last occurrence to handle any intermediate mentions.
 
 ---
 

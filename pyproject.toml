@@ -41,6 +41,8 @@ lint.ignore = ["COM812", "D203", "D213"]
 ]
 "tests/*.py" = [
     "S101",  # Pytest idioms rely on assert statements; replacing them reduces failure introspection quality.
+    "PLR2004",  # Magic values in test assertions are test data, not production magic values.
+    "S108",  # Using /tmp/test in tests is not a security concern.
 ]
 
 [tool.ruff.lint.isort]
