@@ -1,20 +1,35 @@
 # Fix. Die. Repeat.
 
-> *"I'm not going to give up on this. Not today, not tomorrow, not ever."* — Cage, Live. Die. Repeat.
+> *"I'm not going to give up on this. Not today, not tomorrow, not ever."* — *Live. Die. Repeat.* aka *Edge of Tomorrow*
 
-Automated check, review, and fix loop using [pi](https://github.com/mariozechner/pi).
+A relentless check → fix → review loop powered by [pi](https://github.com/mariozechner/pi).
+
+This tool is a polite form of cruelty: it traps your coding agent in a time loop until reality stabilizes.
 
 ---
 
+## The Premise
+
+In *Live. Die. Repeat.* aka *Edge of Tomorrow*, a soldier relives the same day until the battle finally goes right.
+
+*Fix-Die-Repeat* does the same thing to your repository:
+
+- **The “day”**: one full iteration of checks and review
+- **The “death”**: a failing check or a critical review finding
+- **The “reset”**: run pi, apply changes, and start the day again
+- **The “escape”**: checks pass *and* the review reports `NO_ISSUES`
+
+It’s Groundhog Day, but for CI.
+
 ## What It Does
 
-Fix. Die. Repeat. runs a loop:
+*Fix-Die-Repeat* runs a loop (a.k.a. one more reset):
 
-1. **Runs your check command** (e.g., `./scripts/ci.sh`, `pytest`)
-2. **If checks fail** → invokes pi to fix the errors
-3. **If checks pass** → invokes pi to review your changes
-4. **If review finds issues** → invokes pi to fix them
-5. **Repeats** until checks pass and review finds no issues
+1. **Run your check command** (e.g., `./scripts/ci.sh`, `pytest`)
+2. **If checks fail** → the loop “kills” the run and pi attempts a fix
+3. **If checks pass** → pi reviews the diff for problems
+4. **If review finds issues** → pi fixes them and the day restarts
+5. **Repeat** until the run survives both checks *and* review
 
 ## Installation
 
@@ -131,25 +146,25 @@ fix-die-repeat
 
 ## How It Works
 
-### The Loop
+### The Time Loop
 
-1. **Check Phase**: Run your check command. If exit code is 0 → success. If non-zero → continue to fix phase.
-2. **Fix Phase** (if checks failed):
+1. **Checkpoint**: Record the starting commit SHA (for rollback).
+2. **Check Phase**: Run your check command.
+   - Exit code **0** → proceed.
+   - Non-zero → the run “dies” and we enter Fix Phase.
+3. **Fix Phase** (only if checks failed):
    - Filter check output to error-relevant lines
    - Collect changed files as context (up to 200KB total)
    - Invoke pi with the filtered errors to fix them
    - Re-run checks
-   - Repeat until checks pass
-3. **Review Phase** (if checks passed):
+4. **Review Phase** (only if checks passed):
    - Generate a git diff of all changes
    - Invoke pi to review for issues
-   - If pi finds [CRITICAL] issues, write them to `.fix-die-repeat/review_current.md`
+   - If pi finds **[CRITICAL]** issues, write them to `.fix-die-repeat/review_current.md`
    - If pi finds no issues, write the explicit `NO_ISSUES` marker to `.fix-die-repeat/review_current.md`
-4. **Resolution Phase** (if review found issues):
-   - Invoke pi with `review_current.md` to fix issues
-   - If in PR review mode, track which threads were resolved
-   - Loop back to check phase
-5. **Exit**: When checks pass and `review_current.md` contains the `NO_ISSUES` marker
+5. **Reset or Escape**:
+   - If `review_current.md` contains issues → invoke pi to fix them, then reset back to Check Phase.
+   - If `review_current.md` contains `NO_ISSUES` → escape the loop and exit successfully.
 
 ### Context Management
 
@@ -161,7 +176,7 @@ To avoid exceeding pi's context limit:
 
 ### Oscillation Detection
 
-The tool tracks git hashes of check output. If the current output matches a previous iteration's output, it warns: *"Check output is IDENTICAL to iteration X. You are going in CIRCLES."*
+The tool tracks hashes of the check output. If the current output matches a previous iteration, it warns: *"Check output is IDENTICAL to iteration X. You are going in CIRCLES."* In movie terms: you’re waking up on the same beach again—time to change tactics.
 
 ### State Storage
 
@@ -176,7 +191,7 @@ All state is stored in `.fix-die-repeat/`:
 | `checks_filtered.log` | Error-relevant lines extracted from checks.log |
 | `checks_hashes` | History of check output hashes (for oscillation detection) |
 | `pi.log` | All pi invocations and their output |
-| `fdr.log` | Fix. Die. Repeat. internal logging |
+| `fdr.log` | *Fix-Die-Repeat* internal logging |
 | `session.log` | Combined output for current run (timestamped if debug mode) |
 | `.start_sha` | Git commit SHA before any changes (for rollback) |
 
@@ -338,7 +353,7 @@ fix-die-repeat
 
 | Code | Meaning |
 |-------|----------|
-| 0 | Success — all checks pass and no review issues |
+| 0 | Success — escaped the loop (checks pass and review reports no issues) |
 | 1 | Failure — max iterations exceeded or unexpected error |
 | 130 | Interrupted by user (Ctrl+C) |
 
@@ -483,8 +498,7 @@ MIT
 ## Acknowledgments
 
 - [pi](https://github.com/mariozechner/pi) — AI coding agent
-- Original bash script by the same author
 
 ---
 
-> *"Get me an Alpha. Kill it."* — Cage, Live. Die. Repeat.
+> *"On your feet, maggot."* — a suspiciously familiar sergeant, probably
