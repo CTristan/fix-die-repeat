@@ -501,4 +501,4 @@ MIT
 
 ---
 
-> *"On your feet, maggot."* — a suspiciously familiar sergeant, probably
+> *"On your feet, maggot."*
