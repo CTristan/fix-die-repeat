@@ -1499,32 +1499,67 @@ class PiRunner:
             self.logger.info(pr_threads_safe_only_message(len(safe_resolved_ids)))
 
         if safe_resolved_ids:
-            # Build JSON array
-            ids_json = json.dumps(list(safe_resolved_ids))
-
-            self.logger.info("Calling resolve_pr_threads on safe IDs: %s", ids_json)
-            self.before_pi_call()
-            returncode, _stdout, _stderr = run_command(
-                ["pi", "-p", f"resolve_pr_threads(threadIds: {ids_json})"],
+            # Build GraphQL mutation to resolve a single review thread
+            # Note: resolveReviewThread only accepts one threadId at a time
+            mutation = """
+                mutation($threadId: ID!) {
+                    resolveReviewThread(input: {threadId: $threadId}) {
+                        thread {
+                            id
+                        }
+                    }
+                }
+            """
+            mutation_single_line = " ".join(
+                line.strip() for line in mutation.splitlines() if line.strip()
             )
 
-            if returncode == 0:
+            # Resolve each thread individually (GitHub API limitation)
+            resolved_count = 0
+            for thread_id in safe_resolved_ids:
                 self.logger.info(
-                    "Successfully resolved %s thread(s).",
-                    len(safe_resolved_ids),
+                    "Resolving PR thread %s via gh GraphQL",
+                    thread_id,
                 )
-                # Invalidate cache and refetch
-                self.paths.pr_threads_hash_file.unlink(missing_ok=True)
-                self.fetch_pr_threads()
+                returncode, _gql_result, _ = run_command(
+                    [
+                        "gh",
+                        "api",
+                        "graphql",
+                        "-f",
+                        f"query={mutation_single_line}",
+                        "-F",
+                        f"threadId={thread_id}",
+                    ],
+                    cwd=self.paths.project_root,
+                )
 
-                if (
-                    not self.paths.review_current_file.exists()
-                    or not self.paths.review_current_file.read_text().strip()
-                ):
-                    self.logger.info("All PR threads have been resolved! Exiting successfully.")
-                    play_completion_sound()
-                    sys.exit(0)
+                if returncode == 0:
+                    resolved_count += 1
+                else:
+                    self.logger.warning(
+                        "Failed to resolve thread %s (exit code: %s)",
+                        thread_id,
+                        returncode,
+                    )
 
+            self.logger.info(
+                "Successfully resolved %s of %s thread(s).",
+                resolved_count,
+                len(safe_resolved_ids),
+            )
+            # Invalidate cache and refetch
+            self.paths.pr_threads_hash_file.unlink(missing_ok=True)
+            self.fetch_pr_threads()
+
+            if (
+                not self.paths.review_current_file.exists()
+                or not self.paths.review_current_file.read_text().strip()
+            ):
+                self.logger.info("All PR threads have been resolved! Exiting successfully.")
+                play_completion_sound()
+                sys.exit(0)
+            else:
                 remaining_count = self.paths.review_current_file.read_text().count(
                     "--- Thread #",
                 )
@@ -1532,8 +1567,6 @@ class PiRunner:
                     "%s PR threads remain. Continuing to next iteration.",
                     remaining_count,
                 )
-            else:
-                self.logger.warning("Failed to resolve some threads. Continuing to next iteration.")
         else:
             self.logger.info(
                 "No in-scope threads were reported as resolved. Continuing to next iteration.",
