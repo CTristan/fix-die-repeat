@@ -1517,20 +1517,19 @@ class PiRunner:
             # Resolve each thread individually (GitHub API limitation)
             resolved_count = 0
             for thread_id in safe_resolved_ids:
-                variables = json.dumps({"threadId": thread_id})
                 self.logger.info(
                     "Resolving PR thread %s via gh GraphQL",
                     thread_id,
                 )
-                returncode, gql_result, _ = run_command(
+                returncode, _gql_result, _ = run_command(
                     [
                         "gh",
                         "api",
                         "graphql",
                         "-f",
                         f"query={mutation_single_line}",
-                        "-f",
-                        f"variables={variables}",
+                        "-F",
+                        f"threadId={thread_id}",
                     ],
                     cwd=self.paths.project_root,
                 )
@@ -1560,7 +1559,7 @@ class PiRunner:
                 self.logger.info("All PR threads have been resolved! Exiting successfully.")
                 play_completion_sound()
                 sys.exit(0)
-
+            else:
                 remaining_count = self.paths.review_current_file.read_text().count(
                     "--- Thread #",
                 )
@@ -1568,14 +1567,6 @@ class PiRunner:
                     "%s PR threads remain. Continuing to next iteration.",
                     remaining_count,
                 )
-            else:
-                self.logger.warning(
-                    "Failed to resolve some threads (gh exit code %s). "
-                    "Continuing to next iteration.",
-                    returncode,
-                )
-                if gql_result:
-                    self.logger.debug("GraphQL error response: %s", gql_result)
         else:
             self.logger.info(
                 "No in-scope threads were reported as resolved. Continuing to next iteration.",
