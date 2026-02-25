@@ -88,7 +88,7 @@ class TestRunPi:
         runner.settings = settings
         runner.paths = paths
         runner.logger = MagicMock()
-        runner._emergency_compact = MagicMock()  # type: ignore[method-assign]
+        runner.emergency_compact = MagicMock()  # type: ignore[method-assign]
         runner.run_pi = MagicMock(  # type: ignore[method-assign]
             side_effect=[(1, "", ""), (0, "", "")],
         )
@@ -96,7 +96,7 @@ class TestRunPi:
         returncode, _stdout, _stderr = runner.run_pi_safe("-p", "fix")
 
         assert returncode == 0
-        runner._emergency_compact.assert_called_once()
+        runner.emergency_compact.assert_called_once()
 
 
 class TestModelAndSetup:
@@ -162,7 +162,7 @@ class TestModelAndSetup:
         assert not test_file.exists()
 
     def test_setup_run_archives_artifacts(self, tmp_path: Path) -> None:
-        """Test _setup_run archives existing artifacts and writes logs."""
+        """Test setup_run archives existing artifacts and writes logs."""
         settings = MagicMock()
         settings.archive_artifacts = True
         settings.test_model = None
@@ -183,7 +183,7 @@ class TestModelAndSetup:
 
         with patch("fix_die_repeat.runner.run_command") as mock_run:
             mock_run.return_value = (0, "abc123\n", "")
-            runner._setup_run()
+            runner.setup_run()
 
         archive_dirs = list((paths.fdr_dir / "archive").glob("*"))
         assert archive_dirs, "Expected archive directory to be created"

@@ -73,10 +73,10 @@ exit_code = runner.run()  # Runs the full loop
 - `filter_checks_log()` - Extract error-relevant lines from check output
 - `check_oscillation()` - Detect repeated identical failure output
 - `check_and_compact_artifacts()` - Compact large history files
-- `_fetch_pr_threads()` - Get PR threads from GitHub via GraphQL
-- `_run_local_review()` - Review code changes using pi
-- `_process_review_results()` - Handle pi's review findings
-- `_resolve_pr_threads()` - Resolve threads on GitHub via pi tool
+- `fetch_pr_threads()` - Get PR threads from GitHub via GraphQL
+- `run_local_review()` - Review code changes using pi
+- `process_review_results()` - Handle pi's review findings
+- `resolve_pr_threads()` - Resolve threads on GitHub via pi tool
 
 **State Tracked**:
 - `iteration` - Current iteration number (starts at 1, increments each loop)

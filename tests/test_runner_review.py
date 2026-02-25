@@ -7,7 +7,7 @@ from fix_die_repeat.runner import PiRunner
 
 
 class TestRunReviewFixAttempt:
-    """Tests for _run_review_fix_attempt method."""
+    """Tests for run_review_fix_attempt method."""
 
     def test_run_review_fix_attempt_success(self, tmp_path: Path) -> None:
         """Test running a successful review fix attempt."""
@@ -30,7 +30,7 @@ class TestRunReviewFixAttempt:
         runner.logger = MagicMock()
         runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
-        runner._resolve_pr_threads = MagicMock()  # type: ignore[method-assign]
+        runner.resolve_pr_threads = MagicMock()  # type: ignore[method-assign]
 
         # Create review current file
         paths.review_current_file.write_text("[CRITICAL] Bug found")
@@ -38,7 +38,7 @@ class TestRunReviewFixAttempt:
         with patch("fix_die_repeat.runner.run_command") as mock_git:
             mock_git.return_value = (0, "M file1.py\n", "")
 
-            result = runner._run_review_fix_attempt(1, 3)
+            result = runner.run_review_fix_attempt(1, 3)
 
             # Should return True on success
             assert result is True
@@ -74,7 +74,7 @@ class TestRunReviewFixAttempt:
             # No files modified
             mock_git.return_value = (0, "", "")
 
-            result = runner._run_review_fix_attempt(1, 3)
+            result = runner.run_review_fix_attempt(1, 3)
 
             # Should return False when no files changed
             assert result is False
@@ -100,7 +100,7 @@ class TestRunReviewFixAttempt:
         runner.logger = MagicMock()
         runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
-        runner._resolve_pr_threads = MagicMock()  # type: ignore[method-assign]
+        runner.resolve_pr_threads = MagicMock()  # type: ignore[method-assign]
 
         # Create review current file
         paths.review_current_file.write_text("[CRITICAL] Bug found")
@@ -108,7 +108,7 @@ class TestRunReviewFixAttempt:
         with patch("fix_die_repeat.runner.run_command") as mock_git:
             mock_git.return_value = (0, "", "")
 
-            result = runner._run_review_fix_attempt(1, 3)
+            result = runner.run_review_fix_attempt(1, 3)
 
             # Should return False when no files changed
             assert result is False
@@ -117,7 +117,7 @@ class TestRunReviewFixAttempt:
 
 
 class TestResolvePrThreads:
-    """Tests for _resolve_pr_threads method."""
+    """Tests for resolve_pr_threads method."""
 
     def test_resolve_pr_threads_no_file(self, tmp_path: Path) -> None:
         """Test resolving PR threads when no resolved threads file."""
@@ -135,7 +135,7 @@ class TestResolvePrThreads:
         runner.logger = MagicMock()
         runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
 
-        runner._resolve_pr_threads()
+        runner.resolve_pr_threads()
 
         # Should log about no threads reported as resolved
         assert runner.logger.info.called
@@ -159,7 +159,7 @@ class TestResolvePrThreads:
         # Create empty file
         paths.pr_resolved_threads_file.write_text("")
 
-        runner._resolve_pr_threads()
+        runner.resolve_pr_threads()
 
         # Should log about no threads reported as resolved
         assert runner.logger.info.called
@@ -184,7 +184,7 @@ class TestResolvePrThreads:
         paths.pr_resolved_threads_file.write_text("thread1\nthread2\n")
         # No in-scope file
 
-        runner._resolve_pr_threads()
+        runner.resolve_pr_threads()
 
         # Should log about no in-scope threads
         assert runner.logger.info.called
@@ -213,7 +213,7 @@ class TestResolvePrThreads:
         with patch("fix_die_repeat.runner.run_command") as mock_run:
             mock_run.return_value = (0, "", "")
 
-            runner._resolve_pr_threads()
+            runner.resolve_pr_threads()
 
             # Should log about safe resolution
             assert runner.logger.info.called
@@ -242,7 +242,7 @@ class TestResolvePrThreads:
         with patch("fix_die_repeat.runner.run_command") as mock_run:
             mock_run.return_value = (0, "", "")
 
-            runner._resolve_pr_threads()
+            runner.resolve_pr_threads()
 
             # Should log warning about unsafe threads
             assert runner.logger.warning.called

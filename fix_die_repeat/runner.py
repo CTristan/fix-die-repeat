@@ -137,13 +137,13 @@ class PiRunner:
                 self.logger.info(
                     "Detected long context rate limit (429). Forcing emergency compaction...",
                 )
-                self._emergency_compact()
+                self.emergency_compact()
                 self.logger.info("Emergency compaction complete. Retrying...")
 
         self.logger.info("pi failed (exit %s). Retrying once...", returncode)
         return self.run_pi(*args)
 
-    def _emergency_compact(self) -> None:
+    def emergency_compact(self) -> None:
         """Force emergency truncation of artifacts."""
         for f in [self.paths.review_file, self.paths.build_history_file]:
             if f.exists():
@@ -242,7 +242,7 @@ class PiRunner:
 
         return None
 
-    def _check_compaction_needed(self) -> tuple[bool, bool]:
+    def check_compaction_needed(self) -> tuple[bool, bool]:
         """Check if artifacts need compaction.
 
         Returns:
@@ -263,7 +263,7 @@ class PiRunner:
 
         return needs_emergency, needs_compact
 
-    def _perform_emergency_compaction(self) -> None:
+    def perform_emergency_compaction(self) -> None:
         """Perform emergency compaction (truncate to 100 lines)."""
         self.logger.info(
             "Emergency: artifacts exceed %s lines. Truncating to last 100 lines...",
@@ -274,7 +274,7 @@ class PiRunner:
                 lines = f.read_text().splitlines()[-100:]
                 f.write_text("\n".join(lines))
 
-    def _perform_regular_compaction(self) -> None:
+    def perform_regular_compaction(self) -> None:
         """Perform regular compaction (truncate to 50 lines)."""
         self.logger.info(
             "Artifacts exceed %s lines. Compacting with pi...",
@@ -300,14 +300,14 @@ class PiRunner:
         if not self.settings.compact_artifacts:
             return False
 
-        needs_emergency, needs_compact = self._check_compaction_needed()
+        needs_emergency, needs_compact = self.check_compaction_needed()
 
         if needs_emergency:
-            self._perform_emergency_compaction()
+            self.perform_emergency_compaction()
             return True
 
         if needs_compact:
-            self._perform_regular_compaction()
+            self.perform_regular_compaction()
             return True
 
         return False
@@ -423,7 +423,7 @@ class PiRunner:
 
         return (returncode, output)
 
-    def _setup_run(self) -> None:
+    def setup_run(self) -> None:
         """Initialize run environment."""
         self.script_start_time = time.time()
 
@@ -463,7 +463,7 @@ class PiRunner:
         # Compact large artifacts from previous runs
         self.check_and_compact_artifacts()
 
-    def _run_fix_attempt(
+    def run_fix_attempt(
         self,
         fix_attempt: int,
         changed_files: list[str],
@@ -547,7 +547,7 @@ class PiRunner:
 
         return returncode
 
-    def _prepare_fix_context(self) -> tuple[list[str], str, str, str]:
+    def prepare_fix_context(self) -> tuple[list[str], str, str, str]:
         """Prepare context for fix attempts.
 
         Returns:
@@ -601,7 +601,7 @@ class PiRunner:
 
         return changed_files, context_mode, large_context_list, large_file_warning
 
-    def _run_fix_loop(self) -> int:
+    def run_fix_loop(self) -> int:
         """Run the inner fix loop until checks pass or max attempts reached.
 
         Returns:
@@ -628,11 +628,11 @@ class PiRunner:
 
             # Prepare context
             changed_files, context_mode, large_context_list, large_file_warning = (
-                self._prepare_fix_context()
+                self.prepare_fix_context()
             )
 
             # Run fix attempt
-            self._run_fix_attempt(
+            self.run_fix_attempt(
                 fix_attempt,
                 changed_files,
                 context_mode,
@@ -651,7 +651,7 @@ class PiRunner:
         self.logger.info("[Step 2B] Checks passed. Proceeding to review.")
         return 0
 
-    def _run_review_phase(self, changed_files: list[str]) -> None:
+    def run_review_phase(self, changed_files: list[str]) -> None:
         """Run the review phase.
 
         Args:
@@ -664,7 +664,7 @@ class PiRunner:
 
         # Step 3.5: Check PR threads if enabled
         if self.settings.pr_review:
-            self._fetch_pr_threads()
+            self.fetch_pr_threads()
 
         # Step 4: Collect files for review
         if (
@@ -672,7 +672,7 @@ class PiRunner:
             or not self.paths.review_current_file.read_text()
         ):
             # Skip local review if we have PR threads to process
-            self._run_local_review(changed_files)
+            self.run_local_review(changed_files)
         else:
             self.logger.info(
                 "[Step 4] Using PR threads from %s for review.",
@@ -681,7 +681,7 @@ class PiRunner:
             self.logger.info("[Step 5] Skipping local file review generation.")
 
         # Step 6: Process review results
-        self._process_review_results()
+        self.process_review_results()
 
     def run(self) -> int:
         """Run the main fix-die-repeat loop.
@@ -690,7 +690,7 @@ class PiRunner:
             Exit code (0 for success, non-zero for failure)
 
         """
-        self._setup_run()
+        self.setup_run()
 
         # Main loop
         while True:
@@ -715,18 +715,18 @@ class PiRunner:
                 return 1
 
             # Run fix loop
-            exit_code = self._run_fix_loop()
+            exit_code = self.run_fix_loop()
             if exit_code != 0:
                 return exit_code
 
             # Run review phase
             changed_files = get_changed_files(self.paths.project_root)
-            self._run_review_phase(changed_files)
+            self.run_review_phase(changed_files)
 
         # Should not reach here
         return 0
 
-    def _get_branch_name(self) -> str | None:
+    def get_branch_name(self) -> str | None:
         """Get the current git branch name.
 
         Returns:
@@ -738,7 +738,7 @@ class PiRunner:
             return None
         return branch.strip()
 
-    def _get_pr_info(self, branch: str) -> dict | None:
+    def get_pr_info(self, branch: str) -> dict | None:
         """Get PR information for a branch.
 
         Args:
@@ -762,7 +762,7 @@ class PiRunner:
             "repo_name": pr_data["headRepository"]["name"],
         }
 
-    def _check_pr_threads_cache(self, cache_key: str) -> bool:
+    def check_pr_threads_cache(self, cache_key: str) -> bool:
         """Check if cached PR threads are valid and use them.
 
         Args:
@@ -784,7 +784,7 @@ class PiRunner:
             return True
         return False
 
-    def _fetch_pr_threads_gql(
+    def fetch_pr_threads_gql(
         self,
         repo_owner: str,
         repo_name: str,
@@ -838,7 +838,7 @@ class PiRunner:
             self.logger.exception("Failed to parse PR thread data")
             return None
 
-    def _format_pr_threads(self, threads: list, pr_number: int, pr_url: str) -> str:
+    def format_pr_threads(self, threads: list, pr_number: int, pr_url: str) -> str:
         """Format PR threads for display.
 
         Args:
@@ -874,11 +874,11 @@ class PiRunner:
 
         return f"{header}\n\n" + "\n".join(threads_output)
 
-    def _fetch_pr_threads(self) -> None:
+    def fetch_pr_threads(self) -> None:
         """Fetch PR threads for PR review mode."""
         self.logger.info("[Step 3.5] Checking for unresolved PR threads...")
 
-        branch = self._get_branch_name()
+        branch = self.get_branch_name()
         if not branch:
             self.logger.error("Not on a git branch. Skipping PR review.")
             return
@@ -891,7 +891,7 @@ class PiRunner:
             self.logger.error("GitHub CLI not authenticated. Skipping PR review.")
             return
 
-        pr_info = self._get_pr_info(branch)
+        pr_info = self.get_pr_info(branch)
         if not pr_info:
             self.logger.info(
                 "No open PR found for %s or error fetching PR. Skipping PR review.",
@@ -911,19 +911,19 @@ class PiRunner:
         )
 
         cache_key = f"{repo_owner}/{repo_name}/{pr_number}"
-        if self._check_pr_threads_cache(cache_key):
+        if self.check_pr_threads_cache(cache_key):
             return
 
         self.logger.info("Cache miss or invalid. Fetching fresh threads...")
 
-        threads = self._fetch_pr_threads_gql(repo_owner, repo_name, pr_number)
+        threads = self.fetch_pr_threads_gql(repo_owner, repo_name, pr_number)
         if threads is None:
             return
 
         unresolved_threads = [t for t in threads if not t.get("isResolved", True)]
 
         if unresolved_threads:
-            content = self._format_pr_threads(unresolved_threads, pr_number, pr_url)
+            content = self.format_pr_threads(unresolved_threads, pr_number, pr_url)
             self.paths.review_current_file.write_text(content)
             self.logger.info(
                 "Found %s unresolved threads. Added to review queue.",
@@ -936,7 +936,7 @@ class PiRunner:
         else:
             self.logger.info("No unresolved threads found.")
 
-    def _generate_diff(self) -> str:
+    def generate_diff(self) -> str:
         """Generate git diff for review.
 
         Returns:
@@ -952,7 +952,7 @@ class PiRunner:
             diff_content += diff_output
         return diff_content
 
-    def _add_untracked_files_diff(self, diff_content: str) -> str:
+    def add_untracked_files_diff(self, diff_content: str) -> str:
         """Add pseudo-diff for untracked files.
 
         Args:
@@ -972,11 +972,11 @@ class PiRunner:
             if new_file.startswith(".fix-die-repeat") or is_excluded_file(Path(new_file).name):
                 continue
 
-            diff_content += self._create_pseudo_diff(new_file)
+            diff_content += self.create_pseudo_diff(new_file)
 
         return diff_content
 
-    def _create_pseudo_diff(self, filepath: str) -> str:
+    def create_pseudo_diff(self, filepath: str) -> str:
         """Create pseudo-diff for a single untracked file.
 
         Args:
@@ -1006,7 +1006,7 @@ class PiRunner:
 
         return pseudo_diff + "\n"
 
-    def _run_pi_review(self, diff_size: int) -> None:
+    def run_pi_review(self, diff_size: int) -> None:
         """Run pi to review changes.
 
         Args:
@@ -1016,7 +1016,7 @@ class PiRunner:
         self.logger.info("[Step 5] Running pi to review files...")
 
         pi_args = ["-p", "--tools", "read,write,grep,find,ls"]
-        review_prompt_prefix = self._build_review_prompt(diff_size, pi_args)
+        review_prompt_prefix = self.build_review_prompt(diff_size, pi_args)
 
         if self.paths.review_file.exists():
             pi_args.append(f"@{self.paths.review_file}")
@@ -1032,7 +1032,7 @@ class PiRunner:
             self.logger.info("pi review failed. Treating as no issues found.")
             self.paths.review_current_file.write_text("NO_ISSUES")
 
-    def _build_review_prompt(self, diff_size: int, pi_args: list[str]) -> str:
+    def build_review_prompt(self, diff_size: int, pi_args: list[str]) -> str:
         """Build review prompt based on diff size.
 
         Args:
@@ -1060,7 +1060,7 @@ class PiRunner:
             "made in this session.\n"
         )
 
-    def _append_review_entry(self) -> None:
+    def append_review_entry(self) -> None:
         """Append review entry to review file."""
         timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         with self.paths.review_file.open("a") as f:
@@ -1074,7 +1074,7 @@ class PiRunner:
                 f.write("_No issues found._\n")
             f.write("\n")
 
-    def _run_local_review(self, changed_files: list[str]) -> None:
+    def run_local_review(self, changed_files: list[str]) -> None:
         """Run local file review.
 
         Args:
@@ -1094,20 +1094,20 @@ class PiRunner:
         # Generate diff
         self.logger.info("[Step 5] Generating diff for review...")
 
-        diff_content = self._generate_diff()
-        diff_content = self._add_untracked_files_diff(diff_content)
+        diff_content = self.generate_diff()
+        diff_content = self.add_untracked_files_diff(diff_content)
 
         self.paths.diff_file.write_text(diff_content)
         diff_size = get_file_size(self.paths.diff_file)
         self.logger.info("Generated review diff size: %s bytes", diff_size)
 
         # Run pi review
-        self._run_pi_review(diff_size)
+        self.run_pi_review(diff_size)
 
         # Append review entry
-        self._append_review_entry()
+        self.append_review_entry()
 
-    def _has_no_review_issues(self, review_content: str) -> bool:
+    def has_no_review_issues(self, review_content: str) -> bool:
         """Check if review content indicates no issues.
 
         Args:
@@ -1141,7 +1141,7 @@ class PiRunner:
 
         return False
 
-    def _complete_success(self) -> None:
+    def complete_success(self) -> None:
         """Complete the run successfully."""
         timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         with self.paths.review_file.open("a") as f:
@@ -1174,7 +1174,7 @@ class PiRunner:
 
         sys.exit(0)
 
-    def _run_review_fix_attempt(self, fix_attempt: int, max_fix_attempts: int) -> bool:
+    def run_review_fix_attempt(self, fix_attempt: int, max_fix_attempts: int) -> bool:
         """Run a single review fix attempt.
 
         Args:
@@ -1246,11 +1246,11 @@ class PiRunner:
 
         # Check if PR threads were resolved
         if self.settings.pr_review:
-            self._resolve_pr_threads()
+            self.resolve_pr_threads()
 
         return True
 
-    def _process_review_results(self) -> None:
+    def process_review_results(self) -> None:
         """Process review results and fix issues if needed."""
         self.logger.info("[Step 6] Processing review results...")
 
@@ -1263,9 +1263,9 @@ class PiRunner:
         # Check if file is empty or only contains "no issues" messages
         review_content = self.paths.review_current_file.read_text()
 
-        if self._has_no_review_issues(review_content):
+        if self.has_no_review_issues(review_content):
             self.logger.info("[Step 6B] No issues found in .fix-die-repeat/review_current.md.")
-            self._complete_success()
+            self.complete_success()
 
         # Issues found - fix them
         self.logger.info(
@@ -1277,7 +1277,7 @@ class PiRunner:
         max_fix_attempts = 3
 
         while fix_attempt <= max_fix_attempts:
-            success = self._run_review_fix_attempt(fix_attempt, max_fix_attempts)
+            success = self.run_review_fix_attempt(fix_attempt, max_fix_attempts)
             if success:
                 break
             if fix_attempt < max_fix_attempts:
@@ -1288,7 +1288,7 @@ class PiRunner:
 
         # Continue to next iteration
 
-    def _resolve_pr_threads(self) -> None:
+    def resolve_pr_threads(self) -> None:
         """Resolve PR threads that were fixed."""
         if not self.paths.pr_resolved_threads_file.exists():
             self.logger.info("No threads were reported as resolved. Continuing to next iteration.")
@@ -1334,7 +1334,7 @@ class PiRunner:
                 )
                 # Invalidate cache and refetch
                 self.paths.pr_threads_hash_file.unlink(missing_ok=True)
-                self._fetch_pr_threads()
+                self.fetch_pr_threads()
 
                 if not self.paths.review_current_file.read_text().strip():
                     self.logger.info("All PR threads have been resolved! Exiting successfully.")

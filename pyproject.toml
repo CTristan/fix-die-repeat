@@ -40,8 +40,7 @@ lint.ignore = ["COM812", "D203", "D213"]
     "D301",    # Keeping conventional Click docstrings avoids noisy rewrites that do not improve generated help.
 ]
 "tests/*.py" = [
-    "S101",    # Pytest idioms rely on assert statements; replacing them reduces failure introspection quality.
-    "SLF001",  # Tests exercise internal APIs intentionally when validating invariants not exposed publicly.
+    "S101",  # Pytest idioms rely on assert statements; replacing them reduces failure introspection quality.
 ]
 
 [tool.ruff.lint.isort]

@@ -57,7 +57,7 @@ class TestBeforePiCall:
 
 
 class TestEmergencyCompaction:
-    """Tests for _emergency_compact method."""
+    """Tests for emergency_compact method."""
 
     def test_emergency_compact_truncates_files(self, tmp_path: Path) -> None:
         """Test emergency compaction truncates files to 100 lines."""
@@ -76,7 +76,7 @@ class TestEmergencyCompaction:
         paths.review_file.write_text("\n".join(["line"] * 200))
         paths.build_history_file.write_text("\n".join(["line"] * 150))
 
-        runner._emergency_compact()
+        runner.emergency_compact()
 
         # Check they're truncated to 100 lines
         assert get_file_line_count(paths.review_file) == EMERGENCY_COMPACT_LINES
@@ -96,7 +96,7 @@ class TestEmergencyCompaction:
         runner.paths = paths
 
         # Don't create files
-        runner._emergency_compact()
+        runner.emergency_compact()
 
         # Should not raise exception
 
@@ -110,7 +110,7 @@ def get_file_line_count(path: Path) -> int:
 
 
 class TestCheckCompactionNeeded:
-    """Tests for _check_compaction_needed method."""
+    """Tests for check_compaction_needed method."""
 
     def test_no_compaction_needed(self, tmp_path: Path) -> None:
         """Test when files are below thresholds."""
@@ -131,7 +131,7 @@ class TestCheckCompactionNeeded:
         paths.review_file.write_text("\n".join(["line"] * 100))
         paths.build_history_file.write_text("\n".join(["line"] * 120))
 
-        needs_emergency, needs_compact = runner._check_compaction_needed()
+        needs_emergency, needs_compact = runner.check_compaction_needed()
 
         assert not needs_emergency
         assert not needs_compact
@@ -155,7 +155,7 @@ class TestCheckCompactionNeeded:
         paths.review_file.write_text("\n".join(["line"] * 160))
         paths.build_history_file.write_text("\n".join(["line"] * 120))
 
-        needs_emergency, needs_compact = runner._check_compaction_needed()
+        needs_emergency, needs_compact = runner.check_compaction_needed()
 
         assert not needs_emergency
         assert needs_compact
@@ -179,7 +179,7 @@ class TestCheckCompactionNeeded:
         paths.review_file.write_text("\n".join(["line"] * 250))
         paths.build_history_file.write_text("\n".join(["line"] * 120))
 
-        needs_emergency, _needs_compact = runner._check_compaction_needed()
+        needs_emergency, _needs_compact = runner.check_compaction_needed()
 
         assert needs_emergency
 
@@ -199,14 +199,14 @@ class TestCheckCompactionNeeded:
         runner.paths = paths
 
         # Don't create files
-        needs_emergency, needs_compact = runner._check_compaction_needed()
+        needs_emergency, needs_compact = runner.check_compaction_needed()
 
         assert not needs_emergency
         assert not needs_compact
 
 
 class TestPerformEmergencyCompaction:
-    """Tests for _perform_emergency_compaction method."""
+    """Tests for perform_emergency_compaction method."""
 
     def test_emergency_compaction_logs_and_truncates(self, tmp_path: Path) -> None:
         """Test emergency compaction logs and truncates files."""
@@ -227,7 +227,7 @@ class TestPerformEmergencyCompaction:
         paths.review_file.write_text("\n".join(["line"] * 300))
         paths.build_history_file.write_text("\n".join(["line"] * 250))
 
-        runner._perform_emergency_compaction()
+        runner.perform_emergency_compaction()
 
         # Check log was called
         assert runner.logger.info.called
@@ -238,7 +238,7 @@ class TestPerformEmergencyCompaction:
 
 
 class TestPerformRegularCompaction:
-    """Tests for _perform_regular_compaction method."""
+    """Tests for perform_regular_compaction method."""
 
     def test_regular_compaction_logs_and_truncates(self, tmp_path: Path) -> None:
         """Test regular compaction logs and truncates files to 50 lines."""
@@ -259,7 +259,7 @@ class TestPerformRegularCompaction:
         paths.review_file.write_text("\n".join(["line"] * 160))
         paths.build_history_file.write_text("\n".join(["line"] * 155))
 
-        runner._perform_regular_compaction()
+        runner.perform_regular_compaction()
 
         # Check log was called
         assert runner.logger.info.called
@@ -518,7 +518,7 @@ class TestFilterChecksLog:
 
 
 class TestGenerateDiff:
-    """Tests for _generate_diff method."""
+    """Tests for generate_diff method."""
 
     def test_generate_diff_with_start_sha(self, tmp_path: Path) -> None:
         """Test generating diff with start SHA."""
@@ -535,7 +535,7 @@ class TestGenerateDiff:
         with patch("fix_die_repeat.runner.run_command") as mock_run:
             mock_run.return_value = (0, "diff content", "")
 
-            result = runner._generate_diff()
+            result = runner.generate_diff()
 
             assert result == "diff content"
             mock_run.assert_called_once()
@@ -555,14 +555,14 @@ class TestGenerateDiff:
         with patch("fix_die_repeat.runner.run_command") as mock_run:
             mock_run.return_value = (0, "diff content", "")
 
-            result = runner._generate_diff()
+            result = runner.generate_diff()
 
             assert result == "diff content"
             mock_run.assert_called_once()
 
 
 class TestCreatePseudoDiff:
-    """Tests for _create_pseudo_diff method."""
+    """Tests for create_pseudo_diff method."""
 
     def test_create_pseudo_diff_text_file(self, tmp_path: Path) -> None:
         """Test creating pseudo-diff for text file."""
@@ -579,7 +579,7 @@ class TestCreatePseudoDiff:
         test_file = tmp_path / "new_file.txt"
         test_file.write_text("line1\nline2\nline3")
 
-        result = runner._create_pseudo_diff("new_file.txt")
+        result = runner.create_pseudo_diff("new_file.txt")
 
         assert "diff --git a/new_file.txt" in result
         assert "new file mode 100644" in result
@@ -606,13 +606,13 @@ class TestCreatePseudoDiff:
         with patch("fix_die_repeat.runner.run_command") as mock_run:
             mock_run.return_value = (0, "binary.dat: data", "")
 
-            result = runner._create_pseudo_diff("binary.dat")
+            result = runner.create_pseudo_diff("binary.dat")
 
             assert "Binary file" in result or "binary.dat" in result
 
 
 class TestAppendReviewEntry:
-    """Tests for _append_review_entry method."""
+    """Tests for append_review_entry method."""
 
     def test_append_review_entry_with_content(self, tmp_path: Path) -> None:
         """Test appending review entry with content."""
@@ -631,7 +631,7 @@ class TestAppendReviewEntry:
         # Create review current with content
         paths.review_current_file.write_text("# Issues\n\n[CRITICAL] Bug found")
 
-        runner._append_review_entry()
+        runner.append_review_entry()
 
         # Check that content was appended
         assert paths.review_file.exists()
@@ -656,7 +656,7 @@ class TestAppendReviewEntry:
         # Create review current as empty
         paths.review_current_file.write_text("")
 
-        runner._append_review_entry()
+        runner.append_review_entry()
 
         # Check that "No issues found" was written
         assert paths.review_file.exists()
@@ -666,7 +666,7 @@ class TestAppendReviewEntry:
 
 
 class TestRunFixAttempt:
-    """Tests for _run_fix_attempt method."""
+    """Tests for run_fix_attempt method."""
 
     def test_run_fix_attempt_oscillation_warning(self, tmp_path: Path) -> None:
         """Test fix attempt with oscillation warning."""
@@ -695,7 +695,7 @@ class TestRunFixAttempt:
         paths.checks_log.write_text("error output")
         paths.checks_filtered_log.write_text("filtered output")
 
-        _ = runner._run_fix_attempt(
+        _ = runner.run_fix_attempt(
             1,
             [],
             "push",
@@ -736,7 +736,7 @@ class TestRunFixAttempt:
         with patch("fix_die_repeat.runner.run_command") as mock_git:
             mock_git.return_value = (0, "", "")
 
-            _ = runner._run_fix_attempt(
+            _ = runner.run_fix_attempt(
                 1,
                 [],
                 "push",
@@ -775,7 +775,7 @@ class TestRunFixAttempt:
         paths.checks_filtered_log.write_text("filtered output")
         paths.review_file.write_text("# Previous review")
 
-        _ = runner._run_fix_attempt(
+        _ = runner.run_fix_attempt(
             1,
             [],
             "push",
@@ -814,7 +814,7 @@ class TestRunFixAttempt:
         paths.checks_filtered_log.write_text("filtered output")
         paths.build_history_file.write_text("# Build history")
 
-        _ = runner._run_fix_attempt(
+        _ = runner.run_fix_attempt(
             1,
             [],
             "push",
@@ -858,7 +858,7 @@ class TestRunFixAttempt:
         file2 = tmp_path / "file2.py"
         file2.write_text("content")
 
-        _ = runner._run_fix_attempt(
+        _ = runner.run_fix_attempt(
             1,
             ["file1.py", "file2.py"],
             "push",
@@ -898,7 +898,7 @@ class TestRunFixAttempt:
 
         large_context_list = "The following files have changed:\n- file1.py\n- file2.py"
 
-        _ = runner._run_fix_attempt(
+        _ = runner.run_fix_attempt(
             1,
             [],
             "pull",
@@ -911,7 +911,7 @@ class TestRunFixAttempt:
 
 
 class TestPrepareFixContext:
-    """Tests for _prepare_fix_context method."""
+    """Tests for prepare_fix_context method."""
 
     def test_prepare_fix_context_no_files(self, tmp_path: Path) -> None:
         """Test preparing fix context with no changed files."""
@@ -935,7 +935,7 @@ class TestPrepareFixContext:
             mock_detect.return_value = ""
 
             changed_files, context_mode, large_context_list, large_file_warning = (
-                runner._prepare_fix_context()
+                runner.prepare_fix_context()
             )
 
             assert changed_files == []
@@ -967,7 +967,7 @@ class TestPrepareFixContext:
             mock_size.return_value = 50000  # 50KB each
 
             changed_files, context_mode, large_context_list, large_file_warning = (
-                runner._prepare_fix_context()
+                runner.prepare_fix_context()
             )
 
             assert changed_files == ["file1.py", "file2.py"]
@@ -999,7 +999,7 @@ class TestPrepareFixContext:
             mock_size.return_value = 40000  # 40KB each, 80KB total
 
             changed_files, context_mode, large_context_list, _large_file_warning = (
-                runner._prepare_fix_context()
+                runner.prepare_fix_context()
             )
 
             assert changed_files == ["file1.py", "file2.py"]
@@ -1010,7 +1010,7 @@ class TestPrepareFixContext:
 
 
 class TestFormatPrThreads:
-    """Tests for _format_pr_threads method."""
+    """Tests for format_pr_threads method."""
 
     def test_format_single_thread(self, tmp_path: Path) -> None:
         """Test formatting a single PR thread."""
@@ -1036,7 +1036,7 @@ class TestFormatPrThreads:
             },
         ]
 
-        result = runner._format_pr_threads(threads, 123, "https://github.com/test/repo/pull/123")
+        result = runner.format_pr_threads(threads, 123, "https://github.com/test/repo/pull/123")
 
         assert "Thread #1" in result
         assert "thread1" in result
@@ -1069,7 +1069,7 @@ class TestFormatPrThreads:
             },
         ]
 
-        result = runner._format_pr_threads(threads, 123, "https://github.com/test/repo/pull/123")
+        result = runner.format_pr_threads(threads, 123, "https://github.com/test/repo/pull/123")
 
         assert "Thread #1" in result
         assert "Line:" not in result
@@ -1098,7 +1098,7 @@ class TestFormatPrThreads:
             },
         ]
 
-        result = runner._format_pr_threads(threads, 123, "https://github.com/test/repo/pull/123")
+        result = runner.format_pr_threads(threads, 123, "https://github.com/test/repo/pull/123")
 
         assert "Thread #1" in result
         assert "[unknown]:" in result
@@ -1126,7 +1126,7 @@ class TestFormatPrThreads:
             },
         ]
 
-        result = runner._format_pr_threads(threads, 123, "https://github.com/test/repo/pull/123")
+        result = runner.format_pr_threads(threads, 123, "https://github.com/test/repo/pull/123")
 
         assert "Thread #1" in result
         assert "N/A" in result
@@ -1157,7 +1157,7 @@ class TestFormatPrThreads:
             },
         ]
 
-        result = runner._format_pr_threads(threads, 123, "https://github.com/test/repo/pull/123")
+        result = runner.format_pr_threads(threads, 123, "https://github.com/test/repo/pull/123")
 
         assert "Thread #1" in result
         assert "Thread #2" in result
@@ -1166,7 +1166,7 @@ class TestFormatPrThreads:
 
 
 class TestBuildReviewPrompt:
-    """Tests for _build_review_prompt method."""
+    """Tests for build_review_prompt method."""
 
     def test_build_review_prompt_pull_mode(self, tmp_path: Path) -> None:
         """Test building review prompt in pull mode."""
@@ -1182,7 +1182,7 @@ class TestBuildReviewPrompt:
         runner.logger = MagicMock()
 
         pi_args: list[str] = []
-        result = runner._build_review_prompt(200000, pi_args)
+        result = runner.build_review_prompt(200000, pi_args)
 
         assert "too large to attach" in result
         assert "MUST use the 'read' tool" in result
@@ -1206,7 +1206,7 @@ class TestBuildReviewPrompt:
         runner.logger = MagicMock()
 
         pi_args: list[str] = []
-        result = runner._build_review_prompt(100000, pi_args)
+        result = runner.build_review_prompt(100000, pi_args)
 
         assert "changes.diff" in result
         assert len(pi_args) == 1
@@ -1214,7 +1214,7 @@ class TestBuildReviewPrompt:
 
 
 class TestRunPiReview:
-    """Tests for _run_pi_review method."""
+    """Tests for run_pi_review method."""
 
     def test_run_pi_review_push_mode(self, tmp_path: Path) -> None:
         """Test running pi review in push mode."""
@@ -1236,7 +1236,7 @@ class TestRunPiReview:
         # Create diff file
         paths.diff_file.write_text("diff content")
 
-        runner._run_pi_review(100000)
+        runner.run_pi_review(100000)
 
         # Check that run_pi_safe was called
         assert runner.run_pi_safe.called
@@ -1258,7 +1258,7 @@ class TestRunPiReview:
         runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
 
-        runner._run_pi_review(200000)
+        runner.run_pi_review(200000)
 
         # Check that run_pi_safe was called
         assert runner.run_pi_safe.called
@@ -1283,14 +1283,14 @@ class TestRunPiReview:
         # Create review history
         paths.review_file.write_text("# Previous review\n\nIssues found.")
 
-        runner._run_pi_review(100000)
+        runner.run_pi_review(100000)
 
         # Check that run_pi_safe was called
         assert runner.run_pi_safe.called
 
 
 class TestGetBranchName:
-    """Tests for _get_branch_name method."""
+    """Tests for get_branch_name method."""
 
     def test_get_branch_name_success(self, tmp_path: Path) -> None:
         """Test getting branch name successfully."""
@@ -1306,7 +1306,7 @@ class TestGetBranchName:
         with patch("fix_die_repeat.runner.run_command") as mock_run:
             mock_run.return_value = (0, "main\n", "")
 
-            result = runner._get_branch_name()
+            result = runner.get_branch_name()
 
             assert result == "main"
 
@@ -1324,7 +1324,7 @@ class TestGetBranchName:
         with patch("fix_die_repeat.runner.run_command") as mock_run:
             mock_run.return_value = (1, "", "error")
 
-            result = runner._get_branch_name()
+            result = runner.get_branch_name()
 
             assert result is None
 
@@ -1342,13 +1342,13 @@ class TestGetBranchName:
         with patch("fix_die_repeat.runner.run_command") as mock_run:
             mock_run.return_value = (0, "\n", "")
 
-            result = runner._get_branch_name()
+            result = runner.get_branch_name()
 
             assert result is None
 
 
 class TestGetPrInfo:
-    """Tests for _get_pr_info method."""
+    """Tests for get_pr_info method."""
 
     def test_get_pr_info_success(self, tmp_path: Path) -> None:
         """Test getting PR info successfully."""
@@ -1371,7 +1371,7 @@ class TestGetPrInfo:
         with patch("fix_die_repeat.runner.run_command") as mock_run:
             mock_run.return_value = (0, pr_json, "")
 
-            result = runner._get_pr_info("main")
+            result = runner.get_pr_info("main")
 
             assert result is not None
             assert result["number"] == TEST_PR_NUMBER
@@ -1393,13 +1393,13 @@ class TestGetPrInfo:
         with patch("fix_die_repeat.runner.run_command") as mock_run:
             mock_run.return_value = (1, "", "error")
 
-            result = runner._get_pr_info("main")
+            result = runner.get_pr_info("main")
 
             assert result is None
 
 
 class TestCheckPrThreadsCache:
-    """Tests for _check_pr_threads_cache method."""
+    """Tests for check_pr_threads_cache method."""
 
     def test_cache_hit(self, tmp_path: Path) -> None:
         """Test cache hit scenario."""
@@ -1421,7 +1421,7 @@ class TestCheckPrThreadsCache:
         paths.pr_threads_cache.write_text("--- Thread #1 ---\nID: thread1\n")
         paths.review_current_file.write_text("")
 
-        result = runner._check_pr_threads_cache("owner/repo/123")
+        result = runner.check_pr_threads_cache("owner/repo/123")
 
         assert result is True
         assert runner.logger.info.called
@@ -1445,7 +1445,7 @@ class TestCheckPrThreadsCache:
         paths.pr_threads_hash_file.write_text("owner/repo/456")
         paths.pr_threads_cache.write_text("--- Thread #1 ---\nID: thread1\n")
 
-        result = runner._check_pr_threads_cache("owner/repo/123")
+        result = runner.check_pr_threads_cache("owner/repo/123")
 
         assert result is False
 
@@ -1463,13 +1463,13 @@ class TestCheckPrThreadsCache:
         runner.settings = settings
         runner.paths = paths
 
-        result = runner._check_pr_threads_cache("owner/repo/123")
+        result = runner.check_pr_threads_cache("owner/repo/123")
 
         assert result is False
 
 
 class TestFetchPrThreadsGql:
-    """Tests for _fetch_pr_threads_gql method."""
+    """Tests for fetch_pr_threads_gql method."""
 
     def test_fetch_pr_threads_success(self, tmp_path: Path) -> None:
         """Test successful PR thread fetch."""
@@ -1510,7 +1510,7 @@ class TestFetchPrThreadsGql:
         with patch("fix_die_repeat.runner.run_command") as mock_run:
             mock_run.return_value = (0, response, "")
 
-            result = runner._fetch_pr_threads_gql("owner", "repo", 123)
+            result = runner.fetch_pr_threads_gql("owner", "repo", 123)
 
             assert result is not None
             assert isinstance(result, list)
@@ -1531,7 +1531,7 @@ class TestFetchPrThreadsGql:
         with patch("fix_die_repeat.runner.run_command") as mock_run:
             mock_run.return_value = (1, "", "error")
 
-            result = runner._fetch_pr_threads_gql("owner", "repo", 123)
+            result = runner.fetch_pr_threads_gql("owner", "repo", 123)
 
             assert result is None
 
@@ -1550,14 +1550,14 @@ class TestFetchPrThreadsGql:
         with patch("fix_die_repeat.runner.run_command") as mock_run:
             mock_run.return_value = (0, "invalid json", "")
 
-            result = runner._fetch_pr_threads_gql("owner", "repo", 123)
+            result = runner.fetch_pr_threads_gql("owner", "repo", 123)
 
             assert result is None
             assert runner.logger.exception.called
 
 
 class TestHasNoReviewIssues:
-    """Tests for _has_no_review_issues method."""
+    """Tests for has_no_review_issues method."""
 
     def test_no_issues_marker(self) -> None:
         """Test that NO_ISSUES marker returns True."""
@@ -1569,9 +1569,9 @@ class TestHasNoReviewIssues:
         runner.paths = paths
 
         # Explicit marker
-        assert runner._has_no_review_issues("NO_ISSUES") is True
-        assert runner._has_no_review_issues("NO_ISSUES\n") is True
-        assert runner._has_no_review_issues("  NO_ISSUES  ") is True
+        assert runner.has_no_review_issues("NO_ISSUES") is True
+        assert runner.has_no_review_issues("NO_ISSUES\n") is True
+        assert runner.has_no_review_issues("  NO_ISSUES  ") is True
 
     def test_empty_file_warns(self) -> None:
         """Test that empty file returns True but logs warning."""
@@ -1583,7 +1583,7 @@ class TestHasNoReviewIssues:
         runner.logger = MagicMock()
 
         # Empty content
-        assert runner._has_no_review_issues("") is True
+        assert runner.has_no_review_issues("") is True
         runner.logger.warning.assert_called_once()
         assert "expected 'NO_ISSUES' marker" in runner.logger.warning.call_args[0][0]
 
@@ -1597,7 +1597,7 @@ class TestHasNoReviewIssues:
         runner.logger = MagicMock()
 
         # Whitespace only
-        assert runner._has_no_review_issues("   \n  \n") is True
+        assert runner.has_no_review_issues("   \n  \n") is True
         runner.logger.warning.assert_called_once()
         assert "expected 'NO_ISSUES' marker" in runner.logger.warning.call_args[0][0]
 
@@ -1611,10 +1611,10 @@ class TestHasNoReviewIssues:
         runner.logger = MagicMock()
 
         # Legacy format with only that text
-        assert runner._has_no_review_issues("No critical issues found.") is True
+        assert runner.has_no_review_issues("No critical issues found.") is True
 
         # Legacy format with headers only
-        assert runner._has_no_review_issues("# Review\nNo critical issues found.") is True
+        assert runner.has_no_review_issues("# Review\nNo critical issues found.") is True
 
     def test_legacy_with_actual_issues(self) -> None:
         """Test that legacy format with actual issues returns False."""
@@ -1627,7 +1627,7 @@ class TestHasNoReviewIssues:
 
         # Legacy format but has actual content
         content = "No critical issues found.\n\n[CRITICAL] Bug in line 42"
-        assert runner._has_no_review_issues(content) is False
+        assert runner.has_no_review_issues(content) is False
 
     def test_has_issues_returns_false(self) -> None:
         """Test that issues content returns False."""
@@ -1639,9 +1639,9 @@ class TestHasNoReviewIssues:
         runner.logger = MagicMock()
 
         # Actual issues
-        assert runner._has_no_review_issues("[CRITICAL] Bug found") is False
-        assert runner._has_no_review_issues("# Issues\n[CRITICAL] Bug\n[NIT] Style") is False
-        assert runner._has_no_review_issues("This is a bug report") is False
+        assert runner.has_no_review_issues("[CRITICAL] Bug found") is False
+        assert runner.has_no_review_issues("# Issues\n[CRITICAL] Bug\n[NIT] Style") is False
+        assert runner.has_no_review_issues("This is a bug report") is False
 
 
 class TestRunChecks:
@@ -1688,7 +1688,7 @@ class TestRunChecks:
 
 
 class TestFetchPrThreads:
-    """Tests for _fetch_pr_threads method."""
+    """Tests for fetch_pr_threads method."""
 
     def test_fetch_pr_threads_no_branch(self, tmp_path: Path) -> None:
         """Test fetching PR threads when not on a branch."""
@@ -1708,8 +1708,8 @@ class TestFetchPrThreads:
         runner.paths = paths
         runner.logger = MagicMock()
 
-        with patch.object(runner, "_get_branch_name", return_value=None):
-            runner._fetch_pr_threads()
+        with patch.object(runner, "get_branch_name", return_value=None):
+            runner.fetch_pr_threads()
 
             # Should log error about not on a branch
             assert runner.logger.error.called
@@ -1733,13 +1733,13 @@ class TestFetchPrThreads:
         runner.logger = MagicMock()
 
         with (
-            patch.object(runner, "_get_branch_name", return_value="main"),
+            patch.object(runner, "get_branch_name", return_value="main"),
             patch("fix_die_repeat.runner.run_command") as mock_run,
         ):
             # gh auth status fails
             mock_run.return_value = (1, "", "error")
 
-            runner._fetch_pr_threads()
+            runner.fetch_pr_threads()
 
             # Should log error about gh auth
             assert runner.logger.error.called
@@ -1763,14 +1763,14 @@ class TestFetchPrThreads:
         runner.logger = MagicMock()
 
         with (
-            patch.object(runner, "_get_branch_name", return_value="main"),
+            patch.object(runner, "get_branch_name", return_value="main"),
             patch("fix_die_repeat.runner.run_command") as mock_run,
-            patch.object(runner, "_get_pr_info", return_value=None),
+            patch.object(runner, "get_pr_info", return_value=None),
         ):
             # gh auth succeeds
             mock_run.return_value = (0, "", "")
 
-            runner._fetch_pr_threads()
+            runner.fetch_pr_threads()
 
             # Should log info about no PR found
             assert runner.logger.info.called
@@ -1801,13 +1801,13 @@ class TestFetchPrThreads:
         }
 
         with (
-            patch.object(runner, "_get_branch_name", return_value="main"),
+            patch.object(runner, "get_branch_name", return_value="main"),
             patch("fix_die_repeat.runner.run_command") as mock_run,
-            patch.object(runner, "_get_pr_info", return_value=pr_info),
-            patch.object(runner, "_check_pr_threads_cache", return_value=False),
+            patch.object(runner, "get_pr_info", return_value=pr_info),
+            patch.object(runner, "check_pr_threads_cache", return_value=False),
             patch.object(
                 runner,
-                "_fetch_pr_threads_gql",
+                "fetch_pr_threads_gql",
                 return_value=[
                     {"isResolved": True, "id": "thread1"},
                     {"isResolved": True, "id": "thread2"},
@@ -1816,7 +1816,7 @@ class TestFetchPrThreads:
         ):
             mock_run.return_value = (0, "", "")
 
-            runner._fetch_pr_threads()
+            runner.fetch_pr_threads()
 
             # Should log info about no unresolved threads
             assert runner.logger.info.called
@@ -1847,13 +1847,13 @@ class TestFetchPrThreads:
         }
 
         with (
-            patch.object(runner, "_get_branch_name", return_value="main"),
+            patch.object(runner, "get_branch_name", return_value="main"),
             patch("fix_die_repeat.runner.run_command") as mock_run,
-            patch.object(runner, "_get_pr_info", return_value=pr_info),
-            patch.object(runner, "_check_pr_threads_cache", return_value=False),
+            patch.object(runner, "get_pr_info", return_value=pr_info),
+            patch.object(runner, "check_pr_threads_cache", return_value=False),
             patch.object(
                 runner,
-                "_fetch_pr_threads_gql",
+                "fetch_pr_threads_gql",
                 return_value=[
                     {
                         "isResolved": False,
@@ -1871,7 +1871,7 @@ class TestFetchPrThreads:
         ):
             mock_run.return_value = (0, "", "")
 
-            runner._fetch_pr_threads()
+            runner.fetch_pr_threads()
 
             # Should have written to review_current_file
             assert paths.review_current_file.exists()
@@ -1904,21 +1904,21 @@ class TestFetchPrThreads:
         }
 
         with (
-            patch.object(runner, "_get_branch_name", return_value="main"),
+            patch.object(runner, "get_branch_name", return_value="main"),
             patch("fix_die_repeat.runner.run_command") as mock_run,
-            patch.object(runner, "_get_pr_info", return_value=pr_info),
-            patch.object(runner, "_check_pr_threads_cache", return_value=True),
+            patch.object(runner, "get_pr_info", return_value=pr_info),
+            patch.object(runner, "check_pr_threads_cache", return_value=True),
         ):
             mock_run.return_value = (0, "", "")
 
-            runner._fetch_pr_threads()
+            runner.fetch_pr_threads()
 
             # Should log about using cache
             assert runner.logger.info.called
 
 
 class TestCompleteSuccess:
-    """Tests for _complete_success method."""
+    """Tests for complete_success method."""
 
     def test_complete_success(self, tmp_path: Path) -> None:
         """Test completing the run successfully."""
@@ -1951,7 +1951,7 @@ class TestCompleteSuccess:
         ):
             mock_format.return_value = "0s"
             with suppress(SystemExit):
-                runner._complete_success()
+                runner.complete_success()
 
             # Check that exit was called with 0
             mock_exit.assert_called_once_with(0)
@@ -1990,7 +1990,7 @@ class TestCompleteSuccess:
         ):
             mock_format.return_value = "5m 30s"
             with suppress(SystemExit):
-                runner._complete_success()
+                runner.complete_success()
 
             # Check that exit was called with 0
             mock_exit.assert_called_once_with(0)
