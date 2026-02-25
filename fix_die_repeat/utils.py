@@ -201,15 +201,8 @@ def _should_exclude_file(basename: str, exclude_patterns: list[str]) -> bool:
         True if file should be excluded
 
     """
-    for pattern in exclude_patterns:
-        if basename.lower() == pattern.lower().replace("*", ""):
-            if pattern.startswith("*"):
-                suffix = pattern[1:]
-                if basename.endswith(suffix):
-                    return True
-            elif basename == pattern:
-                return True
-    return False
+    basename_lower = basename.lower()
+    return any(fnmatch.fnmatchcase(basename_lower, pattern.lower()) for pattern in exclude_patterns)
 
 
 def get_changed_files(

@@ -524,14 +524,24 @@ class TestCollectGitFilesWithChanges:
 class TestShouldExcludeFile:
     """Tests for _should_exclude_file helper."""
 
-    def test_should_exclude_file_suffix(self) -> None:
-        """Test excluding files with suffix patterns."""
-        assert _should_exclude_file("-lock.json", ["*-lock.json"]) is True
+    def test_should_exclude_file_glob_suffix(self) -> None:
+        """Test excluding files with suffix glob patterns."""
+        assert _should_exclude_file("package.lock", ["*.lock"]) is True
+        assert _should_exclude_file("package-lock.json", ["*-lock.json"]) is True
+
+    def test_should_exclude_file_glob_substring(self) -> None:
+        """Test excluding files with mid-pattern globs."""
+        assert _should_exclude_file("script.min.js", ["*.min.*"]) is True
+        assert _should_exclude_file("script.js", ["*.min.*"]) is False
 
     def test_should_exclude_file_exact(self) -> None:
         """Test excluding files with exact patterns."""
         assert _should_exclude_file("skip.log", ["skip.log"]) is True
         assert _should_exclude_file("keep.log", ["skip.log"]) is False
+
+    def test_should_exclude_file_case_insensitive(self) -> None:
+        """Test case-insensitive pattern matching."""
+        assert _should_exclude_file("PACKAGE.LOCK", ["*.lock"]) is True
 
 
 class TestGetChangedFilesFiltering:

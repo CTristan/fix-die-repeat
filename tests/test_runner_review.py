@@ -15,6 +15,7 @@ class TestRunReviewFixAttempt:
         settings.model = "test-model"
         paths = MagicMock()
         paths.fdr_dir = tmp_path
+        paths.project_root = tmp_path
         paths.review_current_file = tmp_path / "review_current.md"
         paths.review_file = tmp_path / "review.md"
         paths.build_history_file = tmp_path / "build_history.md"
@@ -32,18 +33,23 @@ class TestRunReviewFixAttempt:
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
         runner.resolve_pr_threads = MagicMock()  # type: ignore[method-assign]
 
-        # Create review current file
         paths.review_current_file.write_text("[CRITICAL] Bug found")
 
         with patch("fix_die_repeat.runner.run_command") as mock_git:
-            mock_git.return_value = (0, "M file1.py\n", "")
+            mock_git.side_effect = [
+                (0, "M file1.py\n", ""),
+                (0, " file1.py | 1 +\n", ""),
+            ]
 
             result = runner.run_review_fix_attempt(1, 3)
 
-            # Should return True on success
-            assert result is True
-            # Should have called run_pi_safe
-            assert runner.run_pi_safe.called
+        assert result is True
+        assert runner.run_pi_safe.called
+        pi_args = runner.run_pi_safe.call_args.args
+        assert "--tools" in pi_args
+        assert "read,edit,write,bash,grep,find,ls" in pi_args
+        assert mock_git.call_args_list[0].kwargs["cwd"] == tmp_path
+        assert mock_git.call_args_list[1].kwargs["cwd"] == tmp_path
 
     def test_run_review_fix_attempt_pi_fails(self, tmp_path: Path) -> None:
         """Test running review fix attempt when pi fails."""
@@ -51,6 +57,7 @@ class TestRunReviewFixAttempt:
         settings.model = "test-model"
         paths = MagicMock()
         paths.fdr_dir = tmp_path
+        paths.project_root = tmp_path
         paths.review_current_file = tmp_path / "review_current.md"
         paths.review_file = tmp_path / "review.md"
         paths.build_history_file = tmp_path / "build_history.md"
@@ -67,17 +74,15 @@ class TestRunReviewFixAttempt:
         runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(1, "", "error"))  # type: ignore[method-assign]
 
-        # Create review current file
         paths.review_current_file.write_text("[CRITICAL] Bug found")
 
         with patch("fix_die_repeat.runner.run_command") as mock_git:
-            # No files modified
             mock_git.return_value = (0, "", "")
 
             result = runner.run_review_fix_attempt(1, 3)
 
-            # Should return False when no files changed
-            assert result is False
+        assert result is False
+        assert mock_git.call_args.kwargs["cwd"] == tmp_path
 
     def test_run_review_fix_attempt_no_files_changed(self, tmp_path: Path) -> None:
         """Test running review fix attempt when no files change."""
@@ -85,6 +90,7 @@ class TestRunReviewFixAttempt:
         settings.model = "test-model"
         paths = MagicMock()
         paths.fdr_dir = tmp_path
+        paths.project_root = tmp_path
         paths.review_current_file = tmp_path / "review_current.md"
         paths.review_file = tmp_path / "review.md"
         paths.build_history_file = tmp_path / "build_history.md"
@@ -102,7 +108,6 @@ class TestRunReviewFixAttempt:
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
         runner.resolve_pr_threads = MagicMock()  # type: ignore[method-assign]
 
-        # Create review current file
         paths.review_current_file.write_text("[CRITICAL] Bug found")
 
         with patch("fix_die_repeat.runner.run_command") as mock_git:
@@ -110,10 +115,9 @@ class TestRunReviewFixAttempt:
 
             result = runner.run_review_fix_attempt(1, 3)
 
-            # Should return False when no files changed
-            assert result is False
-            # Should increment consecutive_toolless_attempts
-            assert runner.consecutive_toolless_attempts == 1
+        assert result is False
+        assert runner.consecutive_toolless_attempts == 1
+        assert mock_git.call_args.kwargs["cwd"] == tmp_path
 
 
 class TestResolvePrThreads:

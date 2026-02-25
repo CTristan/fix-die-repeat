@@ -1409,6 +1409,7 @@ class TestCheckPrThreadsCache:
         paths.pr_threads_cache = tmp_path / "pr_threads_cache"
         paths.pr_threads_hash_file = tmp_path / "pr_threads_hash"
         paths.review_current_file = tmp_path / "review_current.md"
+        paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
         paths.pi_log = tmp_path / "pi.log"
 
         runner = PiRunner.__new__(PiRunner)
@@ -1419,6 +1420,7 @@ class TestCheckPrThreadsCache:
         # Setup cache
         paths.pr_threads_hash_file.write_text("owner/repo/123")
         paths.pr_threads_cache.write_text("--- Thread #1 ---\nID: thread1\n")
+        paths.pr_thread_ids_file.write_text("thread1\n")
         paths.review_current_file.write_text("")
 
         result = runner.check_pr_threads_cache("owner/repo/123")

@@ -144,12 +144,12 @@ fix-die-repeat
    - Generate a git diff of all changes
    - Invoke pi to review for issues
    - If pi finds [CRITICAL] issues, write them to `.fix-die-repeat/review_current.md`
-   - If pi finds no issues, write an empty `review_current.md`
+   - If pi finds no issues, write the explicit `NO_ISSUES` marker to `.fix-die-repeat/review_current.md`
 4. **Resolution Phase** (if review found issues):
    - Invoke pi with `review_current.md` to fix issues
    - If in PR review mode, track which threads were resolved
    - Loop back to check phase
-5. **Exit**: When checks pass and `review_current.md` is empty
+5. **Exit**: When checks pass and `review_current.md` contains the `NO_ISSUES` marker
 
 ### Context Management
 
@@ -453,7 +453,9 @@ Install pi and ensure it's on your PATH. See: https://github.com/mariozechner/pi
 
 This is expected behavior — the loop exits successfully when:
 1. Your check command returns exit code 0
-2. pi writes an empty `review_current.md` (no issues found)
+2. pi writes `NO_ISSUES` to `review_current.md`
+
+Note: an empty `review_current.md` is treated as an ambiguous legacy fallback and logs a warning.
 
 ### "Edit commands failed" but files show as changed
 

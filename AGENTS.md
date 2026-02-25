@@ -227,6 +227,8 @@ pi -p "resolve_pr_threads(threadIds: [...safe_ids...])"
 
 This prevents accidental resolution of threads that pi didn't actually address.
 
+**Cache hardening note (2026-02-24):** `check_pr_threads_cache()` no longer derives in-scope IDs from cached markdown content. It now requires the persisted `.pr_thread_ids_in_scope` file and refetches from GitHub when that file is missing/empty. Also, multiline PR comment bodies are indented when formatted so `ID:`-prefixed text inside comments cannot be mistaken for top-level thread headers.
+
 ### 6. No-Progress Detection (PR Review Mode)
 
 In PR review mode, tracks when the same PR threads remain AND git state is unchanged across 3 iterations:

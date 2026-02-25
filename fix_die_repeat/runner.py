@@ -524,13 +524,17 @@ class PiRunner:
         )
 
         self.logger.info("Running pi to fix errors (attempt %s)...", fix_attempt)
-        returncode, _, _ = self.run_pi_safe(*pi_args, prompt)
+        pi_returncode, _, _ = self.run_pi_safe(*pi_args, prompt)
 
-        if returncode != 0:
+        if pi_returncode != 0:
             self.logger.info("pi could not produce a fix on attempt %s.", fix_attempt)
 
         # Check if changes were made
-        returncode, stdout, _ = run_command("git status --porcelain", check=False)
+        _git_returncode, stdout, _ = run_command(
+            "git status --porcelain",
+            cwd=self.paths.project_root,
+            check=False,
+        )
         if not stdout.strip():
             self.logger.error(
                 "Pi reported success but NO files were modified. This suggests "
@@ -543,12 +547,16 @@ class PiRunner:
                 )
         else:
             # Record history
-            returncode, stat_output, _ = run_command("git diff --stat")
+            _git_returncode, stat_output, _ = run_command(
+                "git diff --stat",
+                cwd=self.paths.project_root,
+                check=False,
+            )
             with self.paths.build_history_file.open("a") as f:
                 f.write(f"## Iteration {self.iteration} fix attempt {fix_attempt}\n")
                 f.write(f"{stat_output}\n\n")
 
-        return returncode
+        return pi_returncode
 
     def prepare_fix_context(self) -> tuple[list[str], str, str, str]:
         """Prepare context for fix attempts.
@@ -736,7 +744,10 @@ class PiRunner:
             Branch name or None if not on a branch
 
         """
-        returncode, branch, _ = run_command("git branch --show-current")
+        returncode, branch, _ = run_command(
+            "git branch --show-current",
+            cwd=self.paths.project_root,
+        )
         if returncode != 0 or not branch.strip():
             return None
         return branch.strip()
@@ -753,6 +764,7 @@ class PiRunner:
         """
         returncode, pr_json, _ = run_command(
             f"gh pr view {branch} --json number,url,headRepository,headRepositoryOwner",
+            cwd=self.paths.project_root,
         )
         if returncode != 0:
             return None
@@ -775,17 +787,129 @@ class PiRunner:
             True if cache was used, False otherwise
 
         """
-        if (
+        has_valid_cache = (
             self.paths.pr_threads_cache.exists()
             and self.paths.pr_threads_hash_file.exists()
             and self.paths.pr_threads_hash_file.read_text() == cache_key
-        ):
-            self.logger.info("Using cached PR threads (unchanged)...")
-            self.paths.review_current_file.write_text(self.paths.pr_threads_cache.read_text())
-            thread_count = self.paths.review_current_file.read_text().count("--- Thread #")
-            self.logger.info("Found %s unresolved threads from cache.", thread_count)
-            return True
-        return False
+        )
+        if not has_valid_cache:
+            return False
+
+        if not self.paths.pr_thread_ids_file.exists():
+            self.logger.warning(
+                "PR thread cache exists but in-scope ID file is missing. Refetching threads.",
+            )
+            return False
+
+        in_scope_ids = [
+            thread_id.strip()
+            for thread_id in self.paths.pr_thread_ids_file.read_text().splitlines()
+            if thread_id.strip()
+        ]
+        if not in_scope_ids:
+            self.logger.warning(
+                "PR thread cache exists but in-scope ID file is empty. Refetching threads.",
+            )
+            return False
+
+        self.logger.info("Using cached PR threads (unchanged)...")
+        cached_content = self.paths.pr_threads_cache.read_text()
+        self.paths.review_current_file.write_text(cached_content)
+        self._persist_in_scope_thread_ids(in_scope_ids)
+        self.logger.info("Found %s unresolved threads from cache.", len(in_scope_ids))
+        return True
+
+    @staticmethod
+    def _extract_thread_ids(threads: list[dict]) -> list[str]:
+        """Extract GraphQL thread IDs from thread dictionaries.
+
+        Args:
+            threads: Thread dictionaries
+
+        Returns:
+            Thread IDs in list order
+
+        """
+        return [str(thread["id"]) for thread in threads if thread.get("id")]
+
+    def _persist_in_scope_thread_ids(self, thread_ids: list[str]) -> None:
+        """Persist in-scope PR thread IDs for safe resolution.
+
+        Args:
+            thread_ids: Thread IDs to persist
+
+        """
+        unique_ids = list(dict.fromkeys(thread_id for thread_id in thread_ids if thread_id))
+
+        if unique_ids:
+            self.paths.pr_thread_ids_file.write_text("\n".join(unique_ids) + "\n")
+            return
+
+        self.paths.pr_thread_ids_file.unlink(missing_ok=True)
+
+    @staticmethod
+    def _latest_thread_comment_timestamp(thread: dict) -> str:
+        """Get the latest comment timestamp available for a review thread.
+
+        Args:
+            thread: Review thread payload from GraphQL
+
+        Returns:
+            Latest ``createdAt`` timestamp as an ISO string, or empty string
+
+        """
+        comments = thread.get("comments")
+        if not isinstance(comments, dict):
+            return ""
+
+        nodes = comments.get("nodes")
+        if not isinstance(nodes, list):
+            return ""
+
+        timestamps = [
+            str(node.get("createdAt"))
+            for node in nodes
+            if isinstance(node, dict) and node.get("createdAt")
+        ]
+        if not timestamps:
+            return ""
+
+        return max(timestamps)
+
+    def _limit_unresolved_threads(self, unresolved_threads: list[dict]) -> list[dict]:
+        """Limit unresolved PR threads based on settings.max_pr_threads.
+
+        Args:
+            unresolved_threads: All unresolved PR threads
+
+        Returns:
+            Limited unresolved threads suitable for the prompt
+
+        """
+        total_unresolved = len(unresolved_threads)
+        max_threads = self.settings.max_pr_threads
+
+        if not isinstance(max_threads, int) or max_threads <= 0 or total_unresolved <= max_threads:
+            return unresolved_threads
+
+        unresolved_threads = sorted(
+            unresolved_threads,
+            key=lambda thread: (
+                self._latest_thread_comment_timestamp(thread),
+                str(thread.get("id") or ""),
+            ),
+            reverse=True,
+        )
+        limited_threads = unresolved_threads[:max_threads]
+        skipped_threads = unresolved_threads[max_threads:]
+        skipped_ids = self._extract_thread_ids(skipped_threads)
+
+        self.logger.warning(
+            pr_threads_unsafe_count_warning(len(skipped_threads), skipped_ids),
+        )
+        self.logger.info(pr_threads_safe_only_message(len(limited_threads)))
+
+        return limited_threads
 
     def fetch_pr_threads_gql(
         self,
@@ -814,10 +938,11 @@ class PiRunner:
                                 id
                                 path
                                 line
-                                comments(first: 10) {
+                                comments(last: 10) {
                                     nodes {
                                         author { login }
                                         body
+                                        createdAt
                                     }
                                 }
                             }
@@ -827,10 +952,22 @@ class PiRunner:
             }
         """
 
-        returncode, gql_result, _ = run_command(
-            f"gh api graphql -f query='{query}' -F owner={repo_owner} "
-            f"-F repo={repo_name} -F number={pr_number}",
-        )
+        query_single_line = " ".join(line.strip() for line in query.splitlines() if line.strip())
+        cmd = [
+            "gh",
+            "api",
+            "graphql",
+            "-f",
+            f"query={query_single_line}",
+            "-F",
+            f"owner={repo_owner}",
+            "-F",
+            f"repo={repo_name}",
+            "-F",
+            f"number={pr_number}",
+        ]
+
+        returncode, gql_result, _ = run_command(cmd, cwd=self.paths.project_root)
         if returncode != 0:
             return None
 
@@ -840,6 +977,23 @@ class PiRunner:
         except (json.JSONDecodeError, KeyError):
             self.logger.exception("Failed to parse PR thread data")
             return None
+
+    @staticmethod
+    def _format_thread_comment(author: str, body: str) -> list[str]:
+        """Format a thread comment without exposing parser-sensitive prefixes.
+
+        Args:
+            author: Comment author login
+            body: Raw comment body
+
+        Returns:
+            Formatted comment lines safe to embed in cached markdown
+
+        """
+        comment_lines = body.splitlines() or [""]
+        formatted_lines = [f"[{author}]: {comment_lines[0]}"]
+        formatted_lines.extend(f"    {line}" for line in comment_lines[1:])
+        return formatted_lines
 
     def format_pr_threads(self, threads: list, pr_number: int, pr_url: str) -> str:
         """Format PR threads for display.
@@ -863,8 +1017,8 @@ class PiRunner:
 
             for comment in thread["comments"]["nodes"]:
                 author = comment["author"]["login"] if comment.get("author") else "unknown"
-                body = comment["body"]
-                threads_output.append(f"[{author}]: {body}")
+                body = str(comment.get("body") or "")
+                threads_output.extend(self._format_thread_comment(author, body))
 
             threads_output.append("")
 
@@ -889,7 +1043,7 @@ class PiRunner:
         self.logger.info("Fetching PR info for branch: %s", branch)
 
         # Check gh auth
-        returncode, _, _ = run_command("gh auth status")
+        returncode, _, _ = run_command("gh auth status", cwd=self.paths.project_root)
         if returncode != 0:
             self.logger.error("GitHub CLI not authenticated. Skipping PR review.")
             return
@@ -924,10 +1078,13 @@ class PiRunner:
             return
 
         unresolved_threads = [t for t in threads if not t.get("isResolved", True)]
+        unresolved_threads = self._limit_unresolved_threads(unresolved_threads)
 
         if unresolved_threads:
             content = self.format_pr_threads(unresolved_threads, pr_number, pr_url)
             self.paths.review_current_file.write_text(content)
+            thread_ids = self._extract_thread_ids(unresolved_threads)
+            self._persist_in_scope_thread_ids(thread_ids)
             self.logger.info(
                 "Found %s unresolved threads. Added to review queue.",
                 len(unresolved_threads),
@@ -938,6 +1095,8 @@ class PiRunner:
             self.paths.pr_threads_hash_file.write_text(cache_key)
         else:
             self.logger.info("No unresolved threads found.")
+            self.paths.review_current_file.write_text("")
+            self._persist_in_scope_thread_ids([])
 
     def generate_diff(self) -> str:
         """Generate git diff for review.
@@ -948,10 +1107,16 @@ class PiRunner:
         """
         diff_content = ""
         if self.start_sha:
-            _returncode, diff_output, _ = run_command(f"git diff {self.start_sha}")
+            _returncode, diff_output, _ = run_command(
+                f"git diff {self.start_sha}",
+                cwd=self.paths.project_root,
+            )
             diff_content += diff_output
         else:
-            _returncode, diff_output, _ = run_command("git diff HEAD")
+            _returncode, diff_output, _ = run_command(
+                "git diff HEAD",
+                cwd=self.paths.project_root,
+            )
             diff_content += diff_output
         return diff_content
 
@@ -965,7 +1130,11 @@ class PiRunner:
             Diff content with untracked files added
 
         """
-        returncode, new_files, _ = run_command("git ls-files --others --exclude-standard")
+        returncode, new_files, _ = run_command(
+            "git ls-files --others --exclude-standard",
+            cwd=self.paths.project_root,
+            check=False,
+        )
         if returncode != 0:
             return diff_content
 
@@ -998,10 +1167,11 @@ class PiRunner:
         )
 
         try:
-            _returncode, file_type, _ = run_command(f"file {file_path}")
-            if "text" in file_type.lower():
-                for line in file_path.open():
-                    pseudo_diff += f"+{line}"
+            returncode, file_type, _ = run_command(["file", str(file_path)], check=False)
+            if returncode == 0 and "text" in file_type.lower():
+                with file_path.open(encoding="utf-8", errors="replace") as file_handle:
+                    for line in file_handle:
+                        pseudo_diff += f"+{line}"
             else:
                 pseudo_diff += f"Binary file {filepath} differs\n"
         except OSError:
@@ -1194,7 +1364,7 @@ class PiRunner:
             max_fix_attempts,
         )
 
-        pi_args = ["-p"]
+        pi_args = ["-p", "--tools", "read,edit,write,bash,grep,find,ls"]
 
         if self.settings.model:
             pi_args.extend(["--model", self.settings.model])
@@ -1225,7 +1395,11 @@ class PiRunner:
             )
 
         # Check if changes were made
-        returncode, stdout, _ = run_command("git status --porcelain")
+        returncode, stdout, _ = run_command(
+            "git status --porcelain",
+            cwd=self.paths.project_root,
+            check=False,
+        )
         if not stdout.strip():
             self.consecutive_toolless_attempts += 1
             self.logger.error(
@@ -1242,7 +1416,11 @@ class PiRunner:
 
         self.consecutive_toolless_attempts = 0
         # Record history
-        returncode, stat_output, _ = run_command("git diff --stat")
+        returncode, stat_output, _ = run_command(
+            "git diff --stat",
+            cwd=self.paths.project_root,
+            check=False,
+        )
         with self.paths.build_history_file.open("a") as f:
             f.write(f"## Iteration {self.iteration} Review Fixes (attempt {fix_attempt})\n")
             f.write(f"{stat_output}\n\n")
@@ -1339,18 +1517,21 @@ class PiRunner:
                 self.paths.pr_threads_hash_file.unlink(missing_ok=True)
                 self.fetch_pr_threads()
 
-                if not self.paths.review_current_file.read_text().strip():
+                if (
+                    not self.paths.review_current_file.exists()
+                    or not self.paths.review_current_file.read_text().strip()
+                ):
                     self.logger.info("All PR threads have been resolved! Exiting successfully.")
                     play_completion_sound()
                     sys.exit(0)
-                else:
-                    remaining_count = self.paths.review_current_file.read_text().count(
-                        "--- Thread #",
-                    )
-                    self.logger.info(
-                        "%s PR threads remain. Continuing to next iteration.",
-                        remaining_count,
-                    )
+
+                remaining_count = self.paths.review_current_file.read_text().count(
+                    "--- Thread #",
+                )
+                self.logger.info(
+                    "%s PR threads remain. Continuing to next iteration.",
+                    remaining_count,
+                )
             else:
                 self.logger.warning("Failed to resolve some threads. Continuing to next iteration.")
         else:
