@@ -9,27 +9,35 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 VENV_DIR="$PROJECT_ROOT/.venv"
 
 echo "🚀 Setting up development environment..."
+cd "$PROJECT_ROOT"
 
 # Ensure uv is installed
 if ! command -v uv &> /dev/null; then
-    echo "📦 Installing uv..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.local/bin:$PATH"
+    echo "📦 Installing uv via pip..."
+
+    if ! command -v python3 &> /dev/null; then
+        echo "❌ python3 is required to install uv. Please install uv manually and re-run this script." >&2
+        exit 1
+    fi
+
+    python3 -m pip install --user --upgrade uv
+    UV_USER_BIN="$(python3 -c 'import site; print(site.USER_BASE)')/bin"
+    export PATH="$UV_USER_BIN:$PATH"
 fi
 
 # Create venv if it doesn't exist
 if [ ! -d "$VENV_DIR" ]; then
     echo "📦 Creating virtual environment..."
-    uv venv
+    uv venv "$VENV_DIR"
 fi
 
-# Install development dependencies
-echo "📦 Installing development dependencies..."
-uv pip install ruff mypy pytest pytest-cov pre-commit
+# Sync project + dev dependencies from pyproject.toml/uv.lock
+echo "📦 Syncing development dependencies with uv..."
+uv sync --extra dev
 
-# Install pre-commit hooks (use venv's pre-commit)
+# Install pre-commit hooks through uv-managed environment
 echo "🪝 Installing pre-commit hooks..."
-"$VENV_DIR/bin/pre-commit" install
+uv run pre-commit install
 echo "✅ Pre-commit hooks installed"
 
 echo "✅ Development environment setup complete!"
