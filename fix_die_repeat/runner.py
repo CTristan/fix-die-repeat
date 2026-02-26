@@ -84,7 +84,7 @@ class _FileLock:
         """Acquire the lock."""
         if sys.platform == "win32":  # pragma: no cover
             # Windows: use msvcrt.locking
-            msvcrt.locking(self.file_handle.fileno(), msvcrt.LK_LOCK, 1)
+            msvcrt.locking(self.file_handle.fileno(), msvcrt.LK_LOCK, 65535)
         else:  # pragma: no cover
             # Unix: use fcntl.flock with LOCK_EX
             fcntl.flock(self.file_handle.fileno(), fcntl.LOCK_EX)
@@ -100,7 +100,7 @@ class _FileLock:
         if sys.platform == "win32":  # pragma: no cover
             # Windows: use msvcrt.locking with LK_UNLCK
             self.file_handle.seek(0)
-            msvcrt.locking(self.file_handle.fileno(), msvcrt.LK_UNLCK, 1)
+            msvcrt.locking(self.file_handle.fileno(), msvcrt.LK_UNLCK, 65535)
         else:  # pragma: no cover
             # Unix: use fcntl.flock with LOCK_UN
             fcntl.flock(self.file_handle.fileno(), fcntl.LOCK_UN)
@@ -114,7 +114,7 @@ class IntrospectionYamlParams:
     violating PLR0913 (too many arguments).
     """
 
-    pr_number: str
+    pr_number: int | str
     pr_url: str
     in_scope_ids: list[str]
     resolved_set: set[str]
@@ -1878,7 +1878,7 @@ class PiRunner:
 
         return in_scope_ids, set(resolved_ids)
 
-    def _extract_pr_info(self, pr_info: dict) -> tuple[str, str]:
+    def _extract_pr_info(self, pr_info: dict) -> tuple[int | str, str]:
         """Extract PR number and URL from PR info.
 
         Args:
@@ -1891,7 +1891,8 @@ class PiRunner:
         raw_number = pr_info.get("number")
         raw_url = pr_info.get("url")
 
-        pr_number = "unknown" if raw_number is None else str(raw_number)
+        # Preserve integer type for YAML output (will be unquoted in YAML)
+        pr_number = "unknown" if raw_number is None else raw_number
         pr_url = "unknown" if raw_url is None else str(raw_url)
         return pr_number, pr_url
 
@@ -1947,18 +1948,21 @@ class PiRunner:
         """
         lines = [
             "# Introspection input data for PR review",
-            f"pr_number: {params.pr_number}",
-            f"pr_url: {params.pr_url}",
-            "",
-            "# In-scope thread IDs",
-            "in_scope_thread_ids:",
         ]
 
-        # Add thread outcomes
-        for thread_id in params.in_scope_ids:
-            outcome = "fixed" if thread_id in params.resolved_set else "wont-fix"
-            lines.append(f"  - id: {thread_id}")
-            lines.append(f"    outcome: {outcome}")
+        # Use yaml.safe_dump for proper escaping and quoting
+        header_data = {
+            "pr_number": params.pr_number,
+            "pr_url": params.pr_url,
+            "in_scope_thread_ids": [
+                {
+                    "id": thread_id,
+                    "outcome": ("fixed" if thread_id in params.resolved_set else "wont-fix"),
+                }
+                for thread_id in params.in_scope_ids
+            ],
+        }
+        lines.append(yaml.safe_dump(header_data, default_flow_style=False, sort_keys=False).strip())
 
         # Add PR threads content
         lines.extend(
