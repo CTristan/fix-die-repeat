@@ -635,8 +635,7 @@ class PiRunner:
 
             if self._success_complete:
                 self._run_post_run_introspection()
-                self.complete_success()
-                return 0
+                return self.complete_success()
 
         return 0
 
