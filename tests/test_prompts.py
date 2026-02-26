@@ -30,6 +30,7 @@ class TestRenderPrompt:
         assert ".fix-die-repeat/build_history.md" in prompt
         assert "- app.py" in prompt
         assert "CRITICAL WARNING: large file" in prompt
+        assert "structured data or external tool output" in prompt
 
     def test_fix_checks_template_without_optional_sections(self) -> None:
         """Render fix_checks prompt without optional sections."""
@@ -79,6 +80,14 @@ class TestRenderPrompt:
         assert "Project policy: no violations of AGENTS.md" not in prompt
         assert "If you find any policy violations from AGENTS.md" not in prompt
         assert "No test configuration changes without explicit approval" in prompt
+        assert "external tool output or parsed JSON/YAML" in prompt
+        assert (
+            "Data serialization: structured outputs (JSON/YAML/etc.) use safe serializers" in prompt
+        )
+        assert (
+            "docs/prompts/config instructions and examples match actual behavior "
+            "and required fields" in prompt
+        )
 
     def test_introspect_pr_review_template(self, tmp_path: Path) -> None:
         """Render introspect_pr_review template with all required variables."""
