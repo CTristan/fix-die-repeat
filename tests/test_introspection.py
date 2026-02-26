@@ -7,6 +7,7 @@ import pytest
 
 from fix_die_repeat.config import Paths, Settings, get_introspection_file_path
 from fix_die_repeat.runner import PiRunner
+from fix_die_repeat.runner_introspection import IntrospectionManager
 
 
 class TestGetIntrospectionFilePath:
@@ -249,7 +250,14 @@ class TestRunIntrospection:
         test_global_file.write_text("date: '2026-01-01'\nstatus: pending\n")
 
         introspection_result = (
-            "---\ndate: '2026-02-26'\nproject: 'test-project'\nstatus: pending\nthreads: []\n...\n"
+            "---\n"
+            "date: '2026-02-26'\n"
+            "project: 'test-project'\n"
+            "pr_number: 2\n"
+            "pr_url: 'https://github.com/test/test/pull/2'\n"
+            "status: pending\n"
+            "threads: []\n"
+            "...\n"
         )
         runner.paths.introspection_result_file.write_text(introspection_result)
         pr_json = '{"number": 2, "url": "https://github.com/test/test/pull/2"}'
@@ -312,6 +320,55 @@ class TestRunIntrospection:
         # File should not be modified
         content = test_global_file.read_text()
         assert content == original_content
+
+
+class TestIntrospectionPayloadValidation:
+    """Tests for introspection payload validation."""
+
+    @pytest.fixture
+    def manager(self, tmp_path: Path) -> IntrospectionManager:
+        """Create an IntrospectionManager with temporary paths."""
+        settings = Settings(pr_review=True, pr_review_introspect=True)  # type: ignore[call-arg]  # pydantic's populate_by_name=True allows field names; mypy needs pydantic-mypy plugin
+        paths = Paths(project_root=tmp_path)
+        paths.ensure_fdr_dir()
+        logger = MagicMock()
+        return IntrospectionManager(settings, paths, tmp_path, logger)
+
+    @staticmethod
+    def _base_payload() -> dict[str, object]:
+        """Return a minimal valid payload."""
+        return {
+            "date": "2026-02-26",
+            "project": "test-project",
+            "pr_number": 1,
+            "pr_url": "https://github.com/test/test/pull/1",
+            "status": "pending",
+            "threads": [
+                {
+                    "id": "thread-1",
+                    "title": "Issue title",
+                    "category": "correctness",
+                    "outcome": "fixed",
+                    "summary": "Fixed the issue",
+                    "relevance": "high",
+                }
+            ],
+        }
+
+    def test_valid_payload_passes(self, manager: IntrospectionManager) -> None:
+        """Test that a valid payload passes validation."""
+        payload = self._base_payload()
+        assert manager.validate_introspection_payload(payload)
+
+    def test_wont_fix_requires_reason(self, manager: IntrospectionManager) -> None:
+        """Test that wont-fix threads require a reason."""
+        payload = self._base_payload()
+        threads = payload["threads"]
+        if isinstance(threads, list) and threads:
+            thread = threads[0]
+            if isinstance(thread, dict):
+                thread["outcome"] = "wont-fix"
+        assert not manager.validate_introspection_payload(payload)
 
 
 class TestIntrospectionNonBlocking:

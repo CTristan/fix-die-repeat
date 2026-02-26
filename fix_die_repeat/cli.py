@@ -1,6 +1,5 @@
 """Command-line interface for fix-die-repeat."""
 
-import sys
 import traceback
 
 import click
@@ -111,21 +110,8 @@ def main(**kwargs: str | int | bool | None) -> None:
 
     """
     debug = bool(kwargs.get("debug", False))
-    try:
-        options = _build_cli_options(kwargs)
-        _run_main(options)
-
-    except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Interrupted by user[/yellow]")
-        sys.exit(130)
-    except Exception as e:
-        console.print(f"[red]Unexpected error: {e}[/red]")
-        if debug:
-            console.print(traceback.format_exc())
-        sys.exit(1)
+    exit_code = _run_main_with_error_handling(kwargs, debug=debug)
+    raise SystemExit(exit_code)
 
 
 def _build_cli_options(kwargs: dict[str, str | int | bool | None]) -> CliOptions:
@@ -164,6 +150,37 @@ def _build_cli_options(kwargs: dict[str, str | int | bool | None]) -> CliOptions
         test_model=str(test_model) if test_model is not None else None,
         debug=bool(kwargs.get("debug", False)),
     )
+
+
+def _run_main_with_error_handling(
+    kwargs: dict[str, str | int | bool | None],
+    *,
+    debug: bool,
+) -> int:
+    """Run the main application with error handling.
+
+    Args:
+        kwargs: Keyword arguments injected by Click decorators
+        debug: Whether debug mode is enabled
+
+    Returns:
+        Exit code for the process
+
+    """
+    try:
+        options = _build_cli_options(kwargs)
+        return _run_main(options)
+    except ValueError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        return 1
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted by user[/yellow]")
+        return 130
+    except Exception as e:
+        console.print(f"[red]Unexpected error: {e}[/red]")
+        if debug:
+            console.print(traceback.format_exc())
+        return 1
 
 
 def _run_main(options: CliOptions) -> int:

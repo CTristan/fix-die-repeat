@@ -3,6 +3,10 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
+from fix_die_repeat import runner as runner_module
+from fix_die_repeat.messages import oscillation_warning
 from fix_die_repeat.runner import PiRunner
 
 # Constants for runner test values
@@ -273,7 +277,11 @@ class TestCheckOscillation:
 
         assert result is None
 
-    def test_oscillation_detected_same_hash(self, tmp_path: Path) -> None:
+    def test_oscillation_detected_same_hash(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Test same hash triggers oscillation warning."""
         settings = MagicMock()
         paths = MagicMock()
@@ -286,17 +294,18 @@ class TestCheckOscillation:
         runner.settings = settings
         runner.paths = paths
         runner.iteration = 3
+        runner.logger = MagicMock()
 
         # Create hash file with a hash we'll match
         paths.checks_hash_file.write_text("abc123:1\ndef456:2\n")
-
-        # Write content that produces same hash as iteration 2
         paths.checks_log.write_text("output 2")
 
-        _ = runner.check_oscillation()
+        monkeypatch.setattr(runner_module, "get_git_revision_hash", lambda _path: "abc123")
 
-        # Note: This test is tricky because git hash-object depends on actual content
-        # The result might be None if hashes don't match, but test structure is correct
+        warning = runner.check_oscillation()
+
+        assert warning == oscillation_warning(1)
+        assert paths.checks_hash_file.read_text().splitlines()[-1] == "abc123:3"
 
 
 class TestCheckAndCompactArtifacts:

@@ -6,13 +6,14 @@ feedback to improve future prompts.
 
 import json
 import logging
+import os
 import sys
 import types
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 import yaml
 
@@ -98,6 +99,25 @@ class _FileLock:
         else:  # pragma: no cover
             # Unix: use fcntl.flock with LOCK_UN
             fcntl.flock(self.file_handle.fileno(), fcntl.LOCK_UN)
+
+
+STATUS_PENDING = "pending"
+STATUS_REVIEWED = "reviewed"
+ALLOWED_STATUSES = {STATUS_PENDING, STATUS_REVIEWED}
+
+OUTCOME_FIXED = "fixed"
+OUTCOME_WONT_FIX = "wont-fix"
+ALLOWED_OUTCOMES = {OUTCOME_FIXED, OUTCOME_WONT_FIX}
+
+THREAD_REQUIRED_FIELDS = ("id", "title", "category", "outcome", "summary", "relevance")
+TOP_LEVEL_REQUIRED_FIELDS = {
+    "date": (str,),
+    "project": (str,),
+    "pr_number": (int, str),
+    "pr_url": (str,),
+    "status": (str,),
+    "threads": (list,),
+}
 
 
 @dataclass(frozen=True)
@@ -222,32 +242,19 @@ class IntrospectionManager:
             if result_content is None:
                 return
 
-            # Validate YAML syntax
-            try:
-                yaml.safe_load(result_content)
-            except yaml.YAMLError as e:
-                self.logger.warning(
-                    "[Introspection] Result is not valid YAML: %s",
-                    e,
-                )
-                self.logger.debug(
-                    "[Introspection] Invalid YAML content:\n%s",
-                    result_content,
-                )
+            if not self._validate_introspection_result(result_content):
                 return
 
             # Append to global introspection file with file locking for atomicity
             global_introspection_file = get_introspection_file_path()
             separator = "\n---\n"
 
-            if global_introspection_file.exists():
-                # Open file with file lock to prevent concurrent write corruption
-                with global_introspection_file.open("a") as f, _FileLock(f):
+            with global_introspection_file.open("a+") as f, _FileLock(f):
+                f.seek(0, os.SEEK_END)
+                is_empty = f.tell() == 0
+                if not is_empty:
                     f.write(separator)
-                    f.write(result_content)
-            else:
-                # For new file, write_text is atomic enough (no concurrent readers yet)
-                global_introspection_file.write_text(result_content)
+                f.write(result_content)
 
             self.logger.info(
                 "[Introspection] Appended analysis to %s",
@@ -367,6 +374,198 @@ class IntrospectionManager:
             return None
 
         return normalized_content
+
+    def _validate_introspection_result(self, result_content: str) -> bool:
+        """Validate introspection YAML structure before append.
+
+        Args:
+            result_content: Normalized YAML content
+
+        Returns:
+            True if YAML is valid and structurally sound, False otherwise
+
+        """
+        try:
+            parsed_content = yaml.safe_load(result_content)
+        except yaml.YAMLError as exc:
+            self.logger.warning(
+                "[Introspection] Result is not valid YAML: %s",
+                exc,
+            )
+            self.logger.debug(
+                "[Introspection] Invalid YAML content:\n%s",
+                result_content,
+            )
+            return False
+
+        if not self.validate_introspection_payload(parsed_content):
+            self.logger.warning(
+                "[Introspection] Result YAML failed structural validation, skipping append",
+            )
+            self.logger.debug(
+                "[Introspection] Invalid YAML content:\n%s",
+                result_content,
+            )
+            return False
+
+        return True
+
+    def validate_introspection_payload(self, payload: object) -> bool:
+        """Validate the parsed introspection YAML payload.
+
+        Args:
+            payload: Parsed YAML data
+
+        Returns:
+            True if payload structure is valid, False otherwise
+
+        """
+        payload_mapping = self._coerce_payload_mapping(payload)
+        if payload_mapping is None:
+            return False
+
+        if not self._validate_top_level_fields(payload_mapping):
+            return False
+
+        if not self._validate_status_value(payload_mapping.get("status")):
+            return False
+
+        threads_value = payload_mapping.get("threads")
+        return self._validate_threads_value(threads_value)
+
+    def _coerce_payload_mapping(self, payload: object) -> dict[str, object] | None:
+        """Ensure the payload is a mapping."""
+        if not isinstance(payload, dict):
+            self.logger.warning(
+                "[Introspection] Result YAML root is not a mapping, skipping append",
+            )
+            return None
+        return cast("dict[str, object]", payload)
+
+    def _validate_top_level_fields(self, payload: dict[str, object]) -> bool:
+        """Validate required top-level fields."""
+        for key, expected_types in TOP_LEVEL_REQUIRED_FIELDS.items():
+            if not self._validate_required_field(payload, key, expected_types):
+                return False
+        return True
+
+    def _validate_required_field(
+        self,
+        payload: dict[str, object],
+        key: str,
+        expected_types: tuple[type, ...],
+    ) -> bool:
+        """Validate that a required field exists and has expected type."""
+        if key not in payload:
+            self.logger.warning(
+                "[Introspection] Result YAML missing top-level key '%s'",
+                key,
+            )
+            return False
+        value = payload.get(key)
+        if not isinstance(value, expected_types):
+            self.logger.warning(
+                "[Introspection] Result YAML key '%s' has unexpected type %s",
+                key,
+                type(value).__name__,
+            )
+            return False
+        if isinstance(value, str) and not value.strip():
+            self.logger.warning(
+                "[Introspection] Result YAML key '%s' is empty",
+                key,
+            )
+            return False
+        return True
+
+    def _validate_status_value(self, status_value: object) -> bool:
+        """Validate status value if present."""
+        if isinstance(status_value, str) and status_value not in ALLOWED_STATUSES:
+            self.logger.warning(
+                "[Introspection] Result YAML has unsupported status '%s'",
+                status_value,
+            )
+            return False
+        return True
+
+    def _validate_threads_value(self, threads_value: object) -> bool:
+        """Validate the thread list and its entries."""
+        if not isinstance(threads_value, list):
+            self.logger.warning(
+                "[Introspection] Result YAML 'threads' is not a list",
+            )
+            return False
+
+        for index, thread in enumerate(threads_value, start=1):
+            if not self._validate_thread_entry(thread, index):
+                return False
+
+        return True
+
+    def _validate_thread_entry(self, thread: object, index: int) -> bool:
+        """Validate a single thread entry."""
+        if not isinstance(thread, dict):
+            self.logger.warning(
+                "[Introspection] Result YAML thread #%s is not a mapping",
+                index,
+            )
+            return False
+
+        thread_mapping = cast("dict[str, object]", thread)
+        missing_fields = [field for field in THREAD_REQUIRED_FIELDS if field not in thread_mapping]
+        if missing_fields:
+            self.logger.warning(
+                "[Introspection] Result YAML thread #%s missing fields: %s",
+                index,
+                ", ".join(missing_fields),
+            )
+            return False
+
+        if not self._validate_thread_field_values(thread_mapping, index):
+            return False
+
+        return self._validate_thread_outcome(thread_mapping, index)
+
+    def _validate_thread_field_values(self, thread: dict[str, object], index: int) -> bool:
+        """Validate required thread fields are non-empty strings."""
+        for field in THREAD_REQUIRED_FIELDS:
+            field_value = thread.get(field)
+            if not isinstance(field_value, str) or not field_value.strip():
+                self.logger.warning(
+                    "[Introspection] Result YAML thread #%s has invalid '%s' value",
+                    index,
+                    field,
+                )
+                return False
+        return True
+
+    def _validate_thread_outcome(self, thread: dict[str, object], index: int) -> bool:
+        """Validate thread outcome and reason requirements."""
+        outcome_value = thread.get("outcome")
+        if outcome_value not in ALLOWED_OUTCOMES:
+            self.logger.warning(
+                "[Introspection] Result YAML thread #%s has invalid outcome '%s'",
+                index,
+                outcome_value,
+            )
+            return False
+
+        reason_value = thread.get("reason")
+        if outcome_value == OUTCOME_WONT_FIX:
+            if not isinstance(reason_value, str) or not reason_value.strip():
+                self.logger.warning(
+                    "[Introspection] Result YAML thread #%s missing 'reason' for wont-fix",
+                    index,
+                )
+                return False
+        elif reason_value is not None and not isinstance(reason_value, str):
+            self.logger.warning(
+                "[Introspection] Result YAML thread #%s has non-string 'reason'",
+                index,
+            )
+            return False
+
+        return True
 
     @staticmethod
     def _normalize_result_content(result_content: str) -> str:
