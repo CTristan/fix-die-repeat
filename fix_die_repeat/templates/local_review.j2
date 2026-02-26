@@ -11,7 +11,7 @@ CRITICAL REVIEW CHECKLIST (LANGUAGE-AGNOSTIC):
 - [ ] Performance: no obvious regressions, unbounded growth, heavy work in hot paths, or N+1 style patterns
 - [ ] Correctness/reliability: no missing input validation (especially for external tool output or parsed JSON/YAML), unsafe error handling, resource leaks, or concurrency hazards (including file I/O and locking best practices like lock scope/byte ranges/seek position); test fixtures match implementation expectations
 - [ ] Data serialization: structured outputs (JSON/YAML/etc.) use safe serializers (not string interpolation) and are normalized/validated when appending or combining documents
-- [ ] Code quality: no unjustified suppression of errors or warnings; avoid terminating the process from library/orchestration code (return status instead); prefer explicit guards/failures
+- [ ] Code quality: no unjustified suppression of errors or warnings; avoid terminating the process from library/orchestration code (return status instead); return helper results instead of discarding them or duplicating return logic; prefer explicit guards/failures
 - [ ] Accuracy: docs/prompts/config instructions and examples match actual behavior and required fields (no false claims); user-facing logs/errors clearly explain limits, skips, or partial results; non-obvious platform-specific behavior, concurrency patterns, or API quirks have inline documentation
 - [ ] Testing: new utility classes, functions with platform-specific code paths, or complex logic have corresponding unit tests
 {% if has_agents_file %}- [ ] Project policy: no violations of AGENTS.md
