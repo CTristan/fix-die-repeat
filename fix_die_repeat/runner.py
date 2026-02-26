@@ -1146,8 +1146,9 @@ class PiRunner:
         skipped_ids = [str(thread.get("id")) for thread in skipped_threads if thread.get("id")]
 
         self.logger.warning(
-            "Skipping %s thread(s) that were not in scope: %s",
+            "Skipping %s unresolved thread(s) due to max_pr_threads limit (%s); skipped IDs: %s",
             len(skipped_ids),
+            max_threads,
             skipped_ids,
         )
         self.logger.info(

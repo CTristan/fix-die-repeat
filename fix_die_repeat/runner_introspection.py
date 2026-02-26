@@ -69,11 +69,12 @@ class _FileLock:
         if sys.platform == "win32":  # pragma: no cover
             # Windows: use msvcrt.locking
             # Seek to start of file because msvcrt.locking locks a region
-            # starting from the current file position. To ensure we lock
-            # the same region that we later unlock (starting at position 0),
-            # we must seek to position 0 before calling LK_LOCK.
+            # starting from the current file position. We lock a large region
+            # (0xFFFF bytes) so all processes contend for the same range even
+            # as the file grows.
             self.file_handle.seek(0)
-            msvcrt.locking(self.file_handle.fileno(), msvcrt.LK_LOCK, 65535)
+            lock_length = 0xFFFF
+            msvcrt.locking(self.file_handle.fileno(), msvcrt.LK_LOCK, lock_length)
         else:  # pragma: no cover
             # Unix: use fcntl.flock with LOCK_EX
             fcntl.flock(self.file_handle.fileno(), fcntl.LOCK_EX)
@@ -89,11 +90,11 @@ class _FileLock:
         if sys.platform == "win32":  # pragma: no cover
             # Windows: use msvcrt.locking with LK_UNLCK
             # Seek to start of file because msvcrt.locking locks a region
-            # starting from the current file position. To unlock the same
-            # region that was locked (starting at position 0), we must seek
-            # back to position 0 before calling LK_UNLCK.
+            # starting from the current file position. We must unlock the
+            # same 0xFFFF-byte region that was locked in __enter__.
             self.file_handle.seek(0)
-            msvcrt.locking(self.file_handle.fileno(), msvcrt.LK_UNLCK, 65535)
+            lock_length = 0xFFFF
+            msvcrt.locking(self.file_handle.fileno(), msvcrt.LK_UNLCK, lock_length)
         else:  # pragma: no cover
             # Unix: use fcntl.flock with LOCK_UN
             fcntl.flock(self.file_handle.fileno(), fcntl.LOCK_UN)

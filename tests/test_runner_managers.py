@@ -139,6 +139,29 @@ class TestReviewManager:
         assert run_pi_callback.called
         assert paths.review_current_file.read_text() == "NO_ISSUES"
 
+    def test_run_local_review_no_changes_records_review_entry(self, tmp_path: Path) -> None:
+        """Skipping review with no changes should clear diff and record entry."""
+        settings = Settings()
+        paths = Paths(project_root=tmp_path)
+        paths.ensure_fdr_dir()
+        logger = MagicMock()
+        manager = ReviewManager(settings, paths, tmp_path, logger)
+        run_pi_callback = MagicMock()
+
+        with patch("fix_die_repeat.runner_review.get_changed_files", return_value=[]):
+            manager.run_local_review(
+                iteration=2,
+                start_sha="abc123",
+                run_pi_callback=run_pi_callback,
+            )
+
+        assert paths.review_current_file.read_text() == "NO_ISSUES"
+        assert paths.diff_file.read_text() == ""
+        review_content = paths.review_file.read_text()
+        assert "Iteration 2 - Review" in review_content
+        assert "NO_ISSUES" in review_content
+        assert not run_pi_callback.called
+
     def test_add_untracked_files_diff_includes_pseudo_diff(self, tmp_path: Path) -> None:
         """Untracked files should be included in diff output."""
         settings = Settings()

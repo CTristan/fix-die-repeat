@@ -272,8 +272,13 @@ class ReviewManager:
         changed_files = get_changed_files(self.project_root)
 
         if not changed_files:
-            self.logger.info("No changed or staged files found to review. Checks passed. Exiting.")
-            sys.exit(0)
+            self.logger.info(
+                "No changed or staged files found to review. Checks passed. Skipping review.",
+            )
+            self.paths.review_current_file.write_text("NO_ISSUES")
+            self.paths.diff_file.write_text("")
+            self.append_review_entry(iteration)
+            return
 
         self.logger.info("[Step 4] Found %s file(s) to review", len(changed_files))
 
