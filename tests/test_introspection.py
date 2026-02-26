@@ -54,7 +54,7 @@ class TestCollectIntrospectionData:
         """Test that introspection data collection skips when PR info is unavailable."""
         # Mock get_branch_name to return None
         with patch.object(runner, "get_branch_name", return_value=None):
-            runner.collect_introspection_data()
+            runner.collect_introspection_data(1, "abc123")
 
         # Data file should not be created
         assert not runner.paths.introspection_data_file.exists()
@@ -84,7 +84,7 @@ class TestCollectIntrospectionData:
         # Mock get_branch_name and get_pr_info
         with patch.object(runner, "get_branch_name", return_value="feature-branch"):
             with patch.object(runner, "get_pr_info", return_value=pr_info):
-                runner.collect_introspection_data()
+                runner.collect_introspection_data(1, "abc123")
 
         # Data file should be created
         assert runner.paths.introspection_data_file.exists()
@@ -112,7 +112,7 @@ class TestCollectIntrospectionData:
         # Mock PR info
         with patch.object(runner, "get_branch_name", return_value="branch"):
             with patch.object(runner, "get_pr_info", return_value=pr_info):
-                runner.collect_introspection_data()
+                runner.collect_introspection_data(1, "abc123")
 
         content = runner.paths.introspection_data_file.read_text()
         # tid_2 should be marked as fixed
@@ -185,9 +185,6 @@ class TestRunIntrospection:
         test_global_file.parent.mkdir(parents=True, exist_ok=True)
         test_global_file.write_text("date: '2026-01-01'\nproject: 'old-project'\nstatus: pending\n")
 
-        # Create minimal PR info
-        pr_info = {"number": 2, "url": "https://github.com/test/test/pull/2"}
-
         # Mock successful pi execution
         introspection_result = (
             "date: '2026-02-26'\nproject: 'test-project'\npr_number: 2\n"
@@ -197,17 +194,21 @@ class TestRunIntrospection:
 
         # Create result file to simulate pi writing it
         runner.paths.introspection_result_file.write_text(introspection_result)
+        pr_json = '{"number": 2, "url": "https://github.com/test/test/pull/2"}'
 
         # Call run_introspection which should read result file and append to global file
         # Note: We need to mock the parts that would normally require GitHub/pi
         with patch(
-            "fix_die_repeat.runner.get_introspection_file_path", return_value=test_global_file
+            "fix_die_repeat.runner_introspection.get_introspection_file_path",
+            return_value=test_global_file,
         ):
-            with patch.object(runner, "get_branch_name", return_value="branch"):
-                with patch.object(runner, "get_pr_info", return_value=pr_info):
-                    with patch.object(runner, "run_pi_safe", return_value=(0, "", "")):
-                        # Don't mock collect_introspection_data, we already created the file
-                        runner.run_introspection()
+            with patch(
+                "fix_die_repeat.runner_introspection.run_command",
+                return_value=(0, pr_json, ""),
+            ):
+                with patch.object(runner, "run_pi_safe", return_value=(0, "", "")):
+                    # Don't mock collect_introspection_data, we already created the file
+                    runner.run_introspection()
 
         # Verify result was appended with separator
         content = test_global_file.read_text()
@@ -235,23 +236,24 @@ class TestRunIntrospection:
         # Create thread IDs file required for introspection prerequisites
         runner.paths.cumulative_in_scope_threads_file.write_text("thread_1\n")
 
-        # Create minimal PR info
-        pr_info = {"number": 3, "url": "https://github.com/test/test/pull/3"}
-
         # Create invalid YAML result
         invalid_yaml = "date: 2026-02-26\n  invalid indentation\n    bad yaml: [unclosed"
+        pr_json = '{"number": 3, "url": "https://github.com/test/test/pull/3"}'
 
-        # Patch get_introspection_file_path in the runner module
+        # Patch get_introspection_file_path in the runner_introspection module
         with patch(
-            "fix_die_repeat.runner.get_introspection_file_path", return_value=test_global_file
+            "fix_die_repeat.runner_introspection.get_introspection_file_path",
+            return_value=test_global_file,
         ):
             with patch.object(runner, "collect_introspection_data"):
-                with patch.object(runner, "get_branch_name", return_value="branch"):
-                    with patch.object(runner, "get_pr_info", return_value=pr_info):
-                        with patch.object(runner, "run_pi_safe", return_value=(0, "", "")):
-                            # Create invalid YAML result file
-                            runner.paths.introspection_result_file.write_text(invalid_yaml)
-                            runner.run_introspection()
+                with patch(
+                    "fix_die_repeat.runner_introspection.run_command",
+                    return_value=(0, pr_json, ""),
+                ):
+                    with patch.object(runner, "run_pi_safe", return_value=(0, "", "")):
+                        # Create invalid YAML result file
+                        runner.paths.introspection_result_file.write_text(invalid_yaml)
+                        runner.run_introspection()
 
         # File should not be modified
         content = test_global_file.read_text()
@@ -272,7 +274,7 @@ class TestIntrospectionNonBlocking:
             runner = PiRunner(settings, paths)
 
         # Should not raise even with missing files
-        runner.collect_introspection_data()
+        runner.collect_introspection_data(1, "abc123")
         # Data file may or may not exist depending on PR info availability
 
     def test_run_introspection_catches_exceptions(
