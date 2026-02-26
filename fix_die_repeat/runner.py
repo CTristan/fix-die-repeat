@@ -19,6 +19,7 @@ from fix_die_repeat.messages import (
 )
 from fix_die_repeat.prompts import render_prompt
 from fix_die_repeat.utils import (
+    PROHIBITED_RUFF_RULES,
     configure_logger,
     detect_large_files,
     find_prohibited_ruff_ignores,
@@ -1449,15 +1450,14 @@ class PiRunner:
             return
 
         # Prohibited rules (see AGENTS.md)
-        prohibited_rules = {"C901", "PLR0913", "PLR2004", "PLC0415"}
-        violations = find_prohibited_ruff_ignores(pyproject_path, prohibited_rules)
+        violations = find_prohibited_ruff_ignores(pyproject_path, PROHIBITED_RUFF_RULES)
 
         if violations:
             self.logger.error("=" * 70)
             self.logger.error("CRITICAL: Prohibited ruff rules found in per-file-ignores!")
             self.logger.error("=" * 70)
             self.logger.error("The following rules MUST NEVER be ignored (see AGENTS.md):")
-            for rule in sorted(prohibited_rules):
+            for rule in sorted(PROHIBITED_RUFF_RULES):
                 self.logger.error("  - %s: NEVER IGNORE", rule)
             self.logger.error("")
             self.logger.error("Violations found:")
