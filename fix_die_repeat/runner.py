@@ -99,6 +99,10 @@ class _FileLock:
         """Release the lock."""
         if sys.platform == "win32":  # pragma: no cover
             # Windows: use msvcrt.locking with LK_UNLCK
+            # Seek to start of file because msvcrt.locking locks a region
+            # starting from the current file position. To unlock the same
+            # region that was locked (starting at position 0), we must seek
+            # back to position 0 before calling LK_UNLCK.
             self.file_handle.seek(0)
             msvcrt.locking(self.file_handle.fileno(), msvcrt.LK_UNLCK, 65535)
         else:  # pragma: no cover

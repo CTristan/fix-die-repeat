@@ -4,7 +4,13 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from fix_die_repeat.runner import PiRunner
+import pytest
+
+from fix_die_repeat import runner as runner_module
+from fix_die_repeat.runner import (
+    PiRunner,
+    _FileLock,  # Testing private class is intentional
+)
 
 # Constants for runner test values
 TEST_PI_DELAY_SECONDS = 2
@@ -2001,3 +2007,94 @@ class TestCompleteSuccess:
                 ntfy_url="http://localhost:2586",
                 logger=runner.logger,
             )
+
+
+class TestFileLock:
+    """Tests for _FileLock context manager."""
+
+    def test_file_lock_acquires_and_releases_on_unix(self, tmp_path: Path) -> None:
+        """Test that _FileLock acquires and releases lock on Unix systems."""
+        # Create a test file
+        test_file = tmp_path / "test_lock.txt"
+        test_file.write_text("test content")
+
+        with test_file.open() as f:
+            with patch("fix_die_repeat.runner.fcntl") as mock_fcntl:
+                file_lock = _FileLock(f)
+
+                with file_lock:
+                    # Verify lock was acquired (flock called with LOCK_EX)
+                    mock_fcntl.flock.assert_called_once_with(f.fileno(), mock_fcntl.LOCK_EX)
+
+                # Verify lock was released (flock called with LOCK_UN)
+                mock_fcntl.flock.assert_called_with(f.fileno(), mock_fcntl.LOCK_UN)
+
+    def test_file_lock_acquires_and_releases_on_windows(self, tmp_path: Path) -> None:
+        """Test that _FileLock acquires and releases lock on Windows systems."""
+        # Create a test file
+        test_file = tmp_path / "test_lock.txt"
+        test_file.write_text("test content")
+
+        # Mock msvcrt module for Windows platform
+        mock_msvcrt = MagicMock()
+        mock_msvcrt.LK_LOCK = 0
+        mock_msvcrt.LK_UNLCK = 1
+
+        # Save original platform value
+        original_platform = sys.platform
+
+        try:
+            # Set platform to Windows
+            sys.platform = "win32"
+
+            # Inject msvcrt into the runner module namespace
+            # (This is intentional: we're simulating Windows behavior on a non-Windows platform)
+            runner_module.msvcrt = mock_msvcrt  # type: ignore[attr-defined]
+
+            with test_file.open() as f:
+                file_lock = _FileLock(f)
+
+                with file_lock:
+                    # Verify lock was acquired (locking called with LK_LOCK)
+                    mock_msvcrt.locking.assert_called_once_with(
+                        f.fileno(), mock_msvcrt.LK_LOCK, 65535
+                    )
+
+                # Verify lock was released (locking called with LK_UNLCK)
+                mock_msvcrt.locking.assert_called_with(f.fileno(), mock_msvcrt.LK_UNLCK, 65535)
+        finally:
+            # Restore original platform
+            sys.platform = original_platform
+            # Clean up injected msvcrt
+            if hasattr(runner_module, "msvcrt"):
+                delattr(runner_module, "msvcrt")
+
+    def test_file_lock_returns_self_on_enter(self, tmp_path: Path) -> None:
+        """Test that _FileLock __enter__ returns self."""
+        test_file = tmp_path / "test_lock.txt"
+        test_file.write_text("test content")
+
+        with test_file.open() as f:
+            with patch("fix_die_repeat.runner.fcntl"):
+                file_lock = _FileLock(f)
+
+                with file_lock as acquired_lock:
+                    # __enter__ should return self
+                    assert acquired_lock is file_lock
+
+    def test_file_lock_handles_exception_during_context(self, tmp_path: Path) -> None:
+        """Test that _FileLock releases lock even when exception occurs."""
+        test_file = tmp_path / "test_lock.txt"
+        test_file.write_text("test content")
+
+        with test_file.open() as f:
+            with patch("fix_die_repeat.runner.fcntl") as mock_fcntl:
+                file_lock = _FileLock(f)
+                test_exception = ValueError("Test exception")
+
+                with pytest.raises(ValueError, match="Test exception"):
+                    with file_lock:
+                        raise test_exception
+
+                # Verify lock was still released despite exception
+                mock_fcntl.flock.assert_called_with(f.fileno(), mock_fcntl.LOCK_UN)

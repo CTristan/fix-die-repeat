@@ -232,8 +232,8 @@ class TestRunIntrospection:
         original_content = "date: '2026-01-01'\nstatus: pending\n"
         test_global_file.write_text(original_content)
 
-        # Create thread IDs file
-        runner.paths.pr_thread_ids_file.write_text("thread_1\n")
+        # Create thread IDs file required for introspection prerequisites
+        runner.paths.cumulative_in_scope_threads_file.write_text("thread_1\n")
 
         # Create minimal PR info
         pr_info = {"number": 3, "url": "https://github.com/test/test/pull/3"}
@@ -288,8 +288,8 @@ class TestIntrospectionNonBlocking:
             mock_logger.return_value = MagicMock()
             runner = PiRunner(settings, paths)
 
-        # Create thread IDs file to enable introspection
-        runner.paths.pr_thread_ids_file.write_text("thread_1\n")
+        # Create thread IDs file to enable introspection prerequisites
+        runner.paths.cumulative_in_scope_threads_file.write_text("thread_1\n")
 
         # Mock collect_introspection_data to raise an exception
         with patch.object(
