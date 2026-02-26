@@ -90,19 +90,104 @@ class PrReviewManager:
             PrInfo object or None if not found
 
         """
+        pr_json = self._fetch_pr_info_json(branch)
+        if pr_json is None:
+            return None
+
+        pr_data = self._parse_pr_info_payload(branch, pr_json)
+        if pr_data is None:
+            return None
+
+        return self._build_pr_info(branch, pr_json, pr_data)
+
+    def _fetch_pr_info_json(self, branch: str) -> str | None:
+        """Fetch PR info JSON for a branch."""
         returncode, pr_json, _ = run_command(
             f"gh pr view {branch} --json number,url,headRepository,headRepositoryOwner",
             cwd=self.project_root,
         )
         if returncode != 0:
             return None
+        return pr_json
 
-        pr_data = json.loads(pr_json)
+    def _parse_pr_info_payload(
+        self,
+        branch: str,
+        pr_json: str,
+    ) -> dict[str, object] | None:
+        """Parse PR info JSON into a payload dictionary."""
+        try:
+            pr_data = json.loads(pr_json)
+        except json.JSONDecodeError:
+            self.logger.exception(
+                "Failed to parse PR info from gh output for branch %s: %s",
+                branch,
+                pr_json,
+            )
+            return None
+
+        if not isinstance(pr_data, dict):
+            self.logger.error(
+                "Failed to parse PR info from gh output for branch %s: %s",
+                branch,
+                pr_json,
+            )
+            return None
+
+        return pr_data
+
+    def _build_pr_info(
+        self,
+        branch: str,
+        pr_json: str,
+        pr_data: dict[str, object],
+    ) -> PrInfo | None:
+        """Build a PrInfo object from a parsed payload."""
+        number = pr_data.get("number")
+        url = pr_data.get("url")
+        repo_owner_payload = pr_data.get("headRepositoryOwner")
+        repo_payload = pr_data.get("headRepository")
+
+        if not isinstance(number, int) or not isinstance(url, str) or not url:
+            self.logger.error(
+                "Invalid PR info types from gh output for branch %s: "
+                "number=%r (type=%s), url=%r (type=%s)",
+                branch,
+                number,
+                type(number).__name__,
+                url,
+                type(url).__name__,
+            )
+            return None
+
+        if not isinstance(repo_owner_payload, dict) or not isinstance(repo_payload, dict):
+            self.logger.error(
+                "Failed to parse PR info from gh output for branch %s: %s",
+                branch,
+                pr_json,
+            )
+            return None
+
+        repo_owner = repo_owner_payload.get("login")
+        repo_name = repo_payload.get("name")
+
+        if not isinstance(repo_owner, str) or not isinstance(repo_name, str):
+            self.logger.error(
+                "Invalid repository info types from gh output for branch %s: "
+                "owner=%r (type=%s), name=%r (type=%s)",
+                branch,
+                repo_owner,
+                type(repo_owner).__name__,
+                repo_name,
+                type(repo_name).__name__,
+            )
+            return None
+
         return PrInfo(
-            number=pr_data.get("number"),
-            url=pr_data.get("url"),
-            repo_owner=pr_data["headRepositoryOwner"]["login"],
-            repo_name=pr_data["headRepository"]["name"],
+            number=number,
+            url=url,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
         )
 
     def check_pr_threads_cache(self, cache_key: str) -> bool:

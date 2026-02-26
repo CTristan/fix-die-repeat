@@ -164,6 +164,23 @@ class TestRunIntrospection:
         # Mock failed, so file shouldn't be modified (we can't assert this easily
         # without controlling the exact state, but the test should not error)
 
+    def test_skips_with_invalid_pr_info(self, runner: PiRunner) -> None:
+        """Test that introspection skips when PR info is invalid."""
+        runner.paths.cumulative_in_scope_threads_file.write_text("thread_1\n")
+
+        pr_json = '{"number": null, "url": ""}'
+
+        with patch("fix_die_repeat.runner_introspection.run_command") as mock_run:
+            mock_run.side_effect = [
+                (0, "main\n", ""),
+                (0, pr_json, ""),
+            ]
+            with patch.object(runner, "run_pi_safe") as mock_pi:
+                runner.run_introspection()
+
+        mock_pi.assert_not_called()
+        assert not runner.paths.introspection_data_file.exists()
+
     def test_appends_to_global_file(
         self,
         runner: PiRunner,
@@ -215,6 +232,43 @@ class TestRunIntrospection:
         assert "\n---\n" in content, f"Content:\n{content}"
         assert "date: '2026-02-26'" in content
         assert "project: 'test-project'" in content
+
+    def test_normalizes_document_markers(
+        self,
+        runner: PiRunner,
+        tmp_path: Path,
+    ) -> None:
+        """Test that leading/trailing YAML markers are removed before append."""
+        runner.paths.cumulative_in_scope_threads_file.write_text("thread_1\n")
+        runner.paths.introspection_data_file.write_text(
+            "pr_number: 2\npr_url: https://github.com/test/test/pull/2\n"
+        )
+
+        test_global_file = tmp_path / "introspection.yaml"
+        test_global_file.parent.mkdir(parents=True, exist_ok=True)
+        test_global_file.write_text("date: '2026-01-01'\nstatus: pending\n")
+
+        introspection_result = (
+            "---\ndate: '2026-02-26'\nproject: 'test-project'\nstatus: pending\nthreads: []\n...\n"
+        )
+        runner.paths.introspection_result_file.write_text(introspection_result)
+        pr_json = '{"number": 2, "url": "https://github.com/test/test/pull/2"}'
+
+        with patch(
+            "fix_die_repeat.runner_introspection.get_introspection_file_path",
+            return_value=test_global_file,
+        ):
+            with patch("fix_die_repeat.runner_introspection.run_command") as mock_run:
+                mock_run.side_effect = [
+                    (0, "main\n", ""),
+                    (0, pr_json, ""),
+                ]
+                with patch.object(runner, "run_pi_safe", return_value=(0, "", "")):
+                    runner.run_introspection()
+
+        content = test_global_file.read_text()
+        assert content.count("\n---\n") == 1
+        assert "..." not in content
 
     def test_validates_yaml_before_append(
         self,

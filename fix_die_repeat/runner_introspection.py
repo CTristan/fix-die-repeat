@@ -276,7 +276,18 @@ class IntrospectionManager:
             )
             return None
 
-        # Get PR info - use a simple branch check
+        branch = self._get_current_branch()
+        if branch is None:
+            return None
+
+        pr_json = self._get_pr_info_json(branch)
+        if pr_json is None:
+            return None
+
+        return self._parse_pr_info(pr_json)
+
+    def _get_current_branch(self) -> str | None:
+        """Get the current branch name for introspection checks."""
         returncode, branch, _ = run_command(
             "git branch --show-current",
             cwd=self.project_root,
@@ -286,10 +297,12 @@ class IntrospectionManager:
                 "[Introspection] Not on a git branch, skipping introspection",
             )
             return None
+        return branch.strip()
 
-        # Get PR info
+    def _get_pr_info_json(self, branch: str) -> str | None:
+        """Fetch PR info JSON string for a branch."""
         returncode, pr_json, _ = run_command(
-            f"gh pr view {branch.strip()} --json number,url",
+            f"gh pr view {branch} --json number,url",
             cwd=self.project_root,
         )
         if returncode != 0:
@@ -297,16 +310,37 @@ class IntrospectionManager:
                 "[Introspection] No PR info available, skipping introspection",
             )
             return None
+        return pr_json
 
+    def _parse_pr_info(self, pr_json: str) -> PrInfo | None:
+        """Parse PR info JSON into a PrInfo object."""
         try:
             pr_data = json.loads(pr_json)
-            return PrInfo(
-                number=pr_data.get("number"),
-                url=pr_data.get("url"),
+        except json.JSONDecodeError:
+            self.logger.warning(
+                "[Introspection] Failed to parse PR info (invalid JSON)",
             )
-        except (json.JSONDecodeError, KeyError):
-            self.logger.warning("[Introspection] Failed to parse PR info")
             return None
+
+        if not isinstance(pr_data, dict):
+            self.logger.warning(
+                "[Introspection] PR info payload is not an object, skipping introspection",
+            )
+            return None
+
+        pr_number = pr_data.get("number")
+        pr_url = pr_data.get("url")
+
+        if not isinstance(pr_number, int) or not isinstance(pr_url, str) or not pr_url:
+            self.logger.warning(
+                "[Introspection] PR info missing valid 'number' or 'url', skipping introspection",
+            )
+            return None
+
+        return PrInfo(
+            number=pr_number,
+            url=pr_url,
+        )
 
     def _validate_pi_result_file(self) -> str | None:
         """Validate that pi created a valid result file.
@@ -324,13 +358,44 @@ class IntrospectionManager:
 
         # Read and validate result
         result_content = self.paths.introspection_result_file.read_text()
-        if not result_content.strip():
+        normalized_content = self._normalize_result_content(result_content)
+        if not normalized_content:
             self.logger.warning(
-                "[Introspection] Result file is empty, skipping append",
+                "[Introspection] Result file is empty after normalization, skipping append",
             )
             return None
 
-        return result_content
+        return normalized_content
+
+    @staticmethod
+    def _normalize_result_content(result_content: str) -> str:
+        """Normalize YAML result content for safe multi-document appends.
+
+        Removes leading/trailing YAML document markers and ensures the
+        content ends with a single newline.
+
+        Args:
+            result_content: Raw YAML content from pi
+
+        Returns:
+            Normalized YAML content (empty string if nothing remains)
+
+        """
+        stripped = result_content.strip()
+        if not stripped:
+            return ""
+
+        lines = stripped.splitlines()
+        while lines and lines[0].strip() in ("---", "..."):
+            lines.pop(0)
+        while lines and lines[-1].strip() in ("---", "..."):
+            lines.pop()
+
+        normalized = "\n".join(lines).strip()
+        if not normalized:
+            return ""
+
+        return f"{normalized}\n"
 
     def collect_introspection_data(self, _iteration: int, start_sha: str, pr_info: PrInfo) -> None:
         """Collect input data for introspection analysis.

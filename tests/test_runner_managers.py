@@ -182,6 +182,48 @@ class TestPrReviewManager:
         assert paths.review_current_file.read_text() == "cached content"
         assert "thread1" in paths.cumulative_in_scope_threads_file.read_text()
 
+    def test_get_pr_info_success(self, tmp_path: Path) -> None:
+        """PR info should parse valid gh output."""
+        settings = Settings()
+        paths = Paths(project_root=tmp_path)
+        paths.ensure_fdr_dir()
+        logger = MagicMock()
+        manager = PrReviewManager(settings, paths, tmp_path, logger)
+
+        pr_json = (
+            '{"number": 5, "url": "https://github.com/test/repo/pull/5", '
+            '"headRepository": {"name": "repo"}, '
+            '"headRepositoryOwner": {"login": "owner"}}'
+        )
+
+        with patch("fix_die_repeat.runner_pr.run_command", return_value=(0, pr_json, "")):
+            result = manager.get_pr_info("main")
+
+        assert result == PrInfo(
+            number=5,
+            url="https://github.com/test/repo/pull/5",
+            repo_owner="owner",
+            repo_name="repo",
+        )
+
+    def test_get_pr_info_invalid_payload_returns_none(self, tmp_path: Path) -> None:
+        """Invalid gh output should return None."""
+        settings = Settings()
+        paths = Paths(project_root=tmp_path)
+        paths.ensure_fdr_dir()
+        logger = MagicMock()
+        manager = PrReviewManager(settings, paths, tmp_path, logger)
+
+        pr_json = (
+            '{"number": "5", "url": null, "headRepository": {"name": "repo"}, '
+            '"headRepositoryOwner": {"login": "owner"}}'
+        )
+
+        with patch("fix_die_repeat.runner_pr.run_command", return_value=(0, pr_json, "")):
+            result = manager.get_pr_info("main")
+
+        assert result is None
+
     def test_format_pr_threads_indents_multiline_comment(self, tmp_path: Path) -> None:
         """Multiline comment bodies should be indented."""
         settings = Settings()
