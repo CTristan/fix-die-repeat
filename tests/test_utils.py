@@ -2,6 +2,7 @@
 
 import hashlib
 import importlib
+import importlib.metadata
 import sys
 from pathlib import Path
 from subprocess import CalledProcessError

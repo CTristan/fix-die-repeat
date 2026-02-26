@@ -1,15 +1,5 @@
 The file .fix-die-repeat/checks_filtered.log contains the failure output from `{{ check_cmd }}` (filtered to error-relevant lines; full log is in .fix-die-repeat/checks.log).
 
-I have attached @AGENTS.md which contains coding policies for this project.
-
-CRITICAL POLICY - NEVER-IGNORE RUFF RULES:
-The following ruff rules MUST NEVER be ignored with per-file-ignores in pyproject.toml:
-- C901: Complex functions → Extract helper methods or use Strategy pattern
-- PLR0913: Too many arguments → Group into dataclass/NamedTuple or use **kwargs
-- PLR2004: Magic values → Use named constants at module level
-- PLC0415: Imports outside top-level → Move to module top or refactor circular deps
-
-If you encounter these errors, REFACTOR THE CODE instead of adding ignores. Adding per-file ignores for these rules violates project policy.
 
 {% if oscillation_warning %}
 {{ oscillation_warning }}

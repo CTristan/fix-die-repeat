@@ -26,6 +26,22 @@ LOGGER_NAME = "fix_die_repeat"
 PROHIBITED_RUFF_RULES = {"C901", "PLR0913", "PLR2004", "PLC0415"}
 
 
+class RuffConfigParseError(Exception):
+    """Raised when pyproject.toml cannot be parsed for ruff config validation."""
+
+    def __init__(self, path: Path, original_error: Exception) -> None:
+        """Initialize the exception.
+
+        Args:
+            path: Path to the config file that failed to parse
+            original_error: The original exception that caused the parse failure
+
+        """
+        self.path = path
+        self.original_error = original_error
+        super().__init__(f"Failed to parse ruff config from {path}: {original_error}")
+
+
 def is_running_in_dev_mode() -> bool:
     """Check if fix-die-repeat is running from an editable install.
 
@@ -505,9 +521,10 @@ def find_prohibited_ruff_ignores(
     try:
         with pyproject_path.open("rb") as f:
             config = tomllib.load(f)
-    except (OSError, tomllib.TOMLDecodeError):
-        # If we can't parse the TOML, just skip validation
-        return violations
+    except OSError as e:
+        raise RuffConfigParseError(pyproject_path, e) from e
+    except tomllib.TOMLDecodeError as e:
+        raise RuffConfigParseError(pyproject_path, e) from e
 
     # Navigate to tool.ruff.lint.per-file-ignores
     per_file_ignores = (

@@ -36,7 +36,10 @@ lint.ignore = ["COM812", "D203", "D213"]
 
 [tool.ruff.lint.per-file-ignores]
 "fix_die_repeat/cli.py" = [
-    "BLE001",  # CLI entrypoint is an exception boundary; we convert unexpected errors into user-facing exits.
+    "BLE001",  # CLI entrypoint is an exception boundary; we catch all unexpected errors to show user-friendly messages instead of raw tracebacks. The alternative (not catching or re-raising) would result in poor UX with stack traces visible to end users.
+]
+"fix_die_repeat/runner.py" = [
+    "TRY400",  # Intentional multi-line error logging for formatted output; traceback already captured via logger.exception().
 ]
 "scripts/*.py" = [
     "T201",  # Scripts intentionally use print() for output to stdout/stderr; these are standalone executables, not library code.

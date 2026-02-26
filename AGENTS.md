@@ -2,11 +2,22 @@
 
 This is a living document for coding agents (pi, assistants, etc.) working on **Fix. Die. Repeat.** Update it as you make changes.
 
+## IMPORTANT: Language-Agnostic Tool
+
+**Fix. Die. Repeat.** is implemented in Python, but it is designed to work with **any development repository** regardless of programming language or framework.
+
+- The tool itself uses Python (for the CLI, config, runner, etc.)
+- The **prompts are language-agnostic** and focus on general code quality, security, performance, and correctness
+- When the tool reviews code, it applies language-agnostic principles, not Python-specific rules
+- The Python-specific tooling sections below (ruff, mypy, pytest) apply ONLY to developing **Fix. Die. Repeat. itself**, not to the target projects being reviewed
+
 ---
 
 ## CRITICAL POLICIES (READ FIRST)
 
-### ⚠️ NEVER-IGNORE Ruff Rules
+**IMPORTANT**: These policies apply to the development of **Fix. Die. Repeat. itself** (this Python project). When Fix. Die. Repeat. reviews code in other projects, it uses language-agnostic prompts focused on security, performance, correctness, and code quality—not these Python-specific rules.
+
+### ⚠️ NEVER-IGNORE Ruff Rules (for Fix. Die. Repeat. Development Only)
 
 The following ruff rules **MUST NEVER be ignored** in `pyproject.toml` per-file-ignores. Adding per-file ignores for these rules violates project policy and will be blocked by CI.
 
@@ -33,7 +44,7 @@ The following ruff rules **MUST NEVER be ignored** in `pyproject.toml` per-file-
 
 **If you're tempted to add a per-file ignore, STOP.** Refactor the code instead.
 
-### 🧪 Test Configuration Policy
+### 🧪 Test Configuration Policy (for Fix. Die. Repeat. Development Only)
 
 **NEVER modify test configuration settings without EXPLICIT human approval.**
 
@@ -85,7 +96,7 @@ When a file reaches 2000 lines or more, it **MUST** be refactored into separate 
 4. If review finds issues → fix them
 5. Repeat until all checks pass and no issues are found
 
-### Tech Stack
+### Tech Stack (for Fix. Die. Repeat. itself)
 
 - **Language**: Python 3.12+
 - **Package Manager**: uv
@@ -96,6 +107,8 @@ When a file reaches 2000 lines or more, it **MUST** be refactored into separate 
 - **Testing**: pytest, pytest-cov
 - **Linting**: ruff
 - **Type Checking**: mypy (loose mode)
+
+**Note**: This tech stack describes the implementation of Fix. Die. Repeat. itself. The tool can review and fix code in ANY language.
 
 ---
 
@@ -261,6 +274,8 @@ Prompt text is stored in Jinja templates under `fix_die_repeat/templates/` and r
 - Makes prompt updates safer and easier to review
 - Avoids broad lint rule exceptions for long inline strings
 
+**IMPORTANT**: All prompt templates are designed to be **language-agnostic**. They focus on general principles like security, performance, correctness, and code quality—not language-specific rules.
+
 **Current templates**:
 - `fix_checks.j2` - Prompt for check-failure fix attempts
 - `local_review.j2` - Prompt for local review of generated diff
@@ -381,7 +396,9 @@ After resolution completes, verify the command is executable before entering the
 
 ---
 
-## Testing
+## Testing (for Fix. Die. Repeat. Development Only)
+
+**Note**: This section describes how to test the Fix. Die. Repeat. codebase itself. When Fix. Die. Repeat. runs on other projects, it uses those projects' existing test commands.
 
 ### Python Tooling Policy (uv required)
 
@@ -460,9 +477,11 @@ def test_something(tmp_path: Path) -> None:
 
 ---
 
-## Code Quality Tools
+## Code Quality Tools (for Fix. Die. Repeat. Development Only)
 
-### Ruff (Linting + Formatting)
+**Note**: These tools are used to maintain the quality of the Fix. Die. Repeat. codebase itself. When Fix. Die. Repeat. reviews other projects, it applies language-agnostic code quality principles—not these specific tools.
+
+### Ruff (Linting + Formatting - for Fix. Die. Repeat. Development Only)
 
 ```bash
 # Check
@@ -687,7 +706,7 @@ To add a targeted exception (only when unavoidable), use:
 ]
 ```
 
-### MyPy (Type Checking)
+### MyPy (Type Checking - for Fix. Die. Repeat. Development Only)
 
 ```bash
 uv run mypy fix_die_repeat

@@ -21,7 +21,11 @@ import sys
 from pathlib import Path
 
 # Import shared validation logic from utils
-from fix_die_repeat.utils import PROHIBITED_RUFF_RULES, find_prohibited_ruff_ignores
+from fix_die_repeat.utils import (
+    PROHIBITED_RUFF_RULES,
+    RuffConfigParseError,
+    find_prohibited_ruff_ignores,
+)
 
 # Rationale for each prohibition
 RATIONALE = {
@@ -46,7 +50,11 @@ def main() -> int:
         return 2
 
     # Check for prohibited ignores using shared logic
-    violations = find_prohibited_ruff_ignores(pyproject_path, PROHIBITED_RUFF_RULES)
+    try:
+        violations = find_prohibited_ruff_ignores(pyproject_path, PROHIBITED_RUFF_RULES)
+    except RuffConfigParseError as e:
+        print(f"ERROR: {e}")
+        return 2
 
     if violations:
         print("=" * 70)

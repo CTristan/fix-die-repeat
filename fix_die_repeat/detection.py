@@ -53,7 +53,7 @@ def read_config_file(path: object) -> str | None:
         check_cmd value if found, None otherwise
 
     """
-    if not isinstance(path, str | os.PathLike):
+    if not isinstance(path, (str, os.PathLike)):
         return None
 
     try:
@@ -84,7 +84,7 @@ def write_config_file(path: object, check_cmd: str) -> None:
         check_cmd: Check command to write
 
     """
-    if not isinstance(path, str | os.PathLike):
+    if not isinstance(path, (str, os.PathLike)):
         error_msg = "path must be a string or Path-like object"
         raise TypeError(error_msg)
 
@@ -209,7 +209,7 @@ def _validate_project_root(project_root: object) -> Path | None:
         Path object if valid, None otherwise
 
     """
-    if not isinstance(project_root, str | os.PathLike):
+    if not isinstance(project_root, (str, os.PathLike)):
         return None
 
     try:
