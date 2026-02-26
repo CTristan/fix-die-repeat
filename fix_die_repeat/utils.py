@@ -9,6 +9,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 from rich.console import Console
@@ -20,6 +21,9 @@ console = Console()
 LOG_FORMAT = "[%(asctime)s] [fdr] [%(levelname)s] %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 LOGGER_NAME = "fix_die_repeat"
+
+# Prohibited ruff rules that must NEVER be ignored (see AGENTS.md)
+PROHIBITED_RUFF_RULES = {"C901", "PLR0913", "PLR2004", "PLC0415"}
 
 
 def is_running_in_dev_mode() -> bool:
@@ -474,3 +478,54 @@ def send_ntfy_notification(
 
     if logger:
         logger.debug("Sent ntfy notification to %s/%s", ntfy_url, topic)
+
+
+def find_prohibited_ruff_ignores(
+    pyproject_path: Path,
+    prohibited_rules: set[str] | None = None,
+) -> dict[str, set[str]]:
+    """Find prohibited ruff rule ignores in pyproject.toml.
+
+    This is a shared utility used by both runner.py and validate_ruff_rules.py
+    to enforce the NEVER-IGNORE policy for specific ruff rules.
+
+    Args:
+        pyproject_path: Path to pyproject.toml file
+        prohibited_rules: Set of prohibited rule codes (defaults to PROHIBITED_RUFF_RULES)
+
+    Returns:
+        Dict mapping file patterns to sets of prohibited rule codes found
+
+    """
+    if prohibited_rules is None:
+        prohibited_rules = PROHIBITED_RUFF_RULES
+
+    violations: dict[str, set[str]] = {}
+
+    try:
+        with pyproject_path.open("rb") as f:
+            config = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        # If we can't parse the TOML, just skip validation
+        return violations
+
+    # Navigate to tool.ruff.lint.per-file-ignores
+    per_file_ignores = (
+        config.get("tool", {}).get("ruff", {}).get("lint", {}).get("per-file-ignores", {})
+    )
+
+    if not per_file_ignores:
+        return violations
+
+    # Check each file pattern for prohibited rules
+    for pattern, rules_list in per_file_ignores.items():
+        if not isinstance(rules_list, list):
+            continue
+
+        for rule in rules_list:
+            if rule in prohibited_rules:
+                if pattern not in violations:
+                    violations[pattern] = set()
+                violations[pattern].add(rule)
+
+    return violations

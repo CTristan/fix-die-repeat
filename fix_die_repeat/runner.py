@@ -5,7 +5,6 @@ import re
 import shlex
 import sys
 import time
-import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -22,6 +21,7 @@ from fix_die_repeat.prompts import render_prompt
 from fix_die_repeat.utils import (
     configure_logger,
     detect_large_files,
+    find_prohibited_ruff_ignores,
     format_duration,
     get_changed_files,
     get_file_line_count,
@@ -1450,7 +1450,7 @@ class PiRunner:
 
         # Prohibited rules (see AGENTS.md)
         prohibited_rules = {"C901", "PLR0913", "PLR2004", "PLC0415"}
-        violations = self._find_prohibited_ignores(pyproject_path, prohibited_rules)
+        violations = find_prohibited_ruff_ignores(pyproject_path, prohibited_rules)
 
         if violations:
             self.logger.error("=" * 70)
@@ -1472,52 +1472,6 @@ class PiRunner:
             self.logger.error("")
             self.logger.error("This is a CRITICAL policy violation. The build cannot continue.")
             sys.exit(1)
-
-    def _find_prohibited_ignores(
-        self,
-        pyproject_path: Path,
-        prohibited_rules: set[str],
-    ) -> dict[str, set[str]]:
-        """Find prohibited ruff rule ignores in pyproject.toml using tomllib.
-
-        Args:
-            pyproject_path: Path to pyproject.toml file
-            prohibited_rules: Set of prohibited rule codes
-
-        Returns:
-            Dict mapping file patterns to sets of prohibited rule codes found
-
-        """
-        violations: dict[str, set[str]] = {}
-
-        try:
-            with pyproject_path.open("rb") as f:
-                config = tomllib.load(f)
-        except (OSError, tomllib.TOMLDecodeError):
-            # If we can't parse the TOML, just skip validation
-            # This shouldn't happen in normal operation
-            return violations
-
-        # Navigate to tool.ruff.lint.per-file-ignores
-        per_file_ignores = (
-            config.get("tool", {}).get("ruff", {}).get("lint", {}).get("per-file-ignores", {})
-        )
-
-        if not per_file_ignores:
-            return violations
-
-        # Check each file pattern for prohibited rules
-        for pattern, rules_list in per_file_ignores.items():
-            if not isinstance(rules_list, list):
-                continue
-
-            for rule in rules_list:
-                if rule in prohibited_rules:
-                    if pattern not in violations:
-                        violations[pattern] = set()
-                    violations[pattern].add(rule)
-
-        return violations
 
     def process_review_results(self) -> None:
         """Process review results and fix issues if needed."""

@@ -18,11 +18,10 @@ Exit codes:
 """
 
 import sys
-import tomllib
 from pathlib import Path
 
-# Prohibited rules that must NEVER be ignored (see AGENTS.md)
-PROHIBITED_RULES = {"C901", "PLR0913", "PLR2004", "PLC0415"}
+# Import shared validation logic from utils
+from fix_die_repeat.utils import PROHIBITED_RUFF_RULES, find_prohibited_ruff_ignores
 
 # Rationale for each prohibition
 RATIONALE = {
@@ -46,8 +45,8 @@ def main() -> int:
         print(f"ERROR: {pyproject_path} not found")
         return 2
 
-    # Parse TOML using tomllib (stdlib)
-    violations = _check_prohibited_ignores(pyproject_path)
+    # Check for prohibited ignores using shared logic
+    violations = find_prohibited_ruff_ignores(pyproject_path, PROHIBITED_RUFF_RULES)
 
     if violations:
         print("=" * 70)
@@ -55,7 +54,7 @@ def main() -> int:
         print("=" * 70)
         print()
         print("The following rules MUST NEVER be ignored (see AGENTS.md):")
-        for rule in sorted(PROHIBITED_RULES):
+        for rule in sorted(PROHIBITED_RUFF_RULES):
             print(f"  - {rule}: {RATIONALE[rule]}")
         print()
         print("Violations found:")
@@ -78,47 +77,6 @@ def main() -> int:
 
     print("✓ No prohibited ruff rules in per-file-ignores")
     return 0
-
-
-def _check_prohibited_ignores(pyproject_path: Path) -> dict[str, set[str]]:
-    """Check pyproject.toml for prohibited per-file ignores using tomllib.
-
-    Args:
-        pyproject_path: Path to pyproject.toml file
-
-    Returns:
-        Dict mapping file patterns to sets of prohibited rule codes found
-
-    """
-    violations: dict[str, set[str]] = {}
-
-    try:
-        with pyproject_path.open("rb") as f:
-            config = tomllib.load(f)
-    except (OSError, tomllib.TOMLDecodeError) as e:
-        print(f"ERROR: Could not parse {pyproject_path}: {e}")
-        return violations
-
-    # Navigate to tool.ruff.lint.per-file-ignores
-    per_file_ignores = (
-        config.get("tool", {}).get("ruff", {}).get("lint", {}).get("per-file-ignores", {})
-    )
-
-    if not per_file_ignores:
-        return violations
-
-    # Check each file pattern for prohibited rules
-    for pattern, rules_list in per_file_ignores.items():
-        if not isinstance(rules_list, list):
-            continue
-
-        for rule in rules_list:
-            if rule in PROHIBITED_RULES:
-                if pattern not in violations:
-                    violations[pattern] = set()
-                violations[pattern].add(rule)
-
-    return violations
 
 
 if __name__ == "__main__":

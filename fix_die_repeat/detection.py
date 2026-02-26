@@ -137,9 +137,9 @@ def _check_makefile_targets(root: Path) -> tuple[str, str] | None:
 
     try:
         makefile_content = makefile_path.read_text(encoding="utf-8")
-        if re.search(r"^test:\s*$", makefile_content, re.MULTILINE):
+        if re.search(r"^test:", makefile_content, re.MULTILINE):
             return "make test", "from Makefile test target"
-        if re.search(r"^check:\s*$", makefile_content, re.MULTILINE):
+        if re.search(r"^check:", makefile_content, re.MULTILINE):
             return "make check", "from Makefile check target"
     except OSError:
         pass
@@ -164,12 +164,9 @@ def _check_package_json(root: Path) -> tuple[str, str] | None:
     try:
         package_data = json.loads(package_json_path.read_text(encoding="utf-8"))
         test_script = package_data.get("scripts", {}).get("test", "")
-        # Skip npm's default placeholder
-        if (
-            test_script
-            and 'echo "Error: no test specified"' not in test_script
-            and "exit 1" not in test_script
-        ):
+        # Skip npm's default placeholder exactly
+        default_placeholder = 'echo "Error: no test specified" && exit 1'
+        if test_script and test_script.strip() != default_placeholder:
             return "npm test", "from package.json scripts.test"
     except (OSError, json.JSONDecodeError):
         pass
