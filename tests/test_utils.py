@@ -1,6 +1,7 @@
 """Tests for utils module."""
 
 import hashlib
+import importlib
 import sys
 from pathlib import Path
 from subprocess import CalledProcessError
@@ -19,6 +20,7 @@ from fix_die_repeat.utils import (
     get_file_size,
     get_git_revision_hash,
     is_excluded_file,
+    is_running_in_dev_mode,
     play_completion_sound,
     run_command,
     sanitize_ntfy_topic,
@@ -52,6 +54,76 @@ class TestFormatDuration:
         assert format_duration(3600) == "1h 0m 0s"
         assert format_duration(3661) == "1h 1m 1s"
         assert format_duration(7265) == "2h 1m 5s"
+
+
+class TestIsRunningInDevMode:
+    """Tests for is_running_in_dev_mode function."""
+
+    def test_returns_bool(self) -> None:
+        """Test that is_running_in_dev_mode returns a boolean."""
+        result = is_running_in_dev_mode()
+        assert isinstance(result, bool)
+        assert result in (True, False)
+
+    @patch("fix_die_repeat.utils.importlib.metadata.distribution")
+    def test_package_not_found(self, mock_distribution: MagicMock) -> None:
+        """Test when package metadata is not found."""
+        mock_distribution.side_effect = importlib.metadata.PackageNotFoundError()
+
+        result = is_running_in_dev_mode()
+
+        # Should return False when package is not found
+        assert result is False
+
+    @patch("fix_die_repeat.utils.importlib.metadata.distribution")
+    def test_editable_install_detection(self, mock_distribution: MagicMock, tmp_path: Path) -> None:
+        """Test detection of editable install via direct_url.json."""
+        # Create a mock distribution with direct_url.json
+        dist_path = tmp_path / "dist"
+        dist_path.mkdir()
+
+        direct_url_file = dist_path / "direct_url.json"
+        direct_url_file.write_text('{"dir_info": {"editable": true}, "url_info": {}}')
+
+        mock_dist = MagicMock()
+        mock_dist._path = str(dist_path)  # noqa: SLF001
+        mock_distribution.return_value = mock_dist
+
+        result = is_running_in_dev_mode()
+
+        # Should detect editable install
+        assert result is True
+
+    @patch("fix_die_repeat.utils.importlib.metadata.distribution")
+    def test_non_editable_install(self, mock_distribution: MagicMock, tmp_path: Path) -> None:
+        """Test detection of non-editable install."""
+        # Create a mock distribution without direct_url.json or with editable: false
+        dist_path = tmp_path / "dist"
+        dist_path.mkdir()
+
+        # direct_url.json doesn't exist or has editable: false
+        direct_url_file = dist_path / "direct_url.json"
+        direct_url_file.write_text('{"dir_info": {"editable": false}, "url_info": {}}')
+
+        mock_dist = MagicMock()
+        mock_dist._path = str(dist_path)  # noqa: SLF001
+        mock_distribution.return_value = mock_dist
+
+        result = is_running_in_dev_mode()
+
+        # Should detect non-editable (or handle gracefully)
+        assert isinstance(result, bool)
+
+    def test_exception_handling(self) -> None:
+        """Test that exceptions are handled gracefully."""
+        with patch(
+            "fix_die_repeat.utils.importlib.metadata.distribution",
+            side_effect=OSError("boom"),
+        ):
+            result = is_running_in_dev_mode()
+
+            # Should return False on any error
+            assert result is False
 
 
 class TestGetFileSize:

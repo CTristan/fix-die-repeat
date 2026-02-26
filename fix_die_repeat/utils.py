@@ -2,6 +2,8 @@
 
 import fnmatch
 import hashlib
+import importlib.metadata
+import json
 import logging
 import re
 import shlex
@@ -18,6 +20,55 @@ console = Console()
 LOG_FORMAT = "[%(asctime)s] [fdr] [%(levelname)s] %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 LOGGER_NAME = "fix_die_repeat"
+
+
+def is_running_in_dev_mode() -> bool:
+    """Check if fix-die-repeat is running from an editable install.
+
+    An editable install is typically used during development where changes
+    to the source code are immediately reflected without reinstallation.
+
+    Returns:
+        True if running from an editable install, False otherwise
+
+    """
+    # Get the package distribution metadata
+    try:
+        dist = importlib.metadata.distribution("fix-die-repeat")
+    except importlib.metadata.PackageNotFoundError:
+        # Package not installed via package manager - likely running directly
+        return False
+    except (OSError, ValueError):
+        # Metadata access errors - conservatively return False
+        return False
+
+    # Check for direct_url.json which indicates editable install
+    try:
+        dist_path = getattr(dist, "_path", None)
+        if dist_path:
+            direct_url_file = Path(dist_path) / "direct_url.json"
+            if direct_url_file.exists():
+                data = json.loads(direct_url_file.read_text())
+                # Editable installs have "dir_info": {"editable": true}
+                if data.get("dir_info", {}).get("editable") is True:
+                    return True
+    except (AttributeError, FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+
+    # Fallback: check if __file__ contains "site-packages"
+    # Editable installs typically don't use site-packages
+    # Use sys.modules to avoid triggering a new import (module is already loaded)
+    try:
+        module = sys.modules.get("fix_die_repeat")
+        if module and hasattr(module, "__file__") and module.__file__:
+            package_file = Path(module.__file__).resolve()
+            # If the path doesn't contain "site-packages", it's likely editable
+            if "site-packages" not in str(package_file):
+                return True
+    except (AttributeError, OSError):
+        pass
+
+    return False
 
 
 def configure_logger(

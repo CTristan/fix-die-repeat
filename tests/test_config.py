@@ -46,7 +46,7 @@ class TestSettings:
     def test_default_settings(self) -> None:
         """Test default settings values."""
         settings = Settings()
-        assert settings.check_cmd == "./scripts/ci.sh"
+        assert settings.check_cmd is None
         assert settings.max_iters == DEFAULT_MAX_ITERS
         assert settings.model is None
         assert settings.test_model is None

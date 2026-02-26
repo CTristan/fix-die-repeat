@@ -1,5 +1,7 @@
 """Tests for CLI module."""
 
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -362,6 +364,106 @@ class TestCliExceptions:
         # Should show traceback in debug mode
         assert result.exit_code == 1
         assert "RuntimeError" in result.output
+
+
+class TestCliResolution:
+    """Tests for CLI check command resolution integration."""
+
+    def test_cli_with_check_cmd_skips_resolution(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that providing -c skips the resolution chain."""
+        original_paths = config.Paths
+
+        def mock_paths(_project_root: Path | None = None) -> config.Paths:
+            return original_paths(project_root=tmp_path)
+
+        monkeypatch.setattr(config, "Paths", mock_paths)
+
+        # Mock PiRunner.run to capture the settings.check_cmd value
+        captured_check_cmd = []
+
+        def capturing_run(self: object) -> int:
+            settings = getattr(self, "settings", None)
+            if settings is not None:
+                captured_check_cmd.append(settings.check_cmd)
+            return 0
+
+        monkeypatch.setattr(runner.PiRunner, "run", capturing_run)
+
+        cli_runner = CliRunner()
+        result = cli_runner.invoke(main, ["-c", "pytest"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        assert captured_check_cmd == ["pytest"]
+
+    def test_cli_without_check_cmd_calls_resolution(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test that CLI calls resolution when no check_cmd is provided."""
+        # Resolve full path to git to avoid S607 (partial path security warning)
+        git_path = shutil.which("git")
+        if git_path is None:
+            pytest.skip("git not available")
+
+        # Initialize a git repo in tmp_path so it's isolated from actual project
+        subprocess.run([git_path, "init"], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(
+            [git_path, "config", "user.email", "test@example.com"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            [git_path, "config", "user.name", "Test User"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+
+        original_paths = config.Paths
+
+        def mock_paths(_project_root: Path | None = None) -> config.Paths:
+            return original_paths(project_root=tmp_path)
+
+        monkeypatch.setattr(config, "Paths", mock_paths)
+
+        # Create pyproject.toml for auto-detection (without pytest config)
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'test'\n")
+
+        # Create system config path directory
+        system_config_dir = tmp_path / "system_config_dir"
+        system_config_dir.mkdir()
+
+        # Mock resolve_check_cmd to return a known value
+        monkeypatch.setattr(
+            cli_module,
+            "resolve_check_cmd",
+            lambda **_kwargs: "pytest",
+        )
+
+        # Mock validate_check_cmd_or_exit to skip validation
+        monkeypatch.setattr(cli_module, "validate_check_cmd_or_exit", lambda _cmd: None)
+
+        # Mock PiRunner.run to capture the settings.check_cmd value
+        captured_check_cmd = []
+
+        def capturing_run(self: object) -> int:
+            settings = getattr(self, "settings", None)
+            if settings is not None:
+                captured_check_cmd.append(settings.check_cmd)
+            return 0
+
+        monkeypatch.setattr(runner.PiRunner, "run", capturing_run)
+
+        cli_runner = CliRunner()
+        result = cli_runner.invoke(main, catch_exceptions=False)
+
+        assert result.exit_code == 0
+        # Should have called resolve_check_cmd and set check_cmd
+        assert captured_check_cmd == ["pytest"]
 
     def test_value_error_handling(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test CLI handles ValueError with appropriate error message (lines 107-108)."""

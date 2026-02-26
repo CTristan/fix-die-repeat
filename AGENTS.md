@@ -4,6 +4,75 @@ This is a living document for coding agents (pi, assistants, etc.) working on **
 
 ---
 
+## CRITICAL POLICIES (READ FIRST)
+
+### ⚠️ NEVER-IGNORE Ruff Rules
+
+The following ruff rules **MUST NEVER be ignored** in `pyproject.toml` per-file-ignores. Adding per-file ignores for these rules violates project policy and will be blocked by CI.
+
+| Rule Code | Name | What to do instead |
+|-----------|------|---------------------|
+| **C901** | Complex-structure (McCabe > 10) | Extract helper functions, use Strategy pattern, apply early returns to reduce nesting |
+| **PLR0913** | Too many arguments (>5) | Group related arguments into `dataclass`, `NamedTuple`, or use `**kwargs` for framework callbacks (e.g., Click) |
+| **PLR2004** | Magic value comparison | Replace unnamed numbers/strings with named constants at module level |
+| **PLC0415** | Import outside top-level | Move imports to module top; if circular dependency exists, refactor module boundaries |
+
+**Rationale**: These rules protect code quality by forcing refactoring when complexity grows. Ignoring them creates technical debt that becomes harder to fix over time.
+
+**How to fix each:**
+- **C901**: Break large functions into smaller, focused helpers. Each helper should have a single responsibility.
+- **PLR0913**: Use `@dataclass(frozen=True)` to group related parameters, or capture framework callback kwargs and map to typed objects.
+- **PLR2004**: Define constants like `MAX_RETRIES = 3` at module top. Only 0, 1, `""`, and `"__main__"` are exempt.
+- **PLC0415**: Place all imports at the top of the file. If you have circular imports, restructure modules to break the cycle.
+
+**Enforcement:**
+- The `scripts/validate_ruff_rules.py` script checks for these violations and fails if found
+- The CI script (`scripts/ci.sh`) runs this validation before running ruff
+- The fix prompt (`fix_checks.j2`) explicitly references this policy
+- The review template (`local_review.j2`) includes these in the CRITICAL checklist
+
+**If you're tempted to add a per-file ignore, STOP.** Refactor the code instead.
+
+### 🧪 Test Configuration Policy
+
+**NEVER modify test configuration settings without EXPLICIT human approval.**
+
+This includes but is not limited to:
+- Coverage threshold (`--cov-fail-under`)
+- pytest `addopts` in `[tool.pytest.ini_options]`
+- Coverage report options (`--cov-report`)
+- Test discovery patterns (`testpaths`, `python_files`, `python_classes`, `python_functions`)
+- Test command flags in `scripts/ci.sh`
+
+**Why this matters:**
+- Coverage thresholds are a quality gate to prevent regressions
+- Lowering thresholds to make CI pass undermines the purpose of testing
+- Changes to test configuration affect all future contributors
+
+**What to do instead:**
+- If coverage drops below 80%, write MORE tests to raise it back up
+- If a module is genuinely difficult to test, document why and seek approval to exclude it with `--cov-omit`
+- Never lower `--cov-fail-under` to make CI pass
+
+### 📏 File Size Policy
+
+**CRITICAL: All code and documentation files must be kept under 2000 lines.**
+
+When a file reaches 2000 lines or more, it **MUST** be refactored into separate files.
+
+**Why this matters:**
+- Large files are difficult to navigate, understand, and maintain
+- Code review becomes exponentially harder
+- Merge conflicts are more frequent and harder to resolve
+- Long files often indicate multiple responsibilities (violates Single Responsibility Principle)
+
+**What to do when approaching the limit:**
+1. **For code files**: Split into logical modules (e.g., `utils.py` → `utils.py`, `git_utils.py`, `file_utils.py`)
+2. **For documentation files**: Split into topical sections (e.g., `AGENTS.md` → `AGENTS.md`, `ARCHITECTURE.md`, `WORKFLOW.md`)
+3. **For configuration/template files**: Extract reusable sections into separate files
+
+---
+
 ## Project Overview
 
 **Fix. Die. Repeat.** is a Python rewrite of a bash script that automates an iterative check-review-fix loop using [pi](https://github.com/mariozechner/pi) AI coding agent.
@@ -38,6 +107,8 @@ fix-die-repeat/
 │   ├── __init__.py         # Version and package init
 │   ├── cli.py             # Click-based CLI interface
 │   ├── config.py          # Pydantic settings and path management
+│   ├── detection.py       # Check command resolution and auto-detection
+│   ├── messages.py        # User-facing message generators
 │   ├── prompts.py         # Jinja template rendering helpers
 │   ├── runner.py          # Core PiRunner class - main loop
 │   ├── utils.py           # Utility functions (logging, git, file ops)
@@ -45,10 +116,13 @@ fix-die-repeat/
 ├── tests/                  # Test suite
 │   ├── __init__.py
 │   ├── test_config.py    # Settings and Paths tests
+│   ├── test_detection.py  # Check command resolution tests
+│   ├── test_messages.py   # Message generator tests
 │   ├── test_prompts.py   # Prompt rendering tests
 │   └── test_utils.py     # Utility function tests
 ├── pyproject.toml          # uv configuration, dependencies, tooling
 ├── README.md              # User documentation
+├── CONTRIBUTING.md        # Developer setup, testing, architecture
 └── AGENTS.md              # This file - for coding agents
 ```
 
@@ -89,7 +163,7 @@ exit_code = runner.run()  # Runs the full loop
 Configuration with environment variable support via Pydantic.
 
 **Actual Default Values** (from code):
-- `check_cmd`: `"./scripts/ci.sh"`
+- `check_cmd`: `None` (resolved via detection chain)
 - `max_iters`: `10`
 - `max_pr_threads`: `5`
 - `auto_attach_threshold`: `200 * 1024` (200KB)
@@ -133,6 +207,40 @@ Centralized path management for `.fix-die-repeat/` directory.
 - `diff_file` - Git diff of all changes (for review)
 - `run_timestamps_file` - Start/end timestamps of run
 - `session_log` - Combined output (or timestamped if debug mode)
+
+### `detection` (detection.py)
+
+Check command resolution and auto-detection module. Handles the smart resolution chain that finds or prompts for the check command when not explicitly provided.
+
+**Key Functions**:
+- `resolve_check_cmd()` - Orchestrates the full resolution chain (CLI → project config → system config → auto-detect → prompt → error)
+- `auto_detect_check_cmd()` - Scans project files for known patterns and returns appropriate command
+- `validate_command_exists()` - Pre-flight check that command is executable before entering main loop
+- `read_config_file()` / `write_config_file()` - Simple TOML-like config file I/O for persisting check_cmd
+- `is_interactive()` - Checks if stdin is a TTY (for deciding between auto-detect vs prompt)
+- `get_system_config_path()` - Returns `~/.config/fix-die-repeat/config` (respects XDG_CONFIG_HOME)
+
+**Resolution Priority**:
+1. CLI flag/env var (`-c` / `FDR_CHECK_CMD`)
+2. Project config (`.fix-die-repeat/config`)
+3. System config (`~/.config/fix-die-repeat/config`) - validated, falls through if command not found
+4. Auto-detect from project files
+5. Interactive prompt
+6. Hard error (non-interactive with no config)
+
+**Auto-Detection Rules** (in priority order):
+- `scripts/ci.sh` → `./scripts/ci.sh` (existing FDR convention)
+- `Makefile` with `test:` → `make test`
+- `Makefile` with `check:` → `make check`
+- `package.json` with `scripts.test` → `npm test` (skips npm default placeholder)
+- `Cargo.toml` → `cargo test`
+- `pyproject.toml` with `[tool.pytest]` → `uv run pytest`
+- `pyproject.toml` (no pytest) → `uv run python -m pytest`
+- `go.mod` → `go test ./...`
+- `build.gradle` / `build.gradle.kts` → `./gradlew test`
+- `pom.xml` → `mvn test`
+- `mix.exs` → `mix test`
+- `Gemfile` → `bundle exec rake test`
 
 ### Logging (`configure_logger` in utils.py)
 
@@ -240,6 +348,36 @@ if current_review_hash == last_review_hash and current_git_state == last_git_sta
         logger.error("No progress made after 3 iterations in PR review mode.")
         sys.exit(1)
 ```
+
+### 7. Smart Check Command Resolution
+
+Replaces the hardcoded `./scripts/ci.sh` default with a smart resolution chain that auto-detects, confirms, persists, and validates the check command.
+
+**Why**: New users shouldn't need to know about `./scripts/ci.sh`. The tool should "just work" by detecting their project type and prompting for confirmation.
+
+**Resolution Chain** (priority order):
+1. CLI flag/env var (`-c` / `FDR_CHECK_CMD`) - highest priority, no validation beyond pre-flight
+2. Project config (`.fix-die-repeat/config`) - per-project settings, no validation
+3. System config (`~/.config/fix-die-repeat/config`) - global settings, validated (falls through if command not found)
+4. Auto-detect - scans for common project files (`Makefile`, `package.json`, `Cargo.toml`, etc.)
+5. Interactive prompt - asks user to type a command
+6. Hard error - non-interactive mode with no configured command exits with helpful message
+
+**Pre-Flight Validation**:
+After resolution completes, verify the command is executable before entering the main loop:
+- Tokenize with `shlex.split()`
+- Check first token is executable via `shutil.which()` or path existence
+- If not found → hard error with clear message
+
+**Config Persistence**:
+- Auto-detected or prompted commands are saved to `.fix-die-repeat/config`
+- Project config is automatically gitignored
+- Next run uses persisted command silently (skips detection/prompt)
+
+**Backward Compatibility**:
+- Users with `-c` or `FDR_CHECK_CMD`: Zero change — these take highest priority
+- Users with `./scripts/ci.sh`: Auto-detection finds `scripts/ci.sh` first, confirms on first run, then persists
+- CI/CD: Must set `FDR_CHECK_CMD` or `-c` explicitly — clear error message guides them
 
 ---
 
@@ -832,6 +970,7 @@ self.logger.debug("Debug details: %s", detail)
 1. **Update tests**: Add coverage for new code.
 2. **Update this document** (AGENTS.md) if architecture changes.
 3. **Update README.md** if user-facing changes.
+4. **Update CONTRIBUTING.md** if dev setup, tooling, or architecture changes.
 4. **Run full check**: `uv run pytest && uv run ruff check --fix fix_die_repeat tests && uv run ruff format fix_die_repeat tests`.
 
 ---
@@ -856,6 +995,7 @@ self.logger.debug("Debug details: %s", detail)
 
 | File | Format | Purpose |
 |-------|---------|---------|
+| `config` | TOML-like (key = value) | Persisted check command for project |
 | `review.md` | Markdown | Appended with each iteration, preserves history |
 | `review_current.md` | Markdown | Current issues, deleted after each iteration |
 | `build_history.md` | Markdown | `git diff --stat` per iteration |
