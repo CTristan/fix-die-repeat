@@ -88,6 +88,8 @@ class TestRenderPrompt:
             "docs/prompts/config instructions and examples match actual behavior "
             "and required fields" in prompt
         )
+        assert "avoid terminating the process from library/orchestration code" in prompt
+        assert "user-facing logs/errors clearly explain limits, skips, or partial results" in prompt
 
     def test_introspect_pr_review_template(self, tmp_path: Path) -> None:
         """Render introspect_pr_review template with all required variables."""
