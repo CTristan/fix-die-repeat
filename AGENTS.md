@@ -435,7 +435,7 @@ Analyzes what PR reviewers caught, how the agent responded (fixed vs. won't fix)
 - Reads global introspection file
 - Filters to `status: pending` entries
 - Analyzes patterns across projects
-- Creates git branch with template updates
+- Edits templates directly to address identified gaps
 - Marks entries as `status: reviewed`
 
 ---

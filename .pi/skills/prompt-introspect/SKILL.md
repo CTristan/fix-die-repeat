@@ -21,18 +21,17 @@ Reads the global introspection file and updates FDR's prompt templates to addres
    - **Pattern detection**: Are multiple entries flagging the same category across different projects?
    - **Gap analysis**: Is this category already covered by the templates? If so, is the coverage sufficient?
    - **Actionability**: Can a template change realistically catch this class of issue earlier?
-5. Create a new git branch: `introspect/prompt-updates-YYYY-MM-DD`
-6. Edit templates to address identified gaps:
+5. Edit templates to address identified gaps:
    - Add checklist items to `local_review.j2` for categories not currently covered
    - Add guidance to `fix_checks.j2` for fix patterns that were commonly needed
    - Add context to `resolve_review_issues.j2` for issue types the agent struggled with
-7. Mark processed entries as `status: reviewed` in the introspection file
-8. **Compact the introspection file** if it has reached 2000+ lines:
+6. Mark processed entries as `status: reviewed` in the introspection file
+7. **Compact the introspection file** if it has reached 2000+ lines:
    - Archive reviewed entries older than 6 months to `~/.config/fix-die-repeat/introspection-archive.yaml`
    - Keep the most recent 50 reviewed entries in the main file
    - Keep all `pending` entries in the main file
    - Delete the archive file if it would be empty after compaction
-9. Summarize what was changed and why
+8. Summarize what was changed and why
 
 ## Guidelines
 
