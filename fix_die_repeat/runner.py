@@ -26,9 +26,7 @@ from fix_die_repeat.prompts import render_prompt
 from fix_die_repeat.runner_artifacts import ArtifactManager
 from fix_die_repeat.runner_introspection import (
     IntrospectionManager,
-)
-from fix_die_repeat.runner_introspection import (
-    PrInfo as IntrospectionPrInfo,
+    IntrospectionPrInfo,
 )
 from fix_die_repeat.runner_pr import PrInfo as ReviewPrInfo
 from fix_die_repeat.runner_pr import PrReviewManager

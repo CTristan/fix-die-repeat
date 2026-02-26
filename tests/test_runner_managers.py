@@ -3,10 +3,12 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from fix_die_repeat.config import Paths, Settings
 from fix_die_repeat.runner_artifacts import ArtifactManager
 from fix_die_repeat.runner_pr import PrInfo, PrReviewManager
-from fix_die_repeat.runner_review import ReviewManager
+from fix_die_repeat.runner_review import ReviewManager, RuffConfigValidationError
 from fix_die_repeat.utils import get_file_line_count, get_git_revision_hash
 
 FILTER_LOG_LINE_COUNT = 400
@@ -161,6 +163,35 @@ class TestReviewManager:
         assert "Iteration 2 - Review" in review_content
         assert "NO_ISSUES" in review_content
         assert not run_pi_callback.called
+
+    def test_check_prohibited_ruff_ignores_parse_error(self, tmp_path: Path) -> None:
+        """Invalid ruff config should raise a validation error."""
+        settings = Settings()
+        paths = Paths(project_root=tmp_path)
+        paths.ensure_fdr_dir()
+        logger = MagicMock()
+        manager = ReviewManager(settings, paths, tmp_path, logger)
+
+        (tmp_path / "pyproject.toml").write_text("tool = [")
+
+        with pytest.raises(RuffConfigValidationError):
+            manager.check_prohibited_ruff_ignores()
+
+    def test_check_prohibited_ruff_ignores_violations(self, tmp_path: Path) -> None:
+        """Prohibited ignores should raise a validation error."""
+        settings = Settings()
+        paths = Paths(project_root=tmp_path)
+        paths.ensure_fdr_dir()
+        logger = MagicMock()
+        manager = ReviewManager(settings, paths, tmp_path, logger)
+
+        pyproject = (
+            '[tool.ruff.lint.per-file-ignores]\n"fix_die_repeat/runner.py" = ["C901", "E501"]\n'
+        )
+        (tmp_path / "pyproject.toml").write_text(pyproject)
+
+        with pytest.raises(RuffConfigValidationError):
+            manager.check_prohibited_ruff_ignores()
 
     def test_add_untracked_files_diff_includes_pseudo_diff(self, tmp_path: Path) -> None:
         """Untracked files should be included in diff output."""

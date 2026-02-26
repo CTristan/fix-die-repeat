@@ -7,7 +7,6 @@ This module handles the local code review phase including:
 """
 
 import logging
-import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +22,23 @@ from fix_die_repeat.utils import (
     is_excluded_file,
     run_command,
 )
+
+
+class RuffConfigValidationError(RuntimeError):
+    """Raised when ruff ignore validation fails."""
+
+    _PARSE_ERROR_MESSAGE = "Failed to parse ruff config for prohibited ignore validation."
+    _PROHIBITED_RULES_MESSAGE = "Prohibited ruff rules found in per-file-ignores."
+
+    @classmethod
+    def parse_error(cls) -> "RuffConfigValidationError":
+        """Create an error for ruff config parsing failures."""
+        return cls(cls._PARSE_ERROR_MESSAGE)
+
+    @classmethod
+    def prohibited_rules(cls) -> "RuffConfigValidationError":
+        """Create an error for prohibited ruff rule ignores."""
+        return cls(cls._PROHIBITED_RULES_MESSAGE)
 
 
 class ReviewManager:
@@ -304,7 +320,7 @@ class ReviewManager:
         Enforces the NEVER-IGNORE policy for C901, PLR0913, PLR2004, PLC0415.
 
         Raises:
-            SystemExit: If prohibited ignores are found or config cannot be parsed
+            RuffConfigValidationError: If prohibited ignores are found or config cannot be parsed
 
         """
         pyproject_path = self.project_root / "pyproject.toml"
@@ -318,7 +334,7 @@ class ReviewManager:
         except RuffConfigParseError as exc:
             self.logger.exception("CRITICAL: Failed to parse ruff config!")
             self._log_ruff_config_parse_error(exc)
-            sys.exit(1)
+            raise RuffConfigValidationError.parse_error() from exc
 
         if violations:
             separator = "=" * 70
@@ -340,7 +356,7 @@ class ReviewManager:
             self.logger.error("  2. Refactor the code to address the underlying issue")
             self.logger.error("")
             self.logger.error("This is a CRITICAL policy violation. The build cannot continue.")
-            sys.exit(1)
+            raise RuffConfigValidationError.prohibited_rules()
 
     def _log_ruff_config_parse_error(self, error: RuffConfigParseError) -> None:
         """Log details when the ruff config cannot be parsed.

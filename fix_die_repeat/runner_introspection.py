@@ -137,7 +137,7 @@ class IntrospectionYamlParams:
 
 
 @dataclass
-class PrInfo:
+class IntrospectionPrInfo:
     """PR information from GitHub (minimal for introspection)."""
 
     number: int
@@ -270,11 +270,11 @@ class IntrospectionManager:
             self.paths.introspection_data_file.unlink(missing_ok=True)
             self.paths.introspection_result_file.unlink(missing_ok=True)
 
-    def _validate_prerequisites_for_introspection(self) -> PrInfo | None:
+    def _validate_prerequisites_for_introspection(self) -> IntrospectionPrInfo | None:
         """Validate introspection prerequisites and get PR info.
 
         Returns:
-            PrInfo if valid, None if introspection should skip
+            IntrospectionPrInfo if valid, None if introspection should skip
 
         """
         # Skip if no PR threads were processed (check cumulative file)
@@ -320,8 +320,8 @@ class IntrospectionManager:
             return None
         return pr_json
 
-    def _parse_pr_info(self, pr_json: str) -> PrInfo | None:
-        """Parse PR info JSON into a PrInfo object."""
+    def _parse_pr_info(self, pr_json: str) -> IntrospectionPrInfo | None:
+        """Parse PR info JSON into an IntrospectionPrInfo object."""
         try:
             pr_data = json.loads(pr_json)
         except json.JSONDecodeError:
@@ -345,7 +345,7 @@ class IntrospectionManager:
             )
             return None
 
-        return PrInfo(
+        return IntrospectionPrInfo(
             number=pr_number,
             url=pr_url,
         )
@@ -597,7 +597,12 @@ class IntrospectionManager:
 
         return f"{normalized}\n"
 
-    def collect_introspection_data(self, _iteration: int, start_sha: str, pr_info: PrInfo) -> None:
+    def collect_introspection_data(
+        self,
+        _iteration: int,
+        start_sha: str,
+        pr_info: IntrospectionPrInfo,
+    ) -> None:
         """Collect input data for introspection analysis.
 
         Gathers PR thread comments, fix/won't-fix outcomes, and the diff
