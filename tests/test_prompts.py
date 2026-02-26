@@ -31,6 +31,7 @@ class TestRenderPrompt:
         assert "- app.py" in prompt
         assert "CRITICAL WARNING: large file" in prompt
         assert "structured data or external tool output" in prompt
+        assert "atomic/locked writes" in prompt
 
     def test_fix_checks_template_without_optional_sections(self) -> None:
         """Render fix_checks prompt without optional sections."""
@@ -89,6 +90,8 @@ class TestRenderPrompt:
             "and required fields" in prompt
         )
         assert "avoid terminating the process from library/orchestration code" in prompt
+        assert "propagate internal failure codes to process exit status" in prompt
+        assert "tests assert observable behavior" in prompt
         assert "user-facing logs/errors clearly explain limits, skips, or partial results" in prompt
 
     def test_introspect_pr_review_template(self, tmp_path: Path) -> None:
