@@ -1,7 +1,6 @@
 """Tests for runner module."""
 
 import sys
-from contextlib import suppress
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -1948,16 +1947,14 @@ class TestCompleteSuccess:
 
         with (
             patch("fix_die_repeat.runner.play_completion_sound"),
-            patch("fix_die_repeat.runner.sys.exit") as mock_exit,
             patch("fix_die_repeat.runner.format_duration") as mock_format,
         ):
             mock_format.return_value = "0s"
-            with suppress(SystemExit):
-                runner.complete_success()
+            result = runner.complete_success()
 
-            # Check that exit was called with 0
-            mock_exit.assert_called_once_with(0)
-            # Note: Files are not actually deleted because sys.exit(0) is mocked
+            # Check that the method returns 0
+            assert result == 0
+            # Note: Files are not actually deleted because we're using MagicMock paths
 
     def test_complete_success_with_ntfy(self, tmp_path: Path) -> None:
         """Test completing the run with ntfy notification."""
@@ -1986,13 +1983,19 @@ class TestCompleteSuccess:
 
         with (
             patch("fix_die_repeat.runner.play_completion_sound"),
-            patch("fix_die_repeat.runner.send_ntfy_notification"),
-            patch("fix_die_repeat.runner.sys.exit") as mock_exit,
+            patch("fix_die_repeat.runner.send_ntfy_notification") as mock_ntfy,
             patch("fix_die_repeat.runner.format_duration") as mock_format,
         ):
             mock_format.return_value = "5m 30s"
-            with suppress(SystemExit):
-                runner.complete_success()
+            result = runner.complete_success()
 
-            # Check that exit was called with 0
-            mock_exit.assert_called_once_with(0)
+            # Check that the method returns 0
+            assert result == 0
+            # Check that ntfy notification was sent with correct parameters
+            mock_ntfy.assert_called_once_with(
+                exit_code=0,
+                duration_str="5m 30s",
+                repo_name=tmp_path.name,
+                ntfy_url="http://localhost:2586",
+                logger=runner.logger,
+            )

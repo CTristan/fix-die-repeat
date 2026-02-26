@@ -7,7 +7,13 @@ from unittest.mock import patch
 
 import pytest
 
-from fix_die_repeat.config import CliOptions, Paths, Settings, get_settings
+from fix_die_repeat.config import (
+    CliOptions,
+    Paths,
+    Settings,
+    get_introspection_file_path,
+    get_settings,
+)
 from fix_die_repeat.utils import run_command
 
 # Constants for default settings values
@@ -68,6 +74,33 @@ class TestSettings:
         assert settings.check_cmd == "make test"
         assert settings.max_iters == TEST_MAX_ITERS
         assert settings.model == "anthropic/claude-sonnet-4-5"
+
+    def test_pr_review_introspect_default(self) -> None:
+        """Test that pr_review_introspect defaults to False."""
+        settings = Settings()
+        assert not settings.pr_review_introspect
+
+    def test_pr_review_introspect_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that pr_review_introspect can be set via environment variable."""
+        monkeypatch.setenv("FDR_PR_REVIEW_INTROSPECT", "1")
+        settings = Settings()
+        assert settings.pr_review_introspect
+
+    def test_pr_review_introspect_implies_pr_review(self) -> None:
+        """Test that pr_review_introspect=True also sets pr_review=True."""
+        options = CliOptions(pr_review_introspect=True)
+        settings = get_settings(options)
+
+        assert settings.pr_review_introspect
+        assert settings.pr_review, "pr_review should be True when pr_review_introspect is True"
+
+    def test_pr_review_flag_standalone(self) -> None:
+        """Test that --pr-review flag can be used without --pr-review-introspect."""
+        options = CliOptions(pr_review=True, pr_review_introspect=False)
+        settings = get_settings(options)
+
+        assert settings.pr_review
+        assert not settings.pr_review_introspect
 
     def test_invalid_max_iters(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that invalid max_iters raises ValueError."""
@@ -228,6 +261,8 @@ class TestPaths:
         assert paths.pr_resolved_threads_file == paths.fdr_dir / ".resolved_threads"
         assert paths.diff_file == paths.fdr_dir / "changes.diff"
         assert paths.run_timestamps_file == paths.fdr_dir / "run_timestamps.md"
+        assert paths.introspection_data_file == paths.fdr_dir / ".introspection_data.yaml"
+        assert paths.introspection_result_file == paths.fdr_dir / ".introspection_result.yaml"
 
     def test_find_project_root_git_fallback_to_cwd(self, tmp_path: Path) -> None:
         """Test _find_project_root falls back to cwd when git lookup fails."""
@@ -245,3 +280,58 @@ class TestPaths:
                 assert paths.project_root == no_git_dir
         finally:
             os.chdir(original_cwd)
+
+
+class TestGetIntrospectionFilePath:
+    """Tests for get_introspection_file_path function."""
+
+    def test_returns_path_object(self) -> None:
+        """Test that get_introspection_file_path returns a Path object."""
+        path = get_introspection_file_path()
+        assert isinstance(path, Path)
+
+    def test_default_location(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Test default location is ~/.config/fix-die-repeat/introspection.yaml."""
+        # Set HOME to tmp_path for test isolation
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+        path = get_introspection_file_path()
+        expected = tmp_path / ".config" / "fix-die-repeat" / "introspection.yaml"
+        assert path == expected
+
+    def test_xdg_config_home_respected(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """Test that XDG_CONFIG_HOME is respected when set."""
+        xdg_config = tmp_path / "custom_config"
+        xdg_config.mkdir()
+
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config))
+
+        path = get_introspection_file_path()
+        expected = xdg_config / "fix-die-repeat" / "introspection.yaml"
+        assert path == expected
+
+    def test_creates_parent_directories(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """Test that parent directories are created."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+        # Remove any existing config directory
+        config_dir = tmp_path / ".config" / "fix-die-repeat"
+        if config_dir.exists():
+            shutil.rmtree(config_dir.parent)
+
+        # Call the function - should create directories
+        path = get_introspection_file_path()
+
+        # Verify parent directories were created
+        assert path.parent.exists()
+        assert path.parent.is_dir()

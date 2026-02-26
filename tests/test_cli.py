@@ -76,6 +76,13 @@ class TestCliMain:
         assert "--pr-review" in result.output
         assert "Enable PR review mode" in result.output
 
+    def test_cli_with_pr_review_introspect(self) -> None:
+        """Test CLI with pr-review-introspect flag."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--help"])
+        assert "--pr-review-introspect" in result.output
+        assert "Enable PR review mode with prompt introspection" in result.output
+
     def test_cli_with_archive_artifacts(self) -> None:
         """Test CLI with archive-artifacts flag."""
         runner = CliRunner()
@@ -209,6 +216,7 @@ class TestBuildCliOptions:
             "archive_artifacts": True,
             "no_compact": True,
             "pr_review": True,
+            "pr_review_introspect": True,
             "test_model": "test-model-2",
             "debug": True,
         }
@@ -222,6 +230,7 @@ class TestBuildCliOptions:
         assert options.archive_artifacts is True  # True when flag is set
         assert options.no_compact is True
         assert options.pr_review is True
+        assert options.pr_review_introspect is True
         assert options.test_model == "test-model-2"
         assert options.debug is True
 
@@ -254,8 +263,43 @@ class TestBuildCliOptions:
         assert options.archive_artifacts is None
         assert options.no_compact is False
         assert options.pr_review is False
+        assert options.pr_review_introspect is False
         assert options.test_model is None
         assert options.debug is False
+
+    def test_pr_review_introspect_implies_pr_review(self) -> None:
+        """Test that --pr-review-introspect flag implies --pr-review."""
+        kwargs: CliKwargs = {
+            "pr_review": False,
+            "pr_review_introspect": True,
+        }
+
+        options = _build_cli_options(kwargs)
+        settings = config.get_settings(options)
+
+        # The flag should be set in options
+        assert options.pr_review_introspect is True
+
+        # And settings should have both flags set
+        assert settings.pr_review_introspect is True
+        assert settings.pr_review is True, (
+            "pr_review should be True when pr_review_introspect is True"
+        )
+
+    def test_pr_review_without_introspect(self) -> None:
+        """Test that --pr-review can be used without --pr-review-introspect."""
+        kwargs: CliKwargs = {
+            "pr_review": True,
+            "pr_review_introspect": False,
+        }
+
+        options = _build_cli_options(kwargs)
+        settings = config.get_settings(options)
+
+        assert options.pr_review is True
+        assert options.pr_review_introspect is False
+        assert settings.pr_review is True
+        assert settings.pr_review_introspect is False
 
     def test_partial_options(self) -> None:
         """Test building CliOptions with partial options set."""
@@ -373,6 +417,9 @@ class TestCliResolution:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test that providing -c skips the resolution chain."""
+        # Mock validate_check_cmd_or_exit to skip validation
+        monkeypatch.setattr(cli_module, "validate_check_cmd_or_exit", lambda _cmd: None)
+
         original_paths = config.Paths
 
         def mock_paths(_project_root: Path | None = None) -> config.Paths:
@@ -405,8 +452,7 @@ class TestCliResolution:
         """Test that CLI calls resolution when no check_cmd is provided."""
         # Resolve full path to git to avoid S607 (partial path security warning)
         git_path = shutil.which("git")
-        if git_path is None:
-            pytest.skip("git not available")
+        assert git_path is not None  # mypy needs this for type narrowing
 
         # Initialize a git repo in tmp_path so it's isolated from actual project
         subprocess.run([git_path, "init"], cwd=tmp_path, check=True, capture_output=True)

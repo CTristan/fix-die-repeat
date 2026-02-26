@@ -62,6 +62,12 @@ console = Console()
     envvar="FDR_PR_REVIEW",
 )
 @click.option(
+    "--pr-review-introspect",
+    is_flag=True,
+    help="Enable PR review mode with prompt introspection (implies --pr-review)",
+    envvar="FDR_PR_REVIEW_INTROSPECT",
+)
+@click.option(
     "--test-model",
     help="Test model compatibility before running (exits after test)",
     envvar="FDR_TEST_MODEL",
@@ -154,6 +160,7 @@ def _build_cli_options(kwargs: dict[str, str | int | bool | None]) -> CliOptions
         archive_artifacts=bool(archive_flag) if archive_flag else None,
         no_compact=bool(kwargs.get("no_compact", False)),
         pr_review=bool(kwargs.get("pr_review", False)),
+        pr_review_introspect=bool(kwargs.get("pr_review_introspect", False)),
         test_model=str(test_model) if test_model is not None else None,
         debug=bool(kwargs.get("debug", False)),
     )

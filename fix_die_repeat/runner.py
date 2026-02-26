@@ -5,10 +5,13 @@ import re
 import shlex
 import sys
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fix_die_repeat.config import Paths, Settings
+import yaml
+
+from fix_die_repeat.config import Paths, Settings, get_introspection_file_path
 from fix_die_repeat.messages import (
     git_checkout_instructions,
     git_diff_instructions,
@@ -36,6 +39,22 @@ from fix_die_repeat.utils import (
 )
 
 
+@dataclass(frozen=True)
+class IntrospectionYamlParams:
+    """Parameters for building introspection YAML.
+
+    Groups related parameters for _build_introspection_yaml to avoid
+    violating PLR0913 (too many arguments).
+    """
+
+    pr_number: str
+    pr_url: str
+    in_scope_ids: list[str]
+    resolved_set: set[str]
+    pr_threads_content: str
+    diff_content: str
+
+
 class PiRunner:
     """Runner that orchestrates the fix-die-repeat loop."""
 
@@ -57,6 +76,7 @@ class PiRunner:
         self.last_review_current_hash = ""
         self.last_git_state = ""
         self.consecutive_toolless_attempts = 0
+        self._success_complete = False
 
         # Ensure .fix-die-repeat directory exists before creating logger
         self.paths.ensure_fdr_dir()
@@ -739,11 +759,33 @@ class PiRunner:
             # Run fix loop
             exit_code = self.run_fix_loop()
             if exit_code != 0:
+                # Post-run introspection (non-blocking, even on failure)
+                if self.settings.pr_review_introspect:
+                    try:
+                        self.run_introspection()
+                    except Exception:
+                        self.logger.exception(
+                            "Introspection step failed (non-blocking)",
+                        )
                 return exit_code
 
             # Run review phase
             changed_files = get_changed_files(self.paths.project_root)
             self.run_review_phase(changed_files)
+
+            # Check if we completed successfully
+            if self._success_complete:
+                # Post-run introspection (non-blocking)
+                if self.settings.pr_review_introspect:
+                    try:
+                        self.run_introspection()
+                    except Exception:
+                        self.logger.exception(
+                            "Introspection step failed (non-blocking)",
+                        )
+                self.complete_success()
+                # complete_success() returns normally
+                return 0
 
         # Should not reach here
         return 0
@@ -1326,8 +1368,13 @@ class PiRunner:
 
         return False
 
-    def complete_success(self) -> None:
-        """Complete the run successfully."""
+    def complete_success(self) -> int:
+        """Complete the run successfully.
+
+        Returns:
+            Exit code 0 for success
+
+        """
         timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         with self.paths.review_file.open("a") as f:
             f.write(f"### Iteration {self.iteration} - Resolution ({timestamp})\n")
@@ -1357,7 +1404,7 @@ class PiRunner:
                 logger=self.logger,
             )
 
-        sys.exit(0)
+        return 0
 
     def run_review_fix_attempt(self, fix_attempt: int, max_fix_attempts: int) -> bool:
         """Run a single review fix attempt.
@@ -1507,7 +1554,9 @@ class PiRunner:
 
         if self.has_no_review_issues(review_content):
             self.logger.info("[Step 6B] No issues found in .fix-die-repeat/review_current.md.")
-            self.complete_success()
+            # Set a flag to call complete_success after the loop
+            self._success_complete = True
+            return
 
         # Issues found - fix them
         self.logger.info(
@@ -1637,3 +1686,329 @@ class PiRunner:
 
         # Clear resolved threads file
         self.paths.pr_resolved_threads_file.unlink(missing_ok=True)
+
+    def collect_introspection_data(self) -> None:
+        """Collect input data for introspection analysis.
+
+        Gathers PR thread comments, fix/won't-fix outcomes, and the diff
+        of changes made by the agent during PR review mode.
+
+        Writes the collected data to `self.paths.introspection_data_file`
+        as YAML that the introspection LLM prompt can reference.
+
+        """
+        self.logger.info("Collecting introspection data...")
+
+        # Get PR info
+        pr_info = self._get_pr_info_for_introspection()
+        if not pr_info:
+            self.logger.warning("No PR info available for introspection")
+            return
+
+        # Collect thread IDs and outcomes
+        in_scope_ids, resolved_set = self._collect_thread_ids()
+        pr_number, pr_url = self._extract_pr_info(pr_info)
+
+        # Read cached data
+        pr_threads_content = self._read_pr_threads_cache()
+        diff_content = self._read_diff_content()
+
+        # Build and write YAML structure
+        yaml_params = IntrospectionYamlParams(
+            pr_number=pr_number,
+            pr_url=pr_url,
+            in_scope_ids=in_scope_ids,
+            resolved_set=resolved_set,
+            pr_threads_content=pr_threads_content,
+            diff_content=diff_content,
+        )
+        yaml_content = self._build_introspection_yaml(yaml_params)
+        self.paths.introspection_data_file.write_text(yaml_content)
+        self.logger.info(
+            "Collected introspection data to %s",
+            self.paths.introspection_data_file,
+        )
+
+    def _get_pr_info_for_introspection(self) -> dict | None:
+        """Get PR information for introspection.
+
+        Returns:
+            PR info dict or None if not available
+
+        """
+        branch = self.get_branch_name()
+        if not branch:
+            return None
+        return self.get_pr_info(branch)
+
+    def _collect_thread_ids(self) -> tuple[list[str], set[str]]:
+        """Collect in-scope and resolved thread IDs.
+
+        Returns:
+            Tuple of (in_scope_ids list, resolved_set)
+
+        """
+        # Read in-scope thread IDs
+        in_scope_ids = []
+        if self.paths.pr_thread_ids_file.exists():
+            in_scope_ids = [
+                thread_id
+                for thread_id in self.paths.pr_thread_ids_file.read_text().strip().split("\n")
+                if thread_id
+            ]
+
+        # Read resolved thread IDs
+        resolved_ids = []
+        if self.paths.pr_resolved_threads_file.exists():
+            resolved_ids = [
+                thread_id
+                for thread_id in self.paths.pr_resolved_threads_file.read_text().strip().split("\n")
+                if thread_id
+            ]
+
+        return in_scope_ids, set(resolved_ids)
+
+    def _extract_pr_info(self, pr_info: dict) -> tuple[str, str]:
+        """Extract PR number and URL from PR info.
+
+        Args:
+            pr_info: PR info dict
+
+        Returns:
+            Tuple of (pr_number, pr_url)
+
+        """
+        pr_number = pr_info.get("number", "unknown")
+        pr_url = pr_info.get("url", "unknown")
+        return pr_number, pr_url
+
+    def _read_pr_threads_cache(self) -> str:
+        """Read PR threads cache content.
+
+        Returns:
+            PR threads cache content or empty string
+
+        """
+        if self.paths.pr_threads_cache.exists():
+            return self.paths.pr_threads_cache.read_text()
+        return ""
+
+    def _read_diff_content(self) -> str:
+        """Read diff content from file or git.
+
+        Returns:
+            Diff content or empty string
+
+        """
+        # Try to read from diff file
+        if self.paths.diff_file.exists():
+            return self.paths.diff_file.read_text()
+
+        # Fall back to git diff if start_sha is available
+        if not self.start_sha:
+            return ""
+
+        returncode, stdout, _ = run_command(
+            f"git diff {self.start_sha}",
+            cwd=self.paths.project_root,
+            check=False,
+        )
+        return stdout if returncode == 0 else ""
+
+    def _build_introspection_yaml(
+        self,
+        params: IntrospectionYamlParams,
+    ) -> str:
+        """Build YAML structure for introspection data.
+
+        Args:
+            params: IntrospectionYamlParams with all required data
+
+        Returns:
+            YAML content as string
+
+        """
+        lines = [
+            "# Introspection input data for PR review",
+            f"pr_number: {params.pr_number}",
+            f"pr_url: {params.pr_url}",
+            "",
+            "# In-scope thread IDs",
+            "in_scope_thread_ids:",
+        ]
+
+        # Add thread outcomes
+        for thread_id in params.in_scope_ids:
+            outcome = "fixed" if thread_id in params.resolved_set else "wont-fix"
+            lines.append(f"  - id: {thread_id}")
+            lines.append(f"    outcome: {outcome}")
+
+        # Add PR threads content
+        lines.extend(
+            [
+                "",
+                "# PR threads (from cache)",
+                "pr_threads: |",
+            ]
+        )
+        lines.extend([f"  {line}" for line in params.pr_threads_content.splitlines()])
+
+        # Add diff content
+        lines.extend(
+            [
+                "",
+                "# Diff of changes made by agent",
+                "changes_diff: |",
+            ]
+        )
+        lines.extend([f"  {line}" for line in params.diff_content.splitlines()])
+
+        return "\n".join(lines)
+
+    def run_introspection(self) -> None:
+        """Run prompt introspection analysis after PR review completion.
+
+        This is a post-run step that:
+        1. Collects PR thread data and agent outcomes
+        2. Calls pi with the introspection prompt template
+        3. Appends the result to the global introspection file
+
+        This step does NOT block or fail the overall run. Any errors are
+        logged as warnings and the main run result is preserved.
+
+        """
+        self.logger.info("[Introspection] Running PR review introspection...")
+
+        # Validate prerequisites and get PR info
+        pr_info = self._validate_prerequisites_for_introspection()
+        if pr_info is None:
+            return
+
+        try:
+            # Collect input data
+            self.collect_introspection_data()
+            if not self.paths.introspection_data_file.exists():
+                self.logger.warning(
+                    "[Introspection] Failed to collect introspection data, skipping",
+                )
+                return
+
+            # Prepare prompt template variables
+            template_vars = {
+                "run_date": datetime.now(tz=UTC).strftime("%Y-%m-%d"),
+                "project_name": self.paths.project_root.name,
+                "pr_number": pr_info.get("number", "unknown"),
+                "pr_url": pr_info.get("url", "unknown"),
+                "output_path": str(self.paths.introspection_result_file),
+            }
+
+            # Render prompt and build pi command
+            prompt = render_prompt("introspect_pr_review.j2", **template_vars)
+            pi_args = ["-p", "--tools", "read,write"]
+            pi_args.append(f"@{self.paths.introspection_data_file}")
+
+            # Run pi and validate result
+            self.logger.info(
+                "[Introspection] Calling pi to analyze PR threads...",
+            )
+            returncode, _stdout, _stderr = self.run_pi_safe(*pi_args, prompt)
+
+            if returncode != 0:
+                self.logger.warning(
+                    "[Introspection] pi call failed (exit %s), skipping introspection",
+                    returncode,
+                )
+                return
+
+            # Validate result file and content
+            result_content = self._validate_pi_result_file()
+            if result_content is None:
+                return
+
+            # Validate YAML syntax
+            try:
+                yaml.safe_load(result_content)
+            except yaml.YAMLError as e:
+                self.logger.warning(
+                    "[Introspection] Result is not valid YAML: %s",
+                    e,
+                )
+                self.logger.debug(
+                    "[Introspection] Invalid YAML content:\n%s",
+                    result_content,
+                )
+                return
+
+            # Append to global introspection file
+            global_introspection_file = get_introspection_file_path()
+            separator = "\n---\n"
+
+            if global_introspection_file.exists():
+                with global_introspection_file.open("a") as f:
+                    f.write(separator)
+                    f.write(result_content)
+            else:
+                global_introspection_file.write_text(result_content)
+
+            self.logger.info(
+                "[Introspection] Appended analysis to %s",
+                global_introspection_file,
+            )
+
+        except Exception:
+            self.logger.exception(
+                "[Introspection] Unexpected error during introspection (non-blocking)",
+            )
+        finally:
+            # Clean up temporary files
+            self.paths.introspection_data_file.unlink(missing_ok=True)
+            self.paths.introspection_result_file.unlink(missing_ok=True)
+
+    def _validate_prerequisites_for_introspection(self) -> dict | None:
+        """Validate introspection prerequisites and get PR info.
+
+        Returns:
+            PR info dict if valid, None if introspection should skip
+
+        """
+        # Skip if no PR threads were processed
+        if not self.paths.pr_thread_ids_file.exists():
+            self.logger.info(
+                "[Introspection] No PR threads were processed, skipping introspection",
+            )
+            return None
+
+        # Get PR info
+        branch = self.get_branch_name()
+        pr_info = self.get_pr_info(branch) if branch else None
+        if not pr_info:
+            self.logger.warning(
+                "[Introspection] No PR info available, skipping introspection",
+            )
+            return None
+
+        return pr_info
+
+    def _validate_pi_result_file(self) -> str | None:
+        """Validate that pi created a valid result file.
+
+        Returns:
+            Result content if valid, None otherwise
+
+        """
+        # Check if result file was created
+        if not self.paths.introspection_result_file.exists():
+            self.logger.warning(
+                "[Introspection] pi did not create result file, skipping",
+            )
+            return None
+
+        # Read and validate result
+        result_content = self.paths.introspection_result_file.read_text()
+        if not result_content.strip():
+            self.logger.warning(
+                "[Introspection] Result file is empty, skipping append",
+            )
+            return None
+
+        return result_content

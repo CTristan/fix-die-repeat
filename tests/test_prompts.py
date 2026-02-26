@@ -1,5 +1,7 @@
 """Tests for prompt template rendering."""
 
+from pathlib import Path
+
 import pytest
 from jinja2 import UndefinedError
 
@@ -77,3 +79,25 @@ class TestRenderPrompt:
         assert "Project policy: no violations of AGENTS.md" not in prompt
         assert "If you find any policy violations from AGENTS.md" not in prompt
         assert "No test configuration changes without explicit approval" in prompt
+
+    def test_introspect_pr_review_template(self, tmp_path: Path) -> None:
+        """Render introspect_pr_review template with all required variables."""
+        output_path = tmp_path / "result.yaml"
+        prompt = render_prompt(
+            "introspect_pr_review.j2",
+            run_date="2026-02-26",
+            project_name="test-project",
+            pr_number=123,
+            pr_url="https://github.com/owner/repo/pull/123",
+            output_path=str(output_path),
+        )
+
+        assert "2026-02-26" in prompt
+        assert "test-project" in prompt
+        assert "123" in prompt
+        assert "https://github.com/owner/repo/pull/123" in prompt
+        assert str(output_path) in prompt
+        assert "YAML document" in prompt
+        assert "GraphQL thread ID" in prompt
+        assert "security, error-handling, performance" in prompt
+        assert "Use the 'write' tool" in prompt

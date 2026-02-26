@@ -1,5 +1,6 @@
 """Configuration management for fix-die-repeat."""
 
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,6 +68,13 @@ class Settings(BaseSettings):
         description="Enable PR review mode",
     )
 
+    # PR review introspection
+    pr_review_introspect: bool = pyd.Field(
+        default=False,
+        alias="FDR_PR_REVIEW_INTROSPECT",
+        description="Enable PR review mode with prompt introspection",
+    )
+
     # Debug mode
     debug: bool = pyd.Field(
         default=False,
@@ -117,6 +125,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_prefix="FDR_",
         extra="allow",
+        populate_by_name=True,
     )
 
     def validate_max_iters(self) -> None:
@@ -144,6 +153,7 @@ class CliOptions:
     archive_artifacts: bool | None = None
     no_compact: bool = False
     pr_review: bool = False
+    pr_review_introspect: bool = False
     test_model: str | None = None
     debug: bool = False
 
@@ -181,6 +191,21 @@ def _apply_cli_options(settings: Settings, options: CliOptions) -> None:
         options: CLI options to apply
 
     """
+    # Apply command options
+    _apply_command_options(settings, options)
+
+    # Apply boolean flags
+    _apply_boolean_flags(settings, options)
+
+
+def _apply_command_options(settings: Settings, options: CliOptions) -> None:
+    """Apply command-related CLI options.
+
+    Args:
+        settings: Settings instance to modify
+        options: CLI options to apply
+
+    """
     if options.check_cmd is not None:
         settings.check_cmd = options.check_cmd
     if options.max_iters is not None:
@@ -189,14 +214,27 @@ def _apply_cli_options(settings: Settings, options: CliOptions) -> None:
         settings.model = options.model
     if options.max_pr_threads is not None:
         settings.max_pr_threads = options.max_pr_threads
+    if options.test_model is not None:
+        settings.test_model = options.test_model
+
+
+def _apply_boolean_flags(settings: Settings, options: CliOptions) -> None:
+    """Apply boolean flag CLI options.
+
+    Args:
+        settings: Settings instance to modify
+        options: CLI options to apply
+
+    """
     if options.archive_artifacts is not None:
         settings.archive_artifacts = options.archive_artifacts
     if options.no_compact:
         settings.compact_artifacts = False
     if options.pr_review:
         settings.pr_review = options.pr_review
-    if options.test_model is not None:
-        settings.test_model = options.test_model
+    if options.pr_review_introspect:
+        settings.pr_review_introspect = options.pr_review_introspect
+        settings.pr_review = True
     if options.debug:
         settings.debug = options.debug
 
@@ -230,6 +268,8 @@ class Paths:
         self.pr_resolved_threads_file = self.fdr_dir / ".resolved_threads"
         self.diff_file = self.fdr_dir / "changes.diff"
         self.run_timestamps_file = self.fdr_dir / "run_timestamps.md"
+        self.introspection_data_file = self.fdr_dir / ".introspection_data.yaml"
+        self.introspection_result_file = self.fdr_dir / ".introspection_result.yaml"
 
     @staticmethod
     def _find_project_root() -> Path:
@@ -263,3 +303,19 @@ class Paths:
             if ".fix-die-repeat/" not in gitignore_content:
                 with gitignore.open("a") as f:
                     f.write("\n.fix-die-repeat/\n")
+
+
+def get_introspection_file_path() -> Path:
+    """Return the global introspection file path.
+
+    Returns ~/.config/fix-die-repeat/introspection.yaml,
+    respecting XDG_CONFIG_HOME if set.
+
+    Returns:
+        Path to global introspection file
+
+    """
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    introspection_dir = config_home / "fix-die-repeat"
+    introspection_dir.mkdir(parents=True, exist_ok=True)
+    return introspection_dir / "introspection.yaml"
