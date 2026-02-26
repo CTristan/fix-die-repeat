@@ -67,7 +67,7 @@ On first run, fix-die-repeat [detects your project type](docs/guide.md#check-com
 
 - **[Auto-detection](docs/guide.md#check-command-resolution)** — finds your check command from project files (`Makefile`, `package.json`, `Cargo.toml`, `pyproject.toml`, and more)
 - **[PR review mode](docs/guide.md#pr-review-mode)** — fetches and fixes GitHub PR review comments automatically
-- **[PR review introspection](docs/guide.md#pr-review-introspection)** — analyzes PR reviews to identify prompt improvement opportunities
+- **[PR review introspection](docs/guide.md)** — analyzes PR reviews to identify prompt improvement opportunities
 - **[Oscillation detection](docs/guide.md#oscillation-detection)** — warns when the same failure keeps repeating
 - **[Context management](docs/guide.md#context-management)** — keeps pi's prompt efficient by attaching or compacting artifacts
 - **[Notifications](docs/guide.md#notifications-optional)** — optional [ntfy](https://ntfy.sh/) alerts when runs complete

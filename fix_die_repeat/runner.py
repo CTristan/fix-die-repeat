@@ -5,11 +5,22 @@ import re
 import shlex
 import sys
 import time
+import types
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import yaml
+
+# Platform-specific file locking imports
+if sys.platform == "win32":  # pragma: no cover
+    import msvcrt
+else:  # pragma: no cover
+    import fcntl
+
+if TYPE_CHECKING:
+    from typing import Self
 
 from fix_die_repeat.config import Paths, Settings, get_introspection_file_path
 from fix_die_repeat.messages import (
@@ -37,6 +48,62 @@ from fix_die_repeat.utils import (
     run_command,
     send_ntfy_notification,
 )
+
+
+@runtime_checkable
+class _FileHandle(Protocol):
+    """Protocol for objects that support file descriptor access.
+
+    Used for type-checking the file lock context manager.
+    """
+
+    def fileno(self) -> int:
+        """Return the file descriptor for the file handle."""
+        ...
+
+
+class _FileLock:
+    """Context manager for cross-platform file locking.
+
+    Provides exclusive file locking to prevent concurrent writes from
+    corrupting shared files like the global introspection.yaml.
+
+    Uses fcntl on Unix and msvcrt on Windows.
+    """
+
+    def __init__(self, file_handle: _FileHandle) -> None:
+        """Initialize the file lock.
+
+        Args:
+            file_handle: Open file handle to lock
+
+        """
+        self.file_handle = file_handle
+
+    def __enter__(self) -> "Self":
+        """Acquire the lock."""
+        if sys.platform == "win32":  # pragma: no cover
+            # Windows: use msvcrt.locking
+            msvcrt.locking(self.file_handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:  # pragma: no cover
+            # Unix: use fcntl.flock with LOCK_EX
+            fcntl.flock(self.file_handle.fileno(), fcntl.LOCK_EX)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: types.TracebackType | None,
+    ) -> None:
+        """Release the lock."""
+        if sys.platform == "win32":  # pragma: no cover
+            # Windows: use msvcrt.locking with LK_UNLCK
+            self.file_handle.seek(0)
+            msvcrt.locking(self.file_handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:  # pragma: no cover
+            # Unix: use fcntl.flock with LOCK_UN
+            fcntl.flock(self.file_handle.fileno(), fcntl.LOCK_UN)
 
 
 @dataclass(frozen=True)
@@ -478,6 +545,11 @@ class PiRunner:
         self.paths.pi_log.write_text("")
         self.session_log.write_text("")
         self.paths.checks_hash_file.write_text("")
+
+        # Reset cumulative tracking files for introspection (fresh for each run)
+        self.paths.cumulative_in_scope_threads_file.unlink(missing_ok=True)
+        self.paths.cumulative_resolved_threads_file.unlink(missing_ok=True)
+        self.paths.cumulative_pr_threads_content_file.unlink(missing_ok=True)
         self.logger.info("Logging full session output to: %s", self.session_log)
 
         # Record starting commit SHA
@@ -734,7 +806,6 @@ class PiRunner:
         """
         self.setup_run()
 
-        # Main loop
         while True:
             self.iteration += 1
             self.logger.info(
@@ -743,52 +814,69 @@ class PiRunner:
                 self.settings.max_iters,
             )
 
-            # Check and compact at start of each iteration
             self.check_and_compact_artifacts()
 
             if self.iteration > self.settings.max_iters:
-                self.logger.error(
-                    "Maximum iterations (%s) exceeded. Could not resolve all issues.",
-                    self.settings.max_iters,
-                )
-                if self.start_sha:
-                    self.logger.error(git_diff_instructions(self.start_sha))
-                    self.logger.error(git_checkout_instructions(self.start_sha))
-                return 1
+                return self._handle_max_iterations_exceeded()
 
-            # Run fix loop
             exit_code = self.run_fix_loop()
             if exit_code != 0:
-                # Post-run introspection (non-blocking, even on failure)
-                if self.settings.pr_review_introspect:
-                    try:
-                        self.run_introspection()
-                    except Exception:
-                        self.logger.exception(
-                            "Introspection step failed (non-blocking)",
-                        )
-                return exit_code
+                return self._handle_fix_loop_failure(exit_code)
 
-            # Run review phase
             changed_files = get_changed_files(self.paths.project_root)
             self.run_review_phase(changed_files)
 
-            # Check if we completed successfully
             if self._success_complete:
-                # Post-run introspection (non-blocking)
-                if self.settings.pr_review_introspect:
-                    try:
-                        self.run_introspection()
-                    except Exception:
-                        self.logger.exception(
-                            "Introspection step failed (non-blocking)",
-                        )
+                self._run_post_run_introspection()
                 self.complete_success()
-                # complete_success() returns normally
                 return 0
 
-        # Should not reach here
         return 0
+
+    def _run_post_run_introspection(self) -> None:
+        """Run post-run introspection if enabled.
+
+        Introspection is a non-blocking operation. Errors are logged but do not
+        affect the main flow.
+
+        """
+        if self.settings.pr_review_introspect:
+            try:
+                self.run_introspection()
+            except Exception:
+                self.logger.exception(
+                    "Introspection step failed (non-blocking)",
+                )
+
+    def _handle_max_iterations_exceeded(self) -> int:
+        """Handle the case when maximum iterations is exceeded.
+
+        Returns:
+            Exit code 1 (failure)
+
+        """
+        self.logger.error(
+            "Maximum iterations (%s) exceeded. Could not resolve all issues.",
+            self.settings.max_iters,
+        )
+        if self.start_sha:
+            self.logger.error(git_diff_instructions(self.start_sha))
+            self.logger.error(git_checkout_instructions(self.start_sha))
+        self._run_post_run_introspection()
+        return 1
+
+    def _handle_fix_loop_failure(self, exit_code: int) -> int:
+        """Handle fix loop failure.
+
+        Args:
+            exit_code: Exit code from the fix loop
+
+        Returns:
+            The provided exit code
+
+        """
+        self._run_post_run_introspection()
+        return exit_code
 
     def get_branch_name(self) -> str | None:
         """Get the current git branch name.
@@ -896,6 +984,20 @@ class PiRunner:
 
         if unique_ids:
             self.paths.pr_thread_ids_file.write_text("\n".join(unique_ids) + "\n")
+
+            # Also append to cumulative file for introspection
+            existing_cumulative: set[str] = set()
+            if self.paths.cumulative_in_scope_threads_file.exists():
+                existing_cumulative = {
+                    line.strip()
+                    for line in self.paths.cumulative_in_scope_threads_file.read_text().splitlines()
+                    if line.strip()
+                }
+            new_ids = set(unique_ids) - existing_cumulative
+            if new_ids:
+                with self.paths.cumulative_in_scope_threads_file.open("a") as f:
+                    for thread_id in sorted(new_ids):
+                        f.write(f"{thread_id}\n")
             return
 
         self.paths.pr_thread_ids_file.unlink(missing_ok=True)
@@ -1146,6 +1248,14 @@ class PiRunner:
             # Cache
             self.paths.pr_threads_cache.write_text(content)
             self.paths.pr_threads_hash_file.write_text(cache_key)
+
+            # Append to cumulative content file for introspection (with iteration marker)
+            iteration_num = getattr(self, "iteration", 0)
+            thread_count = len(unresolved_threads)
+            with self.paths.cumulative_pr_threads_content_file.open("a") as f:
+                f.write(f"# Iteration {iteration_num} - Fetched {thread_count} threads\n")
+                f.write(content)
+                f.write("\n")
         else:
             self.logger.info("No unresolved threads found.")
             self.paths.review_current_file.write_text("")
@@ -1646,6 +1756,9 @@ class PiRunner:
 
                 if returncode == 0:
                     resolved_count += 1
+                    # Append to cumulative resolved threads file for introspection
+                    with self.paths.cumulative_resolved_threads_file.open("a") as f:
+                        f.write(f"{thread_id}\n")
                 else:
                     self.logger.warning(
                         "Failed to resolve thread %s (exit code: %s)",
@@ -1744,27 +1857,24 @@ class PiRunner:
     def _collect_thread_ids(self) -> tuple[list[str], set[str]]:
         """Collect in-scope and resolved thread IDs.
 
+        Reads from cumulative files that persist across iterations,
+        not the per-iteration files that may be deleted.
+
         Returns:
             Tuple of (in_scope_ids list, resolved_set)
 
         """
-        # Read in-scope thread IDs
+        # Read in-scope thread IDs from cumulative file
         in_scope_ids = []
-        if self.paths.pr_thread_ids_file.exists():
-            in_scope_ids = [
-                thread_id
-                for thread_id in self.paths.pr_thread_ids_file.read_text().strip().split("\n")
-                if thread_id
-            ]
+        if self.paths.cumulative_in_scope_threads_file.exists():
+            cumulative_content = self.paths.cumulative_in_scope_threads_file.read_text().strip()
+            in_scope_ids = [thread_id for thread_id in cumulative_content.split("\n") if thread_id]
 
-        # Read resolved thread IDs
+        # Read resolved thread IDs from cumulative file
         resolved_ids = []
-        if self.paths.pr_resolved_threads_file.exists():
-            resolved_ids = [
-                thread_id
-                for thread_id in self.paths.pr_resolved_threads_file.read_text().strip().split("\n")
-                if thread_id
-            ]
+        if self.paths.cumulative_resolved_threads_file.exists():
+            resolved_content = self.paths.cumulative_resolved_threads_file.read_text().strip()
+            resolved_ids = [thread_id for thread_id in resolved_content.split("\n") if thread_id]
 
         return in_scope_ids, set(resolved_ids)
 
@@ -1778,19 +1888,26 @@ class PiRunner:
             Tuple of (pr_number, pr_url)
 
         """
-        pr_number = pr_info.get("number", "unknown")
-        pr_url = pr_info.get("url", "unknown")
+        raw_number = pr_info.get("number")
+        raw_url = pr_info.get("url")
+
+        pr_number = "unknown" if raw_number is None else str(raw_number)
+        pr_url = "unknown" if raw_url is None else str(raw_url)
         return pr_number, pr_url
 
     def _read_pr_threads_cache(self) -> str:
-        """Read PR threads cache content.
+        """Read PR threads cache content from cumulative file.
+
+        Reads from the cumulative file that contains all PR threads
+        fetched across all iterations, not the per-iteration cache
+        that is overwritten.
 
         Returns:
             PR threads cache content or empty string
 
         """
-        if self.paths.pr_threads_cache.exists():
-            return self.paths.pr_threads_cache.read_text()
+        if self.paths.cumulative_pr_threads_content_file.exists():
+            return self.paths.cumulative_pr_threads_content_file.read_text()
         return ""
 
     def _read_diff_content(self) -> str:
@@ -1939,15 +2056,17 @@ class PiRunner:
                 )
                 return
 
-            # Append to global introspection file
+            # Append to global introspection file with file locking for atomicity
             global_introspection_file = get_introspection_file_path()
             separator = "\n---\n"
 
             if global_introspection_file.exists():
-                with global_introspection_file.open("a") as f:
+                # Open file with file lock to prevent concurrent write corruption
+                with global_introspection_file.open("a") as f, _FileLock(f):
                     f.write(separator)
                     f.write(result_content)
             else:
+                # For new file, write_text is atomic enough (no concurrent readers yet)
                 global_introspection_file.write_text(result_content)
 
             self.logger.info(
@@ -1971,8 +2090,8 @@ class PiRunner:
             PR info dict if valid, None if introspection should skip
 
         """
-        # Skip if no PR threads were processed
-        if not self.paths.pr_thread_ids_file.exists():
+        # Skip if no PR threads were processed (check cumulative file)
+        if not self.paths.cumulative_in_scope_threads_file.exists():
             self.logger.info(
                 "[Introspection] No PR threads were processed, skipping introspection",
             )

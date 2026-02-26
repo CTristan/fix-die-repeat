@@ -1954,7 +1954,9 @@ class TestCompleteSuccess:
 
             # Check that the method returns 0
             assert result == 0
-            # Note: Files are not actually deleted because we're using MagicMock paths
+            # Check that temporary files were cleaned up
+            assert not paths.review_current_file.exists()
+            assert not paths.start_sha_file.exists()
 
     def test_complete_success_with_ntfy(self, tmp_path: Path) -> None:
         """Test completing the run with ntfy notification."""

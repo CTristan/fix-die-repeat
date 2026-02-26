@@ -452,7 +452,8 @@ class TestCliResolution:
         """Test that CLI calls resolution when no check_cmd is provided."""
         # Resolve full path to git to avoid S607 (partial path security warning)
         git_path = shutil.which("git")
-        assert git_path is not None  # mypy needs this for type narrowing
+        if git_path is None:
+            pytest.skip("git is not available; skipping integration test that requires git")
 
         # Initialize a git repo in tmp_path so it's isolated from actual project
         subprocess.run([git_path, "init"], cwd=tmp_path, check=True, capture_output=True)

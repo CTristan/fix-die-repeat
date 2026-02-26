@@ -12,18 +12,23 @@ from fix_die_repeat.runner import PiRunner
 class TestGetIntrospectionFilePath:
     """Tests for get_introspection_file_path helper function."""
 
-    def test_returns_path_object(self) -> None:
+    def test_returns_path_object(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Test that get_introspection_file_path returns a Path object."""
+        monkeypatch.setenv("HOME", str(tmp_path))
         path = get_introspection_file_path()
         assert isinstance(path, Path)
 
-    def test_file_ends_with_introspection_yaml(self) -> None:
+    def test_file_ends_with_introspection_yaml(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """Test that the returned path ends with introspection.yaml."""
+        monkeypatch.setenv("HOME", str(tmp_path))
         path = get_introspection_file_path()
         assert path.name == "introspection.yaml"
 
-    def test_parent_directory_exists(self) -> None:
+    def test_parent_directory_exists(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Test that the parent directory exists after calling the function."""
+        monkeypatch.setenv("HOME", str(tmp_path))
         path = get_introspection_file_path()
         # The function should create the parent directory
         assert path.parent.exists()
@@ -59,14 +64,16 @@ class TestCollectIntrospectionData:
         # Create mock PR info
         pr_info = {"number": 123, "url": "https://github.com/owner/repo/pull/123"}
 
-        # Create in-scope thread IDs file
-        runner.paths.pr_thread_ids_file.write_text("thread_id_1\nthread_id_2\nthread_id_3\n")
+        # Create cumulative in-scope thread IDs file
+        runner.paths.cumulative_in_scope_threads_file.write_text(
+            "thread_id_1\nthread_id_2\nthread_id_3\n"
+        )
 
-        # Create resolved threads file
-        runner.paths.pr_resolved_threads_file.write_text("thread_id_1\n")
+        # Create cumulative resolved threads file
+        runner.paths.cumulative_resolved_threads_file.write_text("thread_id_1\n")
 
-        # Create PR threads cache
-        runner.paths.pr_threads_cache.write_text(
+        # Create cumulative PR threads cache content
+        runner.paths.cumulative_pr_threads_content_file.write_text(
             "Thread #1: Issue title\nComment: Reviewer feedback\n"
             "Thread #2: Another issue\nComment: More feedback\n"
         )
@@ -96,11 +103,11 @@ class TestCollectIntrospectionData:
         """Test that won't-fix threads are correctly identified."""
         pr_info = {"number": 456, "url": "https://github.com/owner/repo/pull/456"}
 
-        # Create in-scope thread IDs
-        runner.paths.pr_thread_ids_file.write_text("tid_1\ntid_2\ntid_3\n")
+        # Create cumulative in-scope thread IDs
+        runner.paths.cumulative_in_scope_threads_file.write_text("tid_1\ntid_2\ntid_3\n")
 
-        # Only one thread was resolved
-        runner.paths.pr_resolved_threads_file.write_text("tid_2\n")
+        # Only one thread was resolved (cumulative)
+        runner.paths.cumulative_resolved_threads_file.write_text("tid_2\n")
 
         # Mock PR info
         with patch.object(runner, "get_branch_name", return_value="branch"):
@@ -140,8 +147,8 @@ class TestRunIntrospection:
 
     def test_skips_on_pi_failure(self, runner: PiRunner) -> None:
         """Test that introspection skips gracefully when pi fails."""
-        # Create thread IDs file
-        runner.paths.pr_thread_ids_file.write_text("thread_1\n")
+        # Create cumulative thread IDs file
+        runner.paths.cumulative_in_scope_threads_file.write_text("thread_1\n")
 
         # Create minimal PR info
         pr_info = {"number": 1, "url": "https://github.com/test/test/pull/1"}
@@ -163,8 +170,8 @@ class TestRunIntrospection:
         tmp_path: Path,
     ) -> None:
         """Test that valid introspection result is appended to global file."""
-        # Create thread IDs file to enable introspection
-        runner.paths.pr_thread_ids_file.write_text("thread_1\n")
+        # Create cumulative thread IDs file to enable introspection
+        runner.paths.cumulative_in_scope_threads_file.write_text("thread_1\n")
 
         # Create introspection data file (simulating collect_introspection_data)
         runner.paths.introspection_data_file.write_text(

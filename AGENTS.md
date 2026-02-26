@@ -420,7 +420,7 @@ Analyzes what PR reviewers caught, how the agent responded (fixed vs. won't fix)
 **Introspection Process**:
 1. After PR review completes (or max iterations), collect:
    - PR thread comments from cache
-   - Fix/won-fix outcomes by comparing in-scope vs. resolved thread IDs
+   - Fix/wont-fix outcomes by comparing in-scope vs. resolved thread IDs
    - Diff of changes made by the agent
 2. Call pi with `introspect_pr_review.j2` template
 3. Validate YAML output and append to global file

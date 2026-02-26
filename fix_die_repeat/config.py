@@ -266,6 +266,10 @@ class Paths:
         self.start_sha_file = self.fdr_dir / ".start_sha"
         self.pr_thread_ids_file = self.fdr_dir / ".pr_thread_ids_in_scope"
         self.pr_resolved_threads_file = self.fdr_dir / ".resolved_threads"
+        # Cumulative tracking for introspection (persists across iterations)
+        self.cumulative_in_scope_threads_file = self.fdr_dir / ".cumulative_in_scope_threads"
+        self.cumulative_resolved_threads_file = self.fdr_dir / ".cumulative_resolved_threads"
+        self.cumulative_pr_threads_content_file = self.fdr_dir / ".cumulative_pr_threads_content"
         self.diff_file = self.fdr_dir / "changes.diff"
         self.run_timestamps_file = self.fdr_dir / "run_timestamps.md"
         self.introspection_data_file = self.fdr_dir / ".introspection_data.yaml"
