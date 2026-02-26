@@ -27,7 +27,12 @@ Reads the global introspection file and updates FDR's prompt templates to addres
    - Add guidance to `fix_checks.j2` for fix patterns that were commonly needed
    - Add context to `resolve_review_issues.j2` for issue types the agent struggled with
 7. Mark processed entries as `status: reviewed` in the introspection file
-8. Summarize what was changed and why
+8. **Compact the introspection file** if it has reached 2000+ lines:
+   - Archive reviewed entries older than 6 months to `~/.config/fix-die-repeat/introspection-archive.yaml`
+   - Keep the most recent 50 reviewed entries in the main file
+   - Keep all `pending` entries in the main file
+   - Delete the archive file if it would be empty after compaction
+9. Summarize what was changed and why
 
 ## Guidelines
 
@@ -36,6 +41,32 @@ Reads the global introspection file and updates FDR's prompt templates to addres
 - **Preserve structure**: Follow the existing template style and formatting conventions
 - **Don't duplicate**: If a checklist item already covers the gap, strengthen the wording rather than adding a new item
 - **Explain changes**: Each template edit should have a clear rationale tied to specific introspection entries
+
+## Introspection File Compaction
+
+**When**: The introspection file has reached 2000+ lines (per project file size policy).
+
+**Strategy**:
+- Keep all `pending` entries in the main file (these still need processing)
+- Keep the 50 most recent `reviewed` entries in the main file (for trend analysis)
+- Archive `reviewed` entries older than 6 months to `introspection-archive.yaml`
+- Delete the archive file if it would be empty after compaction
+
+**Implementation**:
+1. Count lines in `~/.config/fix-die-repeat/introspection.yaml`
+2. If < 2000 lines, skip compaction
+3. If ≥ 2000 lines:
+   - Parse all YAML documents (separated by `---`)
+   - Identify `pending` entries → keep in main file
+   - Identify `reviewed` entries:
+     - Sort by date (most recent first)
+     - Keep top 50 in main file
+     - Archive entries older than 6 months (based on `date` field)
+   - Write compacted entries to main file
+   - Write archived entries to `introspection-archive.yaml` (prepend with `---` separator)
+   - If archive is empty, delete `introspection-archive.yaml`
+
+**Note**: The file size policy (AGENTS.md) requires all code and documentation files be kept under 2000 lines. The introspection file follows this policy to remain maintainable.
 
 ## Invocation
 
