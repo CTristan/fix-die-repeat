@@ -1,5 +1,6 @@
 """Tests for detection module."""
 
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -290,8 +291,8 @@ class TestValidateCommandExists:
     """Tests for validate_command_exists function."""
 
     def test_valid_system_command(self) -> None:
-        """Test e.g., ls."""
-        assert validate_command_exists("ls") is True
+        """Test e.g., python executable."""
+        assert validate_command_exists(sys.executable) is True
 
     def test_valid_path_command(self, tmp_path: Path) -> None:
         """Test e.g., ./scripts/ci.sh (create temp script)."""
@@ -328,6 +329,7 @@ class TestValidateCommandExists:
         """Test sh wrapper validates sh."""
         assert validate_command_exists("sh -c 'echo test'") is True
 
+    @pytest.mark.skipif(not __import__("shutil").which("zsh"), reason="zsh not available on system")
     def test_zsh_wrapper_passes(self) -> None:
         """Test zsh wrapper validates zsh."""
         assert validate_command_exists("zsh -c 'echo test'") is True

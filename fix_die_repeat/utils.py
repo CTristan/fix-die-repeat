@@ -62,8 +62,9 @@ def is_running_in_dev_mode() -> bool:
         module = sys.modules.get("fix_die_repeat")
         if module and hasattr(module, "__file__") and module.__file__:
             package_file = Path(module.__file__).resolve()
-            # If the path doesn't contain "site-packages", it's likely editable
-            if "site-packages" not in str(package_file):
+            package_path_str = str(package_file)
+            # If the path doesn't contain "site-packages" or "dist-packages", it's likely editable
+            if "site-packages" not in package_path_str and "dist-packages" not in package_path_str:
                 return True
     except (AttributeError, OSError):
         pass

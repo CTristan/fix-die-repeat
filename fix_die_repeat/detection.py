@@ -290,9 +290,9 @@ def validate_command_exists(command: str) -> bool:
 
     first_token = tokens[0]
 
-    # Shell wrapper commands - skip deep validation
+    # Shell wrapper commands - ensure the wrapper itself exists
     if first_token in ("bash", "sh", "zsh", "fish"):
-        return True
+        return shutil.which(first_token) is not None
 
     # Check for relative path (./something)
     if first_token.startswith(("./", "/")):

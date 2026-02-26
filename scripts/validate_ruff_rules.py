@@ -18,6 +18,7 @@ Exit codes:
 """
 
 import sys
+import tomllib
 from pathlib import Path
 
 # Prohibited rules that must NEVER be ignored (see AGENTS.md)
@@ -45,16 +46,8 @@ def main() -> int:
         print(f"ERROR: {pyproject_path} not found")
         return 2
 
-    # Read and parse pyproject.toml
-    try:
-        config_text = pyproject_path.read_text(encoding="utf-8")
-    except OSError as e:
-        print(f"ERROR: Could not read {pyproject_path}: {e}")
-        return 2
-
-    # Parse TOML (simple approach - look for per-file-ignores section)
-    # We use a simple text-based approach to avoid adding tomllib dependency
-    violations = _check_prohibited_ignores(config_text)
+    # Parse TOML using tomllib (stdlib)
+    violations = _check_prohibited_ignores(pyproject_path)
 
     if violations:
         print("=" * 70)
@@ -87,100 +80,11 @@ def main() -> int:
     return 0
 
 
-def _is_section_header(stripped: str) -> bool:
-    """Check if line is the per-file-ignores section header.
+def _check_prohibited_ignores(pyproject_path: Path) -> dict[str, set[str]]:
+    """Check pyproject.toml for prohibited per-file ignores using tomllib.
 
     Args:
-        stripped: Stripped line from config file
-
-    Returns:
-        True if this is the section header we're looking for
-
-    """
-    return stripped == "[tool.ruff.lint.per-file-ignores]"
-
-
-def _should_exit_section(
-    stripped: str,
-    *,
-    in_section: bool,
-) -> bool:
-    """Check if we should exit the per-file-ignores section.
-
-    Args:
-        stripped: Stripped line from config file
-        in_section: Whether we're currently in the section
-
-    Returns:
-        True if we should exit the section
-
-    """
-    return (
-        stripped.startswith("[")
-        and "]" in stripped
-        and in_section
-        and not any(key in stripped for key in ["per-file-ignores", "ruff"])
-    )
-
-
-def _extract_rules_from_line(stripped: str) -> tuple[str, str] | None:
-    """Extract pattern and rules string from a config line.
-
-    Args:
-        stripped: Stripped line from config file
-
-    Returns:
-        Tuple of (pattern, rules_str) if valid, None otherwise
-
-    """
-    if not ("=" in stripped and not stripped.startswith("#")):
-        return None
-
-    parts_count = 2
-    parts = stripped.split("=", 1)
-    if len(parts) != parts_count:
-        return None
-
-    pattern = parts[0].strip().strip('"')
-    rules_str = parts[1].strip()
-
-    # Extract rule codes from list
-    if rules_str.startswith("[") and rules_str.endswith("]"):
-        rules_str = rules_str[1:-1]
-
-    return pattern, rules_str
-
-
-def _find_prohibited_rules_in_line(
-    pattern: str,
-    rules_str: str,
-) -> dict[str, set[str]]:
-    """Check a line for prohibited rules and build violations dict.
-
-    Args:
-        pattern: File pattern from config line
-        rules_str: Rules string from config line
-
-    Returns:
-        Dict with violations found (or empty if none)
-
-    """
-    violations: dict[str, set[str]] = {}
-
-    for rule in PROHIBITED_RULES:
-        if f'"{rule}"' in rules_str or f"'{rule}'" in rules_str:
-            if pattern not in violations:
-                violations[pattern] = set()
-            violations[pattern].add(rule)
-
-    return violations
-
-
-def _check_prohibited_ignores(config_text: str) -> dict[str, set[str]]:
-    """Check config text for prohibited per-file ignores.
-
-    Args:
-        config_text: Contents of pyproject.toml
+        pyproject_path: Path to pyproject.toml file
 
     Returns:
         Dict mapping file patterns to sets of prohibited rule codes found
@@ -188,33 +92,31 @@ def _check_prohibited_ignores(config_text: str) -> dict[str, set[str]]:
     """
     violations: dict[str, set[str]] = {}
 
-    # Simple parsing: find [tool.ruff.lint.per-file-ignores] section
-    lines = config_text.splitlines()
+    try:
+        with pyproject_path.open("rb") as f:
+            config = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        print(f"ERROR: Could not parse {pyproject_path}: {e}")
+        return violations
 
-    in_section = False
+    # Navigate to tool.ruff.lint.per-file-ignores
+    per_file_ignores = (
+        config.get("tool", {}).get("ruff", {}).get("lint", {}).get("per-file-ignores", {})
+    )
 
-    for line in lines:
-        stripped = line.strip()
+    if not per_file_ignores:
+        return violations
 
-        # Check for section header
-        if _is_section_header(stripped):
-            in_section = True
+    # Check each file pattern for prohibited rules
+    for pattern, rules_list in per_file_ignores.items():
+        if not isinstance(rules_list, list):
             continue
 
-        # Exit section when we hit another section
-        if _should_exit_section(stripped, in_section=in_section):
-            in_section = False
-            continue
-
-        if not in_section:
-            continue
-
-        # Parse pattern = ["rule1", "rule2"] lines
-        line_result = _extract_rules_from_line(stripped)
-        if line_result:
-            pattern, rules_str = line_result
-            line_violations = _find_prohibited_rules_in_line(pattern, rules_str)
-            violations.update(line_violations)
+        for rule in rules_list:
+            if rule in PROHIBITED_RULES:
+                if pattern not in violations:
+                    violations[pattern] = set()
+                violations[pattern].add(rule)
 
     return violations
 

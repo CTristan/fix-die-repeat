@@ -5,6 +5,7 @@ import re
 import shlex
 import sys
 import time
+import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -408,9 +409,8 @@ class PiRunner:
             Tuple of (exit_code, output)
 
         """
-        # check_cmd is guaranteed to be set after validation in cli.py
-        # Use str() to satisfy mypy (type is str | None but always str at runtime)
-        check_cmd = str(self.settings.check_cmd)
+        # check_cmd is expected to be set after validation in cli.py
+        check_cmd: str = self.settings.check_cmd  # type: ignore[assignment]
         self.logger.info("[Step 1] Running %s (output: checks.log)...", check_cmd)
 
         start_time = time.time()
@@ -1448,15 +1448,9 @@ class PiRunner:
         if not pyproject_path.exists():
             return
 
-        try:
-            config_text = pyproject_path.read_text(encoding="utf-8")
-        except OSError:
-            self.logger.warning("Could not read pyproject.toml for ruff ignore validation")
-            return
-
         # Prohibited rules (see AGENTS.md)
         prohibited_rules = {"C901", "PLR0913", "PLR2004", "PLC0415"}
-        violations = self._find_prohibited_ignores(config_text, prohibited_rules)
+        violations = self._find_prohibited_ignores(pyproject_path, prohibited_rules)
 
         if violations:
             self.logger.error("=" * 70)
@@ -1479,107 +1473,15 @@ class PiRunner:
             self.logger.error("This is a CRITICAL policy violation. The build cannot continue.")
             sys.exit(1)
 
-    def _is_ruff_section_header(self, stripped: str) -> bool:
-        """Check if line is the per-file-ignores section header.
-
-        Args:
-            stripped: Stripped line from config file
-
-        Returns:
-            True if this is the section header we're looking for
-
-        """
-        return stripped == "[tool.ruff.lint.per-file-ignores]"
-
-    def _should_exit_ruff_section(
-        self,
-        stripped: str,
-        *,
-        in_per_file_section: bool,
-    ) -> bool:
-        """Check if we should exit the per-file-ignores section.
-
-        Args:
-            stripped: Stripped line from config file
-            in_per_file_section: Whether we're currently in the section
-
-        Returns:
-            True if we should exit the section
-
-        """
-        return (
-            stripped.startswith("[")
-            and "]" in stripped
-            and in_per_file_section
-            and not any(key in stripped for key in ["per-file-ignores", "ruff"])
-        )
-
-    def _extract_ruff_rules_from_line(
-        self,
-        stripped: str,
-    ) -> tuple[str, str] | None:
-        """Extract pattern and rules string from a config line.
-
-        Args:
-            stripped: Stripped line from config file
-
-        Returns:
-            Tuple of (pattern, rules_str) if valid, None otherwise
-
-        """
-        if not ("=" in stripped and not stripped.startswith("#")):
-            return None
-
-        parts_count = 2
-        parts = stripped.split("=", 1)
-        if len(parts) != parts_count:
-            return None
-
-        pattern = parts[0].strip().strip('"')
-        rules_str = parts[1].strip()
-
-        # Extract rule codes from list
-        if rules_str.startswith("[") and rules_str.endswith("]"):
-            rules_str = rules_str[1:-1]
-
-        return pattern, rules_str
-
-    def _find_prohibited_rules_in_line(
-        self,
-        pattern: str,
-        rules_str: str,
-        prohibited_rules: set[str],
-    ) -> dict[str, set[str]]:
-        """Check a line for prohibited rules and build violations dict.
-
-        Args:
-            pattern: File pattern from config line
-            rules_str: Rules string from config line
-            prohibited_rules: Set of prohibited rule codes
-
-        Returns:
-            Dict with violations found (or empty if none)
-
-        """
-        violations: dict[str, set[str]] = {}
-
-        for rule in prohibited_rules:
-            if f'"{rule}"' in rules_str or f"'{rule}'" in rules_str:
-                if pattern not in violations:
-                    violations[pattern] = set()
-                violations[pattern].add(rule)
-
-        return violations
-
     def _find_prohibited_ignores(
         self,
-        config_text: str,
+        pyproject_path: Path,
         prohibited_rules: set[str],
     ) -> dict[str, set[str]]:
-        """Find prohibited ruff rule ignores in pyproject.toml.
+        """Find prohibited ruff rule ignores in pyproject.toml using tomllib.
 
         Args:
-            config_text: Contents of pyproject.toml
+            pyproject_path: Path to pyproject.toml file
             prohibited_rules: Set of prohibited rule codes
 
         Returns:
@@ -1587,35 +1489,33 @@ class PiRunner:
 
         """
         violations: dict[str, set[str]] = {}
-        lines = config_text.splitlines()
-        in_per_file_section = False
 
-        for line in lines:
-            stripped = line.strip()
+        try:
+            with pyproject_path.open("rb") as f:
+                config = tomllib.load(f)
+        except (OSError, tomllib.TOMLDecodeError):
+            # If we can't parse the TOML, just skip validation
+            # This shouldn't happen in normal operation
+            return violations
 
-            # Check for section header
-            if self._is_ruff_section_header(stripped):
-                in_per_file_section = True
+        # Navigate to tool.ruff.lint.per-file-ignores
+        per_file_ignores = (
+            config.get("tool", {}).get("ruff", {}).get("lint", {}).get("per-file-ignores", {})
+        )
+
+        if not per_file_ignores:
+            return violations
+
+        # Check each file pattern for prohibited rules
+        for pattern, rules_list in per_file_ignores.items():
+            if not isinstance(rules_list, list):
                 continue
 
-            # Exit section when we hit another section
-            if self._should_exit_ruff_section(stripped, in_per_file_section=in_per_file_section):
-                in_per_file_section = False
-                continue
-
-            if not in_per_file_section:
-                continue
-
-            # Parse pattern = ["rule1", "rule2"] lines
-            line_result = self._extract_ruff_rules_from_line(stripped)
-            if line_result:
-                pattern, rules_str = line_result
-                line_violations = self._find_prohibited_rules_in_line(
-                    pattern,
-                    rules_str,
-                    prohibited_rules,
-                )
-                violations.update(line_violations)
+            for rule in rules_list:
+                if rule in prohibited_rules:
+                    if pattern not in violations:
+                        violations[pattern] = set()
+                    violations[pattern].add(rule)
 
         return violations
 

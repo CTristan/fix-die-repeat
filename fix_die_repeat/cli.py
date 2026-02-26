@@ -191,6 +191,15 @@ def _run_main(options: CliOptions) -> int:
             project_root=str(paths.project_root),
         )
 
+    # Ensure we have a concrete check command before validation
+    if settings.check_cmd is None:
+        console.print(
+            "[red]Error:[/red] Unable to determine a check command to run.\n"
+            "Please specify one via the [bold]--check-cmd[/bold] option or the "
+            "[bold]FDR_CHECK_CMD[/bold] environment variable."
+        )
+        raise SystemExit(1)
+
     # Pre-flight validation of resolved check command
     validate_check_cmd_or_exit(settings.check_cmd)
 
