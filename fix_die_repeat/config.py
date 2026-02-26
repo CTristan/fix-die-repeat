@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     """Configuration settings for fix-die-repeat."""
 
     # Check configuration
-    check_cmd: str = pyd.Field(
-        default="./scripts/ci.sh",
+    check_cmd: str | None = pyd.Field(
+        default=None,
         alias="FDR_CHECK_CMD",
         description="Command to run checks",
     )
@@ -213,6 +213,7 @@ class Paths:
         """
         self.project_root = project_root or self._find_project_root()
         self.fdr_dir = self.project_root / ".fix-die-repeat"
+        self.config_file = self.fdr_dir / "config"
         self.review_file = self.fdr_dir / "review.md"
         self.review_current_file = self.fdr_dir / "review_current.md"
         self.review_recent_file = self.fdr_dir / "review_recent.md"

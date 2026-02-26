@@ -153,3 +153,100 @@ def pr_threads_safe_only_message(safe_count: int) -> str:
 
     """
     return f"Only resolving the {safe_count} in-scope thread(s)."
+
+
+def auto_detect_found_message(command: str, reason: str) -> str:
+    """Return message for auto-detected check command.
+
+    Args:
+        command: Auto-detected command
+        reason: Reason for detection
+
+    Returns:
+        Auto-detect found message
+
+    """
+    return f"🔍 Auto-detected check command: {command}\n   ({reason})"
+
+
+def auto_detect_confirm_prompt() -> str:
+    """Return prompt for confirming auto-detected command.
+
+    Returns:
+        Confirm prompt string
+
+    """
+    return "Use this command?"
+
+
+def no_detection_prompt_message() -> str:
+    """Return prompt when no auto-detection match found.
+
+    Returns:
+        Prompt message asking for check command
+
+    """
+    return (
+        "No check command detected for this project.\n\n"
+        "What command should fix-die-repeat run to check your project?\n"
+        "Examples: pytest, npm test, cargo test, make test, ./scripts/ci.sh\n\n"
+        "Check command"
+    )
+
+
+def no_tty_error_message() -> str:
+    """Return error message when no TTY is available.
+
+    Returns:
+        Error message with setup instructions
+
+    """
+    return (
+        "Error: No check command configured.\n\n"
+        "fix-die-repeat needs a check command to run. Provide one via:\n"
+        '  • CLI flag:          fix-die-repeat -c "pytest"\n'
+        '  • Environment var:   FDR_CHECK_CMD="pytest" fix-die-repeat\n'
+        "  • Project config:    echo 'check_cmd = \"pytest\"' > .fix-die-repeat/config\n"
+        "  • Global config:     echo 'check_cmd = \"pytest\"' > ~/.config/fix-die-repeat/config"
+    )
+
+
+def global_config_fallthrough_warning(command: str) -> str:
+    """Return warning when system config command not found.
+
+    Args:
+        command: Command from system config that wasn't found
+
+    Returns:
+        Warning message
+
+    """
+    msg = f"Global check command '{command}' not found"
+    msg += " in this project. Falling back to auto-detection..."
+    return f"⚠ {msg}"
+
+
+def check_cmd_not_found_error(command: str) -> str:
+    """Return error when check command is not executable.
+
+    Args:
+        command: Command that wasn't found
+
+    Returns:
+        Error message
+
+    """
+    return f"Check command '{command}' not found. Is it installed and on your PATH?"
+
+
+def check_cmd_persisted_message(config_path: str) -> str:
+    """Return message when check command is persisted to config.
+
+    Args:
+        config_path: Path to config file where command was saved
+
+    Returns:
+        Success message
+
+    """
+    return f"✓ Check command saved to {config_path}"

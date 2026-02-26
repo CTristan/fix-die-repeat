@@ -401,8 +401,11 @@ class TestResolvePrThreads:
             # Verify fetch_pr_threads was called (refetch)
             assert runner.fetch_pr_threads.called
 
-    def test_resolve_pr_threads_early_exit_all_resolved(self, tmp_path: Path) -> None:
-        """Test early exit logic when all threads are resolved."""
+    def test_resolve_pr_threads_continues_after_all_resolved(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test that when all threads are resolved, loop continues for final diff review."""
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
@@ -419,6 +422,7 @@ class TestResolvePrThreads:
         runner.paths = paths
         runner.logger = MagicMock()
         runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
+        runner.fetch_pr_threads = MagicMock()  # type: ignore[method-assign]
 
         # Create resolved file with thread IDs
         thread_id = "PRRT_kwDORYGRb85wxpuZ"
@@ -431,14 +435,21 @@ class TestResolvePrThreads:
             patch("sys.exit") as mock_exit,
         ):
             mock_run.return_value = (0, "", "")
-            # Empty review_current means all threads resolved
+            # Empty review_current after refetch means all threads resolved
             paths.review_current_file.write_text("")
 
             runner.resolve_pr_threads()
 
-            # Verify early exit was triggered
-            mock_exit.assert_called_once_with(0)
-            mock_sound.assert_called_once()
+            # Verify NO early exit - loop should continue for final local diff review
+            mock_exit.assert_not_called()
+            mock_sound.assert_not_called()
+            # Verify cache was invalidated and refetched
+            assert not paths.pr_threads_hash_file.exists()
+            assert runner.fetch_pr_threads.called
+            # Verify logger indicated final local diff review will run
+            assert any(
+                "final local diff review" in str(call) for call in runner.logger.info.call_args_list
+            )
 
     def test_resolve_pr_threads_error_logging_non_zero_exit(self, tmp_path: Path) -> None:
         """Test error logging when GraphQL returns non-zero exit codes."""

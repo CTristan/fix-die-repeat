@@ -36,11 +36,18 @@ lint.ignore = ["COM812", "D203", "D213"]
 
 [tool.ruff.lint.per-file-ignores]
 "fix_die_repeat/cli.py" = [
-    "BLE001",  # CLI entrypoint is an exception boundary; we convert unexpected errors into user-facing exits.
-    "D301",    # Keeping conventional Click docstrings avoids noisy rewrites that do not improve generated help.
+    "BLE001",  # CLI entrypoint is an exception boundary; we catch all unexpected errors to show user-friendly messages instead of raw tracebacks. The alternative (not catching or re-raising) would result in poor UX with stack traces visible to end users.
+]
+"fix_die_repeat/runner.py" = [
+    "TRY400",  # Intentional multi-line error logging for formatted output; traceback already captured via logger.exception().
+]
+"scripts/*.py" = [
+    "T201",  # Scripts intentionally use print() for output to stdout/stderr; these are standalone executables, not library code.
 ]
 "tests/*.py" = [
     "S101",  # Pytest idioms rely on assert statements; replacing them reduces failure introspection quality.
+    "S603",  # Test subprocess calls use only trusted inputs (hardcoded literals and system-resolved paths from shutil.which), not untrusted user input.
+    "SIM117",  # Nested with statements in tests make the mock context manager relationships clearer than combined with statements.
 ]
 
 [tool.ruff.lint.isort]

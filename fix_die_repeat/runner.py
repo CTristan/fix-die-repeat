@@ -19,8 +19,11 @@ from fix_die_repeat.messages import (
 )
 from fix_die_repeat.prompts import render_prompt
 from fix_die_repeat.utils import (
+    PROHIBITED_RUFF_RULES,
+    RuffConfigParseError,
     configure_logger,
     detect_large_files,
+    find_prohibited_ruff_ignores,
     format_duration,
     get_changed_files,
     get_file_line_count,
@@ -408,11 +411,19 @@ class PiRunner:
             Tuple of (exit_code, output)
 
         """
-        self.logger.info("[Step 1] Running %s (output: checks.log)...", self.settings.check_cmd)
+        check_cmd = self.settings.check_cmd
+        if check_cmd is None:
+            msg = (
+                "Settings.check_cmd is None. This likely indicates PiRunner was "
+                "constructed or used without running the CLI validation that sets "
+                "a check command."
+            )
+            raise RuntimeError(msg)
+        self.logger.info("[Step 1] Running %s (output: checks.log)...", check_cmd)
 
         start_time = time.time()
         returncode, stdout, stderr = run_command(
-            self.settings.check_cmd,
+            check_cmd,
             cwd=self.paths.project_root,
         )
 
@@ -1197,6 +1208,7 @@ class PiRunner:
         review_prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix=review_prompt_prefix,
+            has_agents_file=(self.paths.project_root / "AGENTS.md").exists(),
         )
 
         returncode, _, _ = self.run_pi_safe(*pi_args, review_prompt)
@@ -1431,9 +1443,58 @@ class PiRunner:
 
         return True
 
+    def check_prohibited_ruff_ignores(self) -> None:
+        """Check for prohibited ruff rules in per-file-ignores.
+
+        Enforces the NEVER-IGNORE policy for C901, PLR0913, PLR2004, PLC0415.
+
+        Raises:
+            SystemExit: If prohibited ignores are found or config cannot be parsed
+
+        """
+        pyproject_path = self.paths.project_root / "pyproject.toml"
+
+        if not pyproject_path.exists():
+            return
+
+        # Prohibited rules (see AGENTS.md)
+        try:
+            violations = find_prohibited_ruff_ignores(pyproject_path, PROHIBITED_RUFF_RULES)
+        except RuffConfigParseError as e:
+            self.logger.exception("CRITICAL: Failed to parse ruff config!")
+            self.logger.error("=" * 70)
+            self.logger.error("%s", e)
+            self.logger.error("")
+            self.logger.error("This is a CRITICAL policy violation. The build cannot continue.")
+            sys.exit(1)
+
+        if violations:
+            self.logger.error("=" * 70)
+            self.logger.error("CRITICAL: Prohibited ruff rules found in per-file-ignores!")
+            self.logger.error("=" * 70)
+            self.logger.error("The following rules MUST NEVER be ignored (see AGENTS.md):")
+            for rule in sorted(PROHIBITED_RUFF_RULES):
+                self.logger.error("  - %s: NEVER IGNORE", rule)
+            self.logger.error("")
+            self.logger.error("Violations found:")
+            for file_pattern, rules in sorted(violations.items()):
+                self.logger.error("  %s:", file_pattern)
+                for rule in sorted(rules):
+                    self.logger.error("    - %s", rule)
+            self.logger.error("")
+            self.logger.error("To fix:")
+            self.logger.error("  1. Remove the ignore from pyproject.toml")
+            self.logger.error("  2. Refactor the code to address the underlying issue")
+            self.logger.error("")
+            self.logger.error("This is a CRITICAL policy violation. The build cannot continue.")
+            sys.exit(1)
+
     def process_review_results(self) -> None:
         """Process review results and fix issues if needed."""
         self.logger.info("[Step 6] Processing review results...")
+
+        # CRITICAL: Check for prohibited ruff ignores (NEVER-IGNORE policy)
+        self.check_prohibited_ruff_ignores()
 
         if not self.paths.review_current_file.exists():
             self.logger.error(
@@ -1556,17 +1617,19 @@ class PiRunner:
                 not self.paths.review_current_file.exists()
                 or not self.paths.review_current_file.read_text().strip()
             ):
-                self.logger.info("All PR threads have been resolved! Exiting successfully.")
-                play_completion_sound()
-                sys.exit(0)
-            else:
-                remaining_count = self.paths.review_current_file.read_text().count(
-                    "--- Thread #",
-                )
                 self.logger.info(
-                    "%s PR threads remain. Continuing to next iteration.",
-                    remaining_count,
+                    "All PR threads have been resolved! "
+                    "Running final local diff review to catch any remaining issues.",
                 )
+                return
+
+            remaining_count = self.paths.review_current_file.read_text().count(
+                "--- Thread #",
+            )
+            self.logger.info(
+                "%s PR threads remain. Continuing to next iteration.",
+                remaining_count,
+            )
         else:
             self.logger.info(
                 "No in-scope threads were reported as resolved. Continuing to next iteration.",

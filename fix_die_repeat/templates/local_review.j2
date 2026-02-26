@@ -3,8 +3,22 @@ Your task is ONLY to identify and document issues introduced by these changes. D
 Note: You do not have access to 'edit' or 'bash', so you cannot apply fixes even if you wanted to.
 
 Classify issues as:
-- [CRITICAL]: Bugs, security flaws, compilation errors, broken logic.
+- [CRITICAL]: Security vulnerabilities, data loss/corruption, correctness bugs, broken builds, performance regressions, or violations of project policy.
 - [NIT]: Style issues, minor optimizations, comments, formatting.
+
+CRITICAL REVIEW CHECKLIST (LANGUAGE-AGNOSTIC):
+- [ ] Security: no injection flaws, auth/permission bypasses, secret exposure, unsafe deserialization, or insecure defaults
+- [ ] Performance: no obvious regressions, unbounded growth, heavy work in hot paths, or N+1 style patterns
+- [ ] Correctness/reliability: no missing input validation, unsafe error handling, resource leaks, or concurrency hazards
+- [ ] Code quality: no unjustified suppression of errors or warnings; prefer explicit guards/failures
+- [ ] Accuracy: docs/prompts/config instructions match actual behavior (no false claims)
+{% if has_agents_file %}- [ ] Project policy: no violations of AGENTS.md
+{% endif -%}
+- [ ] No test configuration changes without explicit approval
+{% if has_agents_file %}
+
+If you find any policy violations from AGENTS.md, classify them as [CRITICAL].
+{% endif %}
 
 IMPORTANT:
 1. ONLY report [NIT] issues if you also find [CRITICAL] issues.

@@ -7,7 +7,13 @@ import click
 from rich.console import Console
 
 from fix_die_repeat.config import CliOptions, Paths, get_settings
+from fix_die_repeat.detection import (
+    get_system_config_path,
+    resolve_check_cmd,
+    validate_check_cmd_or_exit,
+)
 from fix_die_repeat.runner import PiRunner
+from fix_die_repeat.utils import is_running_in_dev_mode
 
 console = Console()
 
@@ -16,7 +22,7 @@ console = Console()
 @click.option(
     "-c",
     "--check-cmd",
-    help="Command to run checks (default: ./scripts/ci.sh)",
+    help="Command to run checks (default: auto-detected)",
     envvar="FDR_CHECK_CMD",
 )
 @click.option(
@@ -69,7 +75,7 @@ console = Console()
 )
 @click.version_option()
 def main(**kwargs: str | int | bool | None) -> None:
-    """Automated check, review, and fix loop using pi.
+    r"""Automated check, review, and fix loop using pi.
 
     \f
     fix-die-repeat is an automated tool that:
@@ -166,11 +172,36 @@ def _run_main(options: CliOptions) -> int:
         Exit code from PiRunner
 
     """
+    # Show dev mode indicator if running from editable install
+    if is_running_in_dev_mode():
+        console.print("[cyan]⚡ Running in DEV mode (editable install)[/cyan]")
+
     # Get settings
     settings = get_settings(options)
 
     # Initialize paths
     paths = Paths()
+
+    # Resolve check command if not provided via CLI/env
+    if settings.check_cmd is None:
+        settings.check_cmd = resolve_check_cmd(
+            cli_check_cmd=options.check_cmd,
+            project_config_path=paths.config_file,
+            system_config_path=get_system_config_path(),
+            project_root=str(paths.project_root),
+        )
+
+    # Ensure we have a concrete check command before validation
+    if settings.check_cmd is None:
+        console.print(
+            "[red]Error:[/red] Unable to determine a check command to run.\n"
+            "Please specify one via the [bold]--check-cmd[/bold] option or the "
+            "[bold]FDR_CHECK_CMD[/bold] environment variable."
+        )
+        raise SystemExit(1)
+
+    # Pre-flight validation of resolved check command
+    validate_check_cmd_or_exit(settings.check_cmd)
 
     # Create runner
     runner = PiRunner(settings, paths)
