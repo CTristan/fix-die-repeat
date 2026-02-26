@@ -9,7 +9,7 @@ Classify issues as:
 CRITICAL REVIEW CHECKLIST (LANGUAGE-AGNOSTIC):
 - [ ] Security: no injection flaws, auth/permission bypasses, secret exposure, unsafe deserialization, or insecure defaults
 - [ ] Performance: no obvious regressions, unbounded growth, heavy work in hot paths, or N+1 style patterns
-- [ ] Correctness/reliability: no missing input validation, unsafe error handling, resource leaks, or concurrency hazards (including file I/O and locking best practices; use proper serialization APIs for YAML/JSON/etc., not string interpolation); test fixtures match implementation expectations
+- [ ] Correctness/reliability: no missing input validation, unsafe error handling, resource leaks, or concurrency hazards (including file I/O and locking best practices like lock scope/byte ranges/seek position; use proper serialization APIs for YAML/JSON/etc., not string interpolation); test fixtures match implementation expectations
 - [ ] Code quality: no unjustified suppression of errors or warnings; prefer explicit guards/failures
 - [ ] Accuracy: docs/prompts/config instructions match actual behavior (no false claims); non-obvious platform-specific behavior, concurrency patterns, or API quirks have inline documentation
 - [ ] Testing: new utility classes, functions with platform-specific code paths, or complex logic have corresponding unit tests
