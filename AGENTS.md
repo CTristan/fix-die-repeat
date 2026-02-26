@@ -394,6 +394,50 @@ After resolution completes, verify the command is executable before entering the
 - Users with `./scripts/ci.sh`: Auto-detection finds `scripts/ci.sh` first, confirms on first run, then persists
 - CI/CD: Must set `FDR_CHECK_CMD` or `-c` explicitly — clear error message guides them
 
+### 8. PR Review Introspection
+
+Analyzes what PR reviewers caught, how the agent responded (fixed vs. won't fix), and writes categorized insights to a global file. Creates a meta-feedback loop where real-world PR reviews improve future prompts.
+
+**Why**: Real-world PR feedback is the best signal for prompt quality gaps. By systematically capturing and analyzing this data across projects, we can continuously improve review and fix prompts.
+
+**CLI Flag**: `--pr-review-introspect` (implies `--pr-review`)
+
+**Global Storage**:
+- Location: `~/.config/fix-die-repeat/introspection.yaml`
+- Format: Multi-document YAML (`---` separated)
+- One document per PR review run with `status: pending` or `reviewed`
+
+**Data Collected**:
+- PR metadata (number, URL, date, project)
+- Per-thread analysis:
+  - GraphQL thread ID
+  - LLM-generated concise title
+  - Category (security, error-handling, performance, correctness, code-quality, testing, documentation, configuration)
+  - Outcome (fixed or wont-fix)
+  - Summary of what was flagged and what the agent did
+  - Relevance assessment for template improvement
+
+**Introspection Process**:
+1. After PR review completes (or max iterations), collect:
+   - PR thread comments from cache
+   - Fix/wont-fix outcomes by comparing in-scope vs. resolved thread IDs
+   - Diff of changes made by the agent
+2. Call pi with `introspect_pr_review.j2` template
+3. Validate YAML output and append to global file
+4. Clean up temporary files
+
+**Non-Blocking**:
+- Introspection failures do not block the main run
+- All errors are logged as warnings
+- Main loop result is preserved
+
+**Pi Skill**: `.pi/skills/prompt-introspect/`
+- Reads global introspection file
+- Filters to `status: pending` entries
+- Analyzes patterns across projects
+- Edits templates directly to address identified gaps
+- Marks entries as `status: reviewed`
+
 ---
 
 ## Testing (for Fix. Die. Repeat. Development Only)

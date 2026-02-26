@@ -1,0 +1,36 @@
+I have attached a file containing PR review thread data from a completed fix-die-repeat run.
+This includes the original reviewer comments, whether the agent fixed or declined each issue,
+and the diff of changes made.
+
+Your task is to produce a YAML document that categorizes each PR thread for future prompt improvement.
+This data will be used later to identify gaps in the review and fix prompt templates.
+
+For each thread, provide:
+- id: The exact GraphQL thread ID (copy from the input data)
+- title: A concise, descriptive title (max 10 words)
+- category: One of: security, error-handling, performance, correctness, code-quality, testing, documentation, configuration (or a new category if none fit)
+- outcome: "fixed" or "wont-fix"
+- summary: 1-2 sentences describing what the reviewer flagged and what the agent did
+- reason: (only for wont-fix) Why the agent declined to fix
+- relevance: 1-2 sentences assessing whether this type of issue could be caught earlier by improved review/fix prompt templates
+
+Output ONLY valid YAML matching this structure (no markdown fencing, no extra text):
+
+date: "{{ run_date }}"
+project: "{{ project_name }}"
+pr_number: {{ pr_number }}
+pr_url: "{{ pr_url }}"
+status: pending
+threads:
+  - id: "<thread_id>"
+    title: "<concise title>"
+    category: "<category>"
+    outcome: "<fixed|wont-fix>"
+    summary: >
+      <summary text>
+    reason: >
+      <reason for wont-fix (omit for fixed)>
+    relevance: >
+      <relevance assessment>
+
+Use the 'write' tool to save the YAML output to '{{ output_path }}'.

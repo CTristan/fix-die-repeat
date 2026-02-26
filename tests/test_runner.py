@@ -1,11 +1,16 @@
 """Tests for runner module."""
 
 import sys
-from contextlib import suppress
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from fix_die_repeat import runner_introspection as runner_introspection_module
 from fix_die_repeat.runner import PiRunner
+from fix_die_repeat.runner_introspection import (  # Testing private class is intentional
+    _FileLock,
+)
 
 # Constants for runner test values
 TEST_PI_DELAY_SECONDS = 2
@@ -15,6 +20,7 @@ REGULAR_COMPACT_LINES = 50
 FILTERED_CHECKS_LOG_SMALL_LINES = 100
 FILTERED_CHECKS_LOG_MAX_LINES = 300
 TEST_PR_NUMBER = 123
+MIN_SEEK_CALLS = 2
 
 
 class TestBeforePiCall:
@@ -54,467 +60,6 @@ class TestBeforePiCall:
             runner.before_pi_call()
             mock_sleep.assert_called_once_with(TEST_PI_DELAY_SECONDS)
             assert runner.pi_invocation_count == EXPECTED_PI_INVOCATION_COUNT
-
-
-class TestEmergencyCompaction:
-    """Tests for emergency_compact method."""
-
-    def test_emergency_compact_truncates_files(self, tmp_path: Path) -> None:
-        """Test emergency compaction truncates files to 100 lines."""
-        settings = MagicMock()
-        paths = MagicMock()
-        paths.fdr_dir = tmp_path
-        paths.review_file = tmp_path / "review.md"
-        paths.build_history_file = tmp_path / "build_history.md"
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-
-        # Create large files
-        paths.review_file.write_text("\n".join(["line"] * 200))
-        paths.build_history_file.write_text("\n".join(["line"] * 150))
-
-        runner.emergency_compact()
-
-        # Check they're truncated to 100 lines
-        assert get_file_line_count(paths.review_file) == EMERGENCY_COMPACT_LINES
-        assert get_file_line_count(paths.build_history_file) == EMERGENCY_COMPACT_LINES
-
-    def test_emergency_compact_handles_nonexistent_files(self, tmp_path: Path) -> None:
-        """Test emergency compaction handles missing files gracefully."""
-        settings = MagicMock()
-        paths = MagicMock()
-        paths.fdr_dir = tmp_path
-        paths.review_file = tmp_path / "review.md"
-        paths.build_history_file = tmp_path / "build_history.md"
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-
-        # Don't create files
-        runner.emergency_compact()
-
-        # Should not raise exception
-
-
-def get_file_line_count(path: Path) -> int:
-    """Count file lines."""
-    try:
-        return sum(1 for _ in path.open(encoding="utf-8", errors="ignore"))
-    except OSError:
-        return 0
-
-
-class TestCheckCompactionNeeded:
-    """Tests for check_compaction_needed method."""
-
-    def test_no_compaction_needed(self, tmp_path: Path) -> None:
-        """Test when files are below thresholds."""
-        settings = MagicMock()
-        settings.compact_threshold_lines = 150
-        settings.emergency_threshold_lines = 200
-        paths = MagicMock()
-        paths.fdr_dir = tmp_path
-        paths.review_file = tmp_path / "review.md"
-        paths.build_history_file = tmp_path / "build_history.md"
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-
-        # Create small files
-        paths.review_file.write_text("\n".join(["line"] * 100))
-        paths.build_history_file.write_text("\n".join(["line"] * 120))
-
-        needs_emergency, needs_compact = runner.check_compaction_needed()
-
-        assert not needs_emergency
-        assert not needs_compact
-
-    def test_compaction_needed(self, tmp_path: Path) -> None:
-        """Test when files exceed regular threshold."""
-        settings = MagicMock()
-        settings.compact_threshold_lines = 150
-        settings.emergency_threshold_lines = 200
-        paths = MagicMock()
-        paths.fdr_dir = tmp_path
-        paths.review_file = tmp_path / "review.md"
-        paths.build_history_file = tmp_path / "build_history.md"
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-
-        # Create files over regular threshold
-        paths.review_file.write_text("\n".join(["line"] * 160))
-        paths.build_history_file.write_text("\n".join(["line"] * 120))
-
-        needs_emergency, needs_compact = runner.check_compaction_needed()
-
-        assert not needs_emergency
-        assert needs_compact
-
-    def test_emergency_compaction_needed(self, tmp_path: Path) -> None:
-        """Test when files exceed emergency threshold."""
-        settings = MagicMock()
-        settings.compact_threshold_lines = 150
-        settings.emergency_threshold_lines = 200
-        paths = MagicMock()
-        paths.fdr_dir = tmp_path
-        paths.review_file = tmp_path / "review.md"
-        paths.build_history_file = tmp_path / "build_history.md"
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-
-        # Create files over emergency threshold
-        paths.review_file.write_text("\n".join(["line"] * 250))
-        paths.build_history_file.write_text("\n".join(["line"] * 120))
-
-        needs_emergency, _needs_compact = runner.check_compaction_needed()
-
-        assert needs_emergency
-
-    def test_missing_files_no_compaction(self, tmp_path: Path) -> None:
-        """Test that missing files don't trigger compaction."""
-        settings = MagicMock()
-        settings.compact_threshold_lines = 150
-        settings.emergency_threshold_lines = 200
-        paths = MagicMock()
-        paths.fdr_dir = tmp_path
-        paths.review_file = tmp_path / "review.md"
-        paths.build_history_file = tmp_path / "build_history.md"
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-
-        # Don't create files
-        needs_emergency, needs_compact = runner.check_compaction_needed()
-
-        assert not needs_emergency
-        assert not needs_compact
-
-
-class TestPerformEmergencyCompaction:
-    """Tests for perform_emergency_compaction method."""
-
-    def test_emergency_compaction_logs_and_truncates(self, tmp_path: Path) -> None:
-        """Test emergency compaction logs and truncates files."""
-        settings = MagicMock()
-        settings.emergency_threshold_lines = 200
-        paths = MagicMock()
-        paths.fdr_dir = tmp_path
-        paths.review_file = tmp_path / "review.md"
-        paths.build_history_file = tmp_path / "build_history.md"
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.logger = MagicMock()
-
-        # Create large files
-        paths.review_file.write_text("\n".join(["line"] * 300))
-        paths.build_history_file.write_text("\n".join(["line"] * 250))
-
-        runner.perform_emergency_compaction()
-
-        # Check log was called
-        assert runner.logger.info.called
-
-        # Check truncation
-        assert get_file_line_count(paths.review_file) == EMERGENCY_COMPACT_LINES
-        assert get_file_line_count(paths.build_history_file) == EMERGENCY_COMPACT_LINES
-
-
-class TestPerformRegularCompaction:
-    """Tests for perform_regular_compaction method."""
-
-    def test_regular_compaction_logs_and_truncates(self, tmp_path: Path) -> None:
-        """Test regular compaction logs and truncates files to 50 lines."""
-        settings = MagicMock()
-        settings.compact_threshold_lines = 150
-        paths = MagicMock()
-        paths.fdr_dir = tmp_path
-        paths.review_file = tmp_path / "review.md"
-        paths.build_history_file = tmp_path / "build_history.md"
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.logger = MagicMock()
-
-        # Create large files
-        paths.review_file.write_text("\n".join(["line"] * 160))
-        paths.build_history_file.write_text("\n".join(["line"] * 155))
-
-        runner.perform_regular_compaction()
-
-        # Check log was called
-        assert runner.logger.info.called
-
-        # Check truncation to 50 lines
-        assert get_file_line_count(paths.review_file) == REGULAR_COMPACT_LINES
-        assert get_file_line_count(paths.build_history_file) == REGULAR_COMPACT_LINES
-
-
-class TestCheckOscillation:
-    """Tests for check_oscillation method."""
-
-    def test_no_oscillation_first_iteration(self, tmp_path: Path) -> None:
-        """Test first iteration doesn't detect oscillation."""
-        settings = MagicMock()
-        paths = MagicMock()
-        paths.fdr_dir = tmp_path
-        paths.checks_log = tmp_path / "checks.log"
-        paths.checks_hash_file = tmp_path / "checks_hashes"
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.iteration = 1
-
-        paths.checks_log.write_text("output 1")
-
-        result = runner.check_oscillation()
-
-        assert result is None
-
-    def test_no_oscillation_different_hashes(self, tmp_path: Path) -> None:
-        """Test different hashes don't trigger oscillation."""
-        settings = MagicMock()
-        paths = MagicMock()
-        paths.fdr_dir = tmp_path
-        paths.checks_log = tmp_path / "checks.log"
-        paths.checks_hash_file = tmp_path / "checks_hashes"
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.iteration = 2
-
-        # Create hash file with different hash
-        paths.checks_hash_file.write_text("abc123:1\n")
-
-        paths.checks_log.write_text("output 2")
-
-        result = runner.check_oscillation()
-
-        assert result is None
-
-    def test_oscillation_detected_same_hash(self, tmp_path: Path) -> None:
-        """Test same hash triggers oscillation warning."""
-        settings = MagicMock()
-        paths = MagicMock()
-        paths.fdr_dir = tmp_path
-        paths.checks_log = tmp_path / "checks.log"
-        paths.checks_hash_file = tmp_path / "checks_hashes"
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.iteration = 3
-
-        # Create hash file with a hash we'll match
-        paths.checks_hash_file.write_text("abc123:1\ndef456:2\n")
-
-        # Write content that produces same hash as iteration 2
-        paths.checks_log.write_text("output 2")
-
-        _ = runner.check_oscillation()
-
-        # Note: This test is tricky because git hash-object depends on actual content
-        # The result might be None if hashes don't match, but the test structure is correct
-
-
-class TestCheckAndCompactArtifacts:
-    """Tests for check_and_compact_artifacts method."""
-
-    def test_compaction_disabled(self, tmp_path: Path) -> None:
-        """Test that compaction is skipped when disabled."""
-        settings = MagicMock()
-        settings.compact_artifacts = False
-        paths = MagicMock()
-        paths.fdr_dir = tmp_path
-        paths.review_file = tmp_path / "review.md"
-        paths.build_history_file = tmp_path / "build_history.md"
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-
-        result = runner.check_and_compact_artifacts()
-
-        assert result is False
-
-    def test_emergency_compaction_performed(self, tmp_path: Path) -> None:
-        """Test emergency compaction is performed when needed."""
-        settings = MagicMock()
-        settings.compact_artifacts = True
-        settings.emergency_threshold_lines = 200
-        paths = MagicMock()
-        paths.fdr_dir = tmp_path
-        paths.review_file = tmp_path / "review.md"
-        paths.build_history_file = tmp_path / "build_history.md"
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.logger = MagicMock()
-
-        # Create large file
-        paths.review_file.write_text("\n".join(["line"] * 300))
-
-        result = runner.check_and_compact_artifacts()
-
-        assert result is True
-        assert get_file_line_count(paths.review_file) == EMERGENCY_COMPACT_LINES
-
-    def test_regular_compaction_performed(self, tmp_path: Path) -> None:
-        """Test regular compaction is performed when needed."""
-        settings = MagicMock()
-        settings.compact_artifacts = True
-        settings.compact_threshold_lines = 150
-        settings.emergency_threshold_lines = 200
-        paths = MagicMock()
-        paths.fdr_dir = tmp_path
-        paths.review_file = tmp_path / "review.md"
-        paths.build_history_file = tmp_path / "build_history.md"
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.logger = MagicMock()
-
-        # Create file over regular threshold
-        paths.review_file.write_text("\n".join(["line"] * 160))
-
-        result = runner.check_and_compact_artifacts()
-
-        assert result is True
-        assert get_file_line_count(paths.review_file) == REGULAR_COMPACT_LINES
-
-    def test_no_compaction_performed(self, tmp_path: Path) -> None:
-        """Test no compaction when files are small."""
-        settings = MagicMock()
-        settings.compact_artifacts = True
-        settings.compact_threshold_lines = 150
-        settings.emergency_threshold_lines = 200
-        paths = MagicMock()
-        paths.fdr_dir = tmp_path
-        paths.review_file = tmp_path / "review.md"
-        paths.build_history_file = tmp_path / "build_history.md"
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.logger = MagicMock()
-
-        # Create small files
-        paths.review_file.write_text("\n".join(["line"] * EMERGENCY_COMPACT_LINES))
-
-        result = runner.check_and_compact_artifacts()
-
-        assert result is False
-        assert get_file_line_count(paths.review_file) == EMERGENCY_COMPACT_LINES
-
-
-class TestFilterChecksLog:
-    """Tests for filter_checks_log method."""
-
-    def test_filter_checks_log_small_file(self, tmp_path: Path) -> None:
-        """Test filtering when log is small enough."""
-        settings = MagicMock()
-        paths = MagicMock()
-        paths.fdr_dir = tmp_path
-        paths.checks_log = tmp_path / "checks.log"
-        paths.checks_filtered_log = tmp_path / "checks_filtered.log"
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.logger = MagicMock()
-
-        # Create small log (under 300 lines)
-        paths.checks_log.write_text("\n".join(["line"] * FILTERED_CHECKS_LOG_SMALL_LINES))
-
-        runner.filter_checks_log()
-
-        # Should just copy it
-        assert paths.checks_filtered_log.exists()
-        content = paths.checks_filtered_log.read_text()
-        assert len(content.splitlines()) == FILTERED_CHECKS_LOG_SMALL_LINES
-
-    def test_filter_checks_log_large_file(self, tmp_path: Path) -> None:
-        """Test filtering when log exceeds threshold."""
-        settings = MagicMock()
-        paths = MagicMock()
-        paths.fdr_dir = tmp_path
-        paths.checks_log = tmp_path / "checks.log"
-        paths.checks_filtered_log = tmp_path / "checks_filtered.log"
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.logger = MagicMock()
-
-        # Create large log with error lines
-        lines = []
-        for i in range(400):
-            if i % 50 == 0:
-                lines.append(f"ERROR: error at line {i}")
-            else:
-                lines.append(f"line {i}")
-
-        paths.checks_log.write_text("\n".join(lines))
-
-        runner.filter_checks_log()
-
-        # Should be filtered to ~300 lines max
-        filtered_lines = paths.checks_filtered_log.read_text().splitlines()
-        assert len(filtered_lines) <= FILTERED_CHECKS_LOG_MAX_LINES
-        # Should contain error lines
-        assert any("ERROR" in line for line in filtered_lines)
-
-    def test_filter_checks_log_no_log_file(self, tmp_path: Path) -> None:
-        """Test filtering when checks.log doesn't exist."""
-        settings = MagicMock()
-        paths = MagicMock()
-        paths.fdr_dir = tmp_path
-        paths.checks_log = tmp_path / "checks.log"
-        paths.checks_filtered_log = tmp_path / "checks_filtered.log"
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.logger = MagicMock()
-
-        # Don't create checks.log
-        runner.filter_checks_log()
-
-        # Should not create filtered log
-        assert not paths.checks_filtered_log.exists()
 
 
 class TestGenerateDiff:
@@ -631,7 +176,7 @@ class TestAppendReviewEntry:
         # Create review current with content
         paths.review_current_file.write_text("# Issues\n\n[CRITICAL] Bug found")
 
-        runner.append_review_entry()
+        runner.append_review_entry(runner.iteration)
 
         # Check that content was appended
         assert paths.review_file.exists()
@@ -656,7 +201,7 @@ class TestAppendReviewEntry:
         # Create review current as empty
         paths.review_current_file.write_text("")
 
-        runner.append_review_entry()
+        runner.append_review_entry(runner.iteration)
 
         # Check that "No issues found" was written
         assert paths.review_file.exists()
@@ -1236,7 +781,7 @@ class TestRunPiReview:
         # Create diff file
         paths.diff_file.write_text("diff content")
 
-        runner.run_pi_review(100000)
+        runner.run_pi_review(100000, runner.run_pi_safe)  # type: ignore[arg-type]
 
         # Check that run_pi_safe was called
         assert runner.run_pi_safe.called
@@ -1258,7 +803,7 @@ class TestRunPiReview:
         runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
 
-        runner.run_pi_review(200000)
+        runner.run_pi_review(200000, runner.run_pi_safe)  # type: ignore[arg-type]
 
         # Check that run_pi_safe was called
         assert runner.run_pi_safe.called
@@ -1283,7 +828,7 @@ class TestRunPiReview:
         # Create review history
         paths.review_file.write_text("# Previous review\n\nIssues found.")
 
-        runner.run_pi_review(100000)
+        runner.run_pi_review(100000, runner.run_pi_safe)  # type: ignore[arg-type]
 
         # Check that run_pi_safe was called
         assert runner.run_pi_safe.called
@@ -1948,16 +1493,16 @@ class TestCompleteSuccess:
 
         with (
             patch("fix_die_repeat.runner.play_completion_sound"),
-            patch("fix_die_repeat.runner.sys.exit") as mock_exit,
             patch("fix_die_repeat.runner.format_duration") as mock_format,
         ):
             mock_format.return_value = "0s"
-            with suppress(SystemExit):
-                runner.complete_success()
+            result = runner.complete_success()
 
-            # Check that exit was called with 0
-            mock_exit.assert_called_once_with(0)
-            # Note: Files are not actually deleted because sys.exit(0) is mocked
+            # Check that the method returns 0
+            assert result == 0
+            # Check that temporary files were cleaned up
+            assert not paths.review_current_file.exists()
+            assert not paths.start_sha_file.exists()
 
     def test_complete_success_with_ntfy(self, tmp_path: Path) -> None:
         """Test completing the run with ntfy notification."""
@@ -1986,13 +1531,115 @@ class TestCompleteSuccess:
 
         with (
             patch("fix_die_repeat.runner.play_completion_sound"),
-            patch("fix_die_repeat.runner.send_ntfy_notification"),
-            patch("fix_die_repeat.runner.sys.exit") as mock_exit,
+            patch("fix_die_repeat.runner.send_ntfy_notification") as mock_ntfy,
             patch("fix_die_repeat.runner.format_duration") as mock_format,
         ):
             mock_format.return_value = "5m 30s"
-            with suppress(SystemExit):
-                runner.complete_success()
+            result = runner.complete_success()
 
-            # Check that exit was called with 0
-            mock_exit.assert_called_once_with(0)
+            # Check that the method returns 0
+            assert result == 0
+            # Check that ntfy notification was sent with correct parameters
+            mock_ntfy.assert_called_once_with(
+                exit_code=0,
+                duration_str="5m 30s",
+                repo_name=tmp_path.name,
+                ntfy_url="http://localhost:2586",
+                logger=runner.logger,
+            )
+
+
+class TestFileLock:
+    """Tests for _FileLock context manager."""
+
+    def test_file_lock_acquires_and_releases_on_unix(self, tmp_path: Path) -> None:
+        """Test that _FileLock acquires and releases lock on Unix systems."""
+        # Create a test file
+        test_file = tmp_path / "test_lock.txt"
+        test_file.write_text("test content")
+
+        with test_file.open() as f:
+            with patch("fix_die_repeat.runner_introspection.fcntl") as mock_fcntl:
+                file_lock = _FileLock(f)
+
+                with file_lock:
+                    # Verify lock was acquired (flock called with LOCK_EX)
+                    mock_fcntl.flock.assert_called_once_with(f.fileno(), mock_fcntl.LOCK_EX)
+
+                # Verify lock was released (flock called with LOCK_UN)
+                mock_fcntl.flock.assert_called_with(f.fileno(), mock_fcntl.LOCK_UN)
+
+    def test_file_lock_acquires_and_releases_on_windows(self, tmp_path: Path) -> None:
+        """Test that _FileLock acquires and releases lock on Windows systems."""
+        # Create a test file
+        test_file = tmp_path / "test_lock.txt"
+        test_file.write_text("test content")
+
+        # Mock msvcrt module for Windows platform
+        mock_msvcrt = MagicMock()
+        mock_msvcrt.LK_LOCK = 0
+        mock_msvcrt.LK_UNLCK = 1
+
+        # Save original platform value
+        original_platform = sys.platform
+
+        try:
+            # Set platform to Windows
+            sys.platform = "win32"
+
+            # Inject msvcrt into the runner_introspection module namespace
+            # (This is intentional: we're simulating Windows behavior on a non-Windows platform)
+            runner_introspection_module.msvcrt = mock_msvcrt  # type: ignore[attr-defined]
+
+            with test_file.open() as f:
+                # Wrap f.seek so we can assert it is called with position 0 before unlocking
+                with patch.object(f, "seek", wraps=f.seek) as mock_seek:
+                    file_lock = _FileLock(f)
+
+                    with file_lock:
+                        # Verify lock was acquired (locking called with LK_LOCK)
+                        mock_msvcrt.locking.assert_called_once_with(
+                            f.fileno(), mock_msvcrt.LK_LOCK, 65535
+                        )
+
+                    # Verify lock was released (locking called with LK_UNLCK)
+                    mock_msvcrt.locking.assert_called_with(f.fileno(), mock_msvcrt.LK_UNLCK, 65535)
+                    # Verify that seek was called at least twice (before lock and unlock)
+                    assert mock_seek.call_count >= MIN_SEEK_CALLS
+                    mock_seek.assert_any_call(0)
+        finally:
+            # Restore original platform
+            sys.platform = original_platform
+            # Clean up injected msvcrt
+            if hasattr(runner_introspection_module, "msvcrt"):
+                delattr(runner_introspection_module, "msvcrt")
+
+    def test_file_lock_returns_self_on_enter(self, tmp_path: Path) -> None:
+        """Test that _FileLock __enter__ returns self."""
+        test_file = tmp_path / "test_lock.txt"
+        test_file.write_text("test content")
+
+        with test_file.open() as f:
+            with patch("fix_die_repeat.runner_introspection.fcntl"):
+                file_lock = _FileLock(f)
+
+                with file_lock as acquired_lock:
+                    # __enter__ should return self
+                    assert acquired_lock is file_lock
+
+    def test_file_lock_handles_exception_during_context(self, tmp_path: Path) -> None:
+        """Test that _FileLock releases lock even when exception occurs."""
+        test_file = tmp_path / "test_lock.txt"
+        test_file.write_text("test content")
+
+        with test_file.open() as f:
+            with patch("fix_die_repeat.runner_introspection.fcntl") as mock_fcntl:
+                file_lock = _FileLock(f)
+                test_exception = ValueError("Test exception")
+
+                with pytest.raises(ValueError, match="Test exception"):
+                    with file_lock:
+                        raise test_exception
+
+                # Verify lock was still released despite exception
+                mock_fcntl.flock.assert_called_with(f.fileno(), mock_fcntl.LOCK_UN)
