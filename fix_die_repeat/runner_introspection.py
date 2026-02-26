@@ -68,6 +68,11 @@ class _FileLock:
         """Acquire the lock."""
         if sys.platform == "win32":  # pragma: no cover
             # Windows: use msvcrt.locking
+            # Seek to start of file because msvcrt.locking locks a region
+            # starting from the current file position. To ensure we lock
+            # the same region that we later unlock (starting at position 0),
+            # we must seek to position 0 before calling LK_LOCK.
+            self.file_handle.seek(0)
             msvcrt.locking(self.file_handle.fileno(), msvcrt.LK_LOCK, 65535)
         else:  # pragma: no cover
             # Unix: use fcntl.flock with LOCK_EX

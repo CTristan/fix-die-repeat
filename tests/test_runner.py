@@ -20,6 +20,7 @@ REGULAR_COMPACT_LINES = 50
 FILTERED_CHECKS_LOG_SMALL_LINES = 100
 FILTERED_CHECKS_LOG_MAX_LINES = 300
 TEST_PR_NUMBER = 123
+MIN_SEEK_CALLS = 2
 
 
 class TestBeforePiCall:
@@ -1603,7 +1604,8 @@ class TestFileLock:
 
                     # Verify lock was released (locking called with LK_UNLCK)
                     mock_msvcrt.locking.assert_called_with(f.fileno(), mock_msvcrt.LK_UNLCK, 65535)
-                    # Verify that seek was called with position 0 prior to unlocking
+                    # Verify that seek was called at least twice (before lock and unlock)
+                    assert mock_seek.call_count >= MIN_SEEK_CALLS
                     mock_seek.assert_any_call(0)
         finally:
             # Restore original platform
