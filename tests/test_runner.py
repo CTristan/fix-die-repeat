@@ -2052,16 +2052,20 @@ class TestFileLock:
             runner_module.msvcrt = mock_msvcrt  # type: ignore[attr-defined]
 
             with test_file.open() as f:
-                file_lock = _FileLock(f)
+                # Wrap f.seek so we can assert it is called with position 0 before unlocking
+                with patch.object(f, "seek", wraps=f.seek) as mock_seek:
+                    file_lock = _FileLock(f)
 
-                with file_lock:
-                    # Verify lock was acquired (locking called with LK_LOCK)
-                    mock_msvcrt.locking.assert_called_once_with(
-                        f.fileno(), mock_msvcrt.LK_LOCK, 65535
-                    )
+                    with file_lock:
+                        # Verify lock was acquired (locking called with LK_LOCK)
+                        mock_msvcrt.locking.assert_called_once_with(
+                            f.fileno(), mock_msvcrt.LK_LOCK, 65535
+                        )
 
-                # Verify lock was released (locking called with LK_UNLCK)
-                mock_msvcrt.locking.assert_called_with(f.fileno(), mock_msvcrt.LK_UNLCK, 65535)
+                    # Verify lock was released (locking called with LK_UNLCK)
+                    mock_msvcrt.locking.assert_called_with(f.fileno(), mock_msvcrt.LK_UNLCK, 65535)
+                    # Verify that seek was called with position 0 prior to unlocking
+                    mock_seek.assert_any_call(0)
         finally:
             # Restore original platform
             sys.platform = original_platform

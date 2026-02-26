@@ -61,6 +61,10 @@ class _FileHandle(Protocol):
         """Return the file descriptor for the file handle."""
         ...
 
+    def seek(self, offset: int, whence: int = 0) -> int:
+        """Move to a new file position."""
+        ...
+
 
 class _FileLock:
     """Context manager for cross-platform file locking.
