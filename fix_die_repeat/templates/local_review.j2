@@ -9,9 +9,10 @@ Classify issues as:
 CRITICAL REVIEW CHECKLIST (LANGUAGE-AGNOSTIC):
 - [ ] Security: no injection flaws, auth/permission bypasses, secret exposure, unsafe deserialization, or insecure defaults
 - [ ] Performance: no obvious regressions, unbounded growth, heavy work in hot paths, or N+1 style patterns
-- [ ] Correctness/reliability: no missing input validation, unsafe error handling, resource leaks, or concurrency hazards
+- [ ] Correctness/reliability: no missing input validation, unsafe error handling, resource leaks, or concurrency hazards; Protocol/interface declarations include all methods/properties used by implementations
 - [ ] Code quality: no unjustified suppression of errors or warnings; prefer explicit guards/failures
 - [ ] Accuracy: docs/prompts/config instructions match actual behavior (no false claims)
+- [ ] Testing: new utility classes, functions with platform-specific code paths, or complex logic have corresponding unit tests; tests verify all documented behavior and critical implementation assumptions
 {% if has_agents_file %}- [ ] Project policy: no violations of AGENTS.md
 {% endif -%}
 - [ ] No test configuration changes without explicit approval
