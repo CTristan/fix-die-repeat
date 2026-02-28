@@ -18,11 +18,6 @@ class TestLanguageExtensions:
         for lang in LANGUAGE_EXTENSIONS.values():
             assert lang in valid_keys, f"Unknown language key: {lang}"
 
-    def test_no_duplicate_extensions(self) -> None:
-        """Each extension maps to exactly one language."""
-        extensions = list(LANGUAGE_EXTENSIONS.keys())
-        assert len(extensions) == len(set(extensions)), "Duplicate extensions found"
-
 
 class TestDetectLanguagesFromFiles:
     """Tests for detect_languages_from_files."""
