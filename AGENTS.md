@@ -121,15 +121,23 @@ fix-die-repeat/
 │   ├── cli.py             # Click-based CLI interface
 │   ├── config.py          # Pydantic settings and path management
 │   ├── detection.py       # Check command resolution and auto-detection
+│   ├── lang.py           # Language detection from file extensions
 │   ├── messages.py        # User-facing message generators
 │   ├── prompts.py         # Jinja template rendering helpers
 │   ├── runner.py          # Core PiRunner class - main loop
 │   ├── utils.py           # Utility functions (logging, git, file ops)
 │   └── templates/         # Prompt templates consumed by prompts.py
+│       └── lang_checks/  # Language-specific checklists
+│           ├── python.j2    # Python-specific checklist
+│           ├── rust.j2      # Rust-specific checklist
+│           ├── javascript.j2 # JS/TS-specific checklist
+│           ├── elixir.j2    # Elixir/Phoenix-specific checklist
+│           └── csharp.j2    # C#-specific checklist
 ├── tests/                  # Test suite
 │   ├── __init__.py
 │   ├── test_config.py    # Settings and Paths tests
 │   ├── test_detection.py  # Check command resolution tests
+│   ├── test_lang.py      # Language detection tests
 │   ├── test_messages.py   # Message generator tests
 │   ├── test_prompts.py   # Prompt rendering tests
 │   └── test_utils.py     # Utility function tests
@@ -191,6 +199,7 @@ Configuration with environment variable support via Pydantic.
 **Optional/Null Defaults**:
 - `model`: `None`
 - `test_model`: `None`
+- `languages`: `None` (auto-detect from changed files; can be set to comma-separated override like `python,rust`)
 - `archive_artifacts`: `False`
 - `pr_review`: `False`
 - `debug`: `False`
@@ -255,6 +264,28 @@ Check command resolution and auto-detection module. Handles the smart resolution
 - `mix.exs` → `mix test`
 - `Gemfile` → `bundle exec rake test`
 
+### `lang` (lang.py)
+
+Language detection module for language-specific review and fix checks. Automatically detects programming languages from changed files based on file extensions.
+
+**Key Functions**:
+- `detect_languages_from_files()` - Detects languages from a list of file paths using extension mapping
+- `resolve_languages()` - Resolves languages using hybrid strategy: config override + diff detection
+
+**Language Extensions Mapping**:
+Maps file extensions to canonical language keys:
+- `.py`, `.pyi` → `python`
+- `.rs` → `rust`
+- `.js`, `.jsx`, `.ts`, `.tsx`, `.mjs`, `.cjs` → `javascript`
+- `.ex`, `.exs`, `.heex`, `.leex` → `elixir`
+- `.cs`, `.csx` → `csharp`
+
+**Configuration Override**:
+The `FDR_LANGUAGES` environment variable can override auto-detection with a comma-separated list (e.g., `FDR_LANGUAGES=python,rust`). This is useful for testing or when auto-detection fails to identify a language.
+
+**Template Integration**:
+Language-specific checklists are rendered in review prompts via `templates/lang_checks/*.j2` partials. Each language partial contains 6 high-impact checklist items targeting common language-specific footguns.
+
 ### Logging (`configure_logger` in utils.py)
 
 Uses Python's standard `logging` module with `RichHandler` for console output.
@@ -274,13 +305,23 @@ Prompt text is stored in Jinja templates under `fix_die_repeat/templates/` and r
 - Makes prompt updates safer and easier to review
 - Avoids broad lint rule exceptions for long inline strings
 
-**IMPORTANT**: All prompt templates are designed to be **language-agnostic**. They focus on general principles like security, performance, correctness, and code quality—not language-specific rules.
+**Template Types**:
+- **Language-agnostic prompts**: Main templates (e.g., `fix_checks.j2`, `local_review.j2`) contain generic checks that apply to any code
+- **Language-specific partials**: `templates/lang_checks/*.j2` contains 6-item checklists targeting common language-specific footguns
 
 **Current templates**:
-- `fix_checks.j2` - Prompt for check-failure fix attempts
-- `local_review.j2` - Prompt for local review of generated diff
+- `fix_checks.j2` - Prompt for check-failure fix attempts (includes language hint when languages detected)
+- `local_review.j2` - Prompt for local review of generated diff (includes language-specific checks)
 - `resolve_review_issues.j2` - Prompt for applying review fixes
 - `pr_threads_header.j2` - Header/instructions for fetched PR thread context
+- `introspect_pr_review.j2` - Prompt for PR review introspection (includes language gap analysis)
+
+**Language-specific partials** (`templates/lang_checks/*.j2`):
+- `python.j2` - Python-specific checks (eval/exec, bare except, mutable defaults, context managers, assert, SQL/shell injection)
+- `rust.j2` - Rust-specific checks (unsafe blocks, unwrap/expect, unbounded collect, mutex across await, clippy allows, as casts)
+- `javascript.j2` - JS/TS-specific checks (eval/innerHTML, prototype pollution, strict equality, async error handling, any type, secrets)
+- `elixir.j2` - Elixir/Phoenix-specific checks (Code.eval_string, Ecto parameterization, Phoenix changesets, GenServer timeouts, Logger data, LiveView assigns)
+- `csharp.j2` - C#-specific checks (SQL string concat, IDisposable, async deadlock risk, nullable suppression, BinaryFormatter, catch Exception)
 
 ---
 

@@ -75,6 +75,18 @@ class TestSettings:
         assert settings.max_iters == TEST_MAX_ITERS
         assert settings.model == "anthropic/claude-sonnet-4-5"
 
+    def test_languages_default_none(self) -> None:
+        """Test that languages defaults to None."""
+        settings = Settings()
+        assert settings.languages is None
+
+    def test_languages_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that languages can be set via environment variable."""
+        monkeypatch.setenv("FDR_LANGUAGES", "python,rust,elixir")
+
+        settings = Settings()
+        assert settings.languages == "python,rust,elixir"
+
     def test_pr_review_introspect_default(self) -> None:
         """Test that pr_review_introspect defaults to False."""
         settings = Settings()

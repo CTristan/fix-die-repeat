@@ -1,0 +1,7 @@
+Rust:
+- [ ] `unsafe` blocks are justified, minimal in scope, and documented
+- [ ] No `.unwrap()` / `.expect()` in library code — propagate errors with `?`
+- [ ] No unbounded `.collect()` on untrusted iterators (DoS vector)
+- [ ] Mutex guards are not held across `.await` points
+- [ ] Clippy `#[allow(...)]` attributes are justified with comments
+- [ ] No `as` casts that could silently truncate — use `try_into()`

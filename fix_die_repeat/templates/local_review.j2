@@ -9,17 +9,24 @@ Classify issues as:
 CRITICAL REVIEW CHECKLIST (LANGUAGE-AGNOSTIC):
 - [ ] Security: no injection flaws, auth/permission bypasses, secret exposure, unsafe deserialization, or insecure defaults
 - [ ] Performance: no obvious regressions, unbounded growth, heavy work in hot paths, or N+1 style patterns
-- [ ] Correctness/reliability: no missing input validation (especially for external tool output or parsed JSON/YAML), unsafe error handling, resource leaks, or concurrency hazards (including file I/O and locking best practices like lock scope/byte ranges/seek position plus atomic append/locking for shared artifacts); test fixtures match implementation expectations
+- [ ] Correctness/reliability: no missing input validation (especially for external tool output or parsed JSON/YAML), unsafe error handling, resource leaks, or concurrency hazards (including file I/O and locking best practices like lock scope/byte ranges/seek position plus atomic append/locking for shared artifacts); test fixtures match implementation expectations; early returns or edge case handling include appropriate user-facing notifications (no silent failures)
 - [ ] Data serialization: structured outputs (JSON/YAML/etc.) use safe serializers (not string interpolation) and are normalized/validated against expected schema when appending or combining documents before persisting
 - [ ] Code quality: no unjustified suppression of errors or warnings; avoid terminating the process from library/orchestration code (return status instead); ensure CLI/entrypoint layers propagate internal failure codes to process exit status; return helper results instead of discarding them or duplicating return logic; prefer explicit guards/failures
-- [ ] Accuracy: docs/prompts/config instructions and examples match actual behavior and required fields (no false claims); user-facing logs/errors clearly explain limits, skips, or partial results; non-obvious platform-specific behavior, concurrency patterns, or API quirks have inline documentation
-- [ ] Testing: new utility classes, functions with platform-specific code paths, or complex logic have corresponding unit tests; tests assert observable behavior (no empty tests that only exercise code paths)
+- [ ] Accuracy: docs/prompts/config instructions and examples match actual behavior and required fields (no false claims); user-facing logs/errors clearly explain limits, skips, or partial results (especially for fallback paths and edge cases); non-obvious platform-specific behavior, concurrency patterns, or API quirks have inline documentation; platform-specific commands (e.g., in CI scripts) check for availability or provide fallbacks
+- [ ] Testing: new utility classes, functions with platform-specific code paths, or complex logic have corresponding unit tests; tests assert observable behavior (no empty tests that only exercise code paths); test logic actually exercises intended paths (not unreachable due to environment constraints); tests that mutate global state (e.g., process.env) properly restore it in finally/cleanup blocks
 {% if has_agents_file %}- [ ] Project policy: no violations of AGENTS.md
 {% endif -%}
 - [ ] No test configuration changes without explicit approval
 {% if has_agents_file %}
 
 If you find any policy violations from AGENTS.md, classify them as [CRITICAL].
+{% endif %}
+{% if languages %}
+
+LANGUAGE-SPECIFIC CHECKS:
+{% for lang in languages %}
+{% include "lang_checks/" ~ lang ~ ".j2" ignore missing %}
+{% endfor %}
 {% endif %}
 
 IMPORTANT:

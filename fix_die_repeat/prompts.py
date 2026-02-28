@@ -7,7 +7,7 @@ from jinja2 import Environment, PackageLoader, StrictUndefined, select_autoescap
 # Types that Jinja2 can render natively in our templates.
 # Using a union instead of Any enables type checking while maintaining
 # flexibility for future template additions.
-TemplateContextValue = str | int | bool | None
+TemplateContextValue = str | int | bool | list[str] | None
 
 
 @lru_cache(maxsize=1)

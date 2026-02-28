@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fix_die_repeat.config import Paths, Settings
+from fix_die_repeat.lang import resolve_languages
 from fix_die_repeat.prompts import render_prompt
 from fix_die_repeat.utils import (
     PROHIBITED_RUFF_RULES,
@@ -160,12 +161,14 @@ class ReviewManager:
         self,
         diff_size: int,
         run_pi_callback: Callable[..., tuple[int, str, str]],
+        changed_files: list[str] | None = None,
     ) -> None:
         """Run pi to review changes.
 
         Args:
             diff_size: Size of the diff in bytes
             run_pi_callback: Function to run pi (from PiRunner)
+            changed_files: List of changed files for language detection (optional)
 
         """
         self.logger.info("[Step 5] Running pi to review files...")
@@ -176,10 +179,16 @@ class ReviewManager:
         if self.paths.review_file.exists():
             pi_args.append(f"@{self.paths.review_file}")
 
+        # Detect languages for language-specific checks
+        if changed_files is None:
+            changed_files = get_changed_files(self.project_root)
+        languages = resolve_languages(changed_files, self.settings.languages)
+
         review_prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix=review_prompt_prefix,
-            has_agents_file=(self.project_root / "AGENTS.md").exists(),
+            has_agents_file=(self.paths.project_root / "AGENTS.md").exists(),
+            languages=sorted(languages),
         )
 
         returncode, _, _ = run_pi_callback(*pi_args, review_prompt)
@@ -309,7 +318,7 @@ class ReviewManager:
         self.logger.info("Generated review diff size: %s bytes", diff_size)
 
         # Run pi review
-        self.run_pi_review(diff_size, run_pi_callback)
+        self.run_pi_review(diff_size, run_pi_callback, changed_files)
 
         # Append review entry
         self.append_review_entry(iteration)

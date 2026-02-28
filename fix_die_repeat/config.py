@@ -82,6 +82,14 @@ class Settings(BaseSettings):
         description="Enable debug mode with timestamped session logs",
     )
 
+    # Language detection
+    languages: str | None = pyd.Field(
+        default=None,
+        alias="FDR_LANGUAGES",
+        description="Comma-separated language override (e.g., 'python,rust'). "
+        "Replaces auto-detection from diff.",
+    )
+
     # Notification settings
     ntfy_enabled: bool = pyd.Field(
         default=True,
