@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fix_die_repeat.config import Paths, Settings
-from fix_die_repeat.lang import resolve_languages
+from fix_die_repeat.lang import filter_supported_languages, resolve_languages
 from fix_die_repeat.prompts import render_prompt
 from fix_die_repeat.utils import (
     PROHIBITED_RUFF_RULES,
@@ -181,8 +181,9 @@ class ReviewManager:
 
         # Detect languages for language-specific checks
         if changed_files is None:
-            changed_files = get_changed_files(self.project_root)
+            changed_files = get_changed_files(self.paths.project_root)
         languages = resolve_languages(changed_files, self.settings.languages)
+        languages = filter_supported_languages(languages)
 
         review_prompt = render_prompt(
             "local_review.j2",

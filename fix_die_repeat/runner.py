@@ -16,7 +16,7 @@ from fix_die_repeat.config import (
 from fix_die_repeat.config import (
     get_introspection_file_path as _get_introspection_file_path,
 )
-from fix_die_repeat.lang import resolve_languages
+from fix_die_repeat.lang import filter_supported_languages, resolve_languages
 from fix_die_repeat.messages import (
     git_checkout_instructions,
     git_diff_instructions,
@@ -419,6 +419,7 @@ class PiRunner:
 
         # Detect languages for language-specific checks
         languages = resolve_languages(changed_files, self.settings.languages)
+        languages = filter_supported_languages(languages)
 
         prompt = render_prompt(
             "fix_checks.j2",
@@ -1738,6 +1739,7 @@ class PiRunner:
         # Detect languages for language-specific checks
         changed_files = get_changed_files(self.paths.project_root)
         languages = resolve_languages(changed_files, self.settings.languages)
+        languages = filter_supported_languages(languages)
 
         review_prompt = render_prompt(
             "local_review.j2",

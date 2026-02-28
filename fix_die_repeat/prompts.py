@@ -34,7 +34,7 @@ def render_prompt(template_name: str, **context: TemplateContextValue) -> str:
 
     Args:
         template_name: Template filename (e.g., "review_prompt.j2")
-        **context: Template variables (str, int, bool, or None)
+        **context: Template variables (str, int, bool, list[str], or None)
 
     Returns:
         Rendered prompt text

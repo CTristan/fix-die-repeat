@@ -2,7 +2,9 @@
 
 from fix_die_repeat.lang import (
     LANGUAGE_EXTENSIONS,
+    SUPPORTED_TEMPLATE_LANGUAGES,
     detect_languages_from_files,
+    filter_supported_languages,
     resolve_languages,
 )
 
@@ -160,3 +162,33 @@ class TestResolveLanguages:
         files = ["src/main.py"]
         result = resolve_languages(files, override="   ,  ,  ")
         assert result == {"python"}
+
+
+class TestFilterSupportedLanguages:
+    """Tests for filter_supported_languages."""
+
+    def test_all_supported_languages(self) -> None:
+        """All supported languages pass through unchanged."""
+        result = filter_supported_languages(SUPPORTED_TEMPLATE_LANGUAGES)
+        assert result == SUPPORTED_TEMPLATE_LANGUAGES
+
+    def test_empty_set(self) -> None:
+        """Empty input returns empty set."""
+        result = filter_supported_languages(set())
+        assert result == set()
+
+    def test_filters_unsupported_languages(self) -> None:
+        """Unsupported languages are removed."""
+        result = filter_supported_languages({"python", "rust", "unknownlang"})
+        assert result == {"python", "rust"}
+
+    def test_all_unsupported_languages(self) -> None:
+        """Set of only unsupported languages returns empty set."""
+        result = filter_supported_languages({"unknown1", "unknown2", "unknown3"})
+        assert result == set()
+
+    def test_mixed_supported_unsupported(self) -> None:
+        """Mix of supported and unsupported filters correctly."""
+        languages = {"python", "elixir", "unknown1", "javascript", "unknown2"}
+        result = filter_supported_languages(languages)
+        assert result == {"python", "elixir", "javascript"}
