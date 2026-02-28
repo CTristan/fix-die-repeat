@@ -109,7 +109,15 @@ OUTCOME_FIXED = "fixed"
 OUTCOME_WONT_FIX = "wont-fix"
 ALLOWED_OUTCOMES = {OUTCOME_FIXED, OUTCOME_WONT_FIX}
 
-THREAD_REQUIRED_FIELDS = ("id", "title", "category", "outcome", "summary", "relevance")
+THREAD_REQUIRED_FIELDS = (
+    "id",
+    "title",
+    "category",
+    "outcome",
+    "summary",
+    "relevance",
+    "lang_check_gap",
+)
 TOP_LEVEL_REQUIRED_FIELDS = {
     "date": (str,),
     "project": (str,),
