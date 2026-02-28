@@ -1,0 +1,7 @@
+C#:
+- [ ] No string concatenation for SQL — use parameterized queries or ORMs
+- [ ] `IDisposable` resources are wrapped in `using` statements or blocks
+- [ ] Async methods use `await` — no `.Result` or `.Wait()` (deadlock risk)
+- [ ] Nullable reference types: no suppression operator (`!`) without justification
+- [ ] No deserialization of untrusted data with `BinaryFormatter` (RCE vector)
+- [ ] Exception handling catches specific types — no bare `catch (Exception)`

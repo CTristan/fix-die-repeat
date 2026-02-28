@@ -1,0 +1,7 @@
+Elixir/Phoenix:
+- [ ] No `Code.eval_string()` or `:erlang.binary_to_term()` with untrusted input
+- [ ] Ecto queries use parameterized fragments — no string interpolation in SQL
+- [ ] Phoenix controllers validate and sanitize all user input via changesets
+- [ ] GenServer `handle_call`/`handle_cast` includes timeout or handles unexpected messages
+- [ ] No sensitive data in Logger output (tokens, passwords, PII)
+- [ ] LiveView assigns are minimized — no large data structures pushed to the socket

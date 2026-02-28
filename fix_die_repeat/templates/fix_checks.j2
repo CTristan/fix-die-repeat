@@ -18,10 +18,14 @@ I have also attached the currently changed files for context.
 {% if large_file_warning %}
 {{ large_file_warning }}
 {% endif %}
+{% if languages %}
+The changed files include {{ languages | join(", ") }} code. Use idiomatic patterns and best practices for {{ languages | join("/") }} when applying fixes.
+{% endif %}
 
 Your goal is to FIX the errors. Follow this plan:
 1. ANALYZE the log and identify the root cause.
 2. PLAN your fix.
 3. When touching structured data or external tool output, use safe parsers/serializers (avoid string interpolation), validate required fields/schema before use, and use atomic/locked writes when appending to shared artifacts.
-4. APPLY the fix using 'edit'.
-5. VERIFY with a quick targeted check (e.g., compile the affected file, run the specific failing test). You MAY run the checks script (e.g., ./checks.sh or the command in `{{ check_cmd }}`) using the 'bash' tool to verify your fix. Prefer targeted invocations over running the full CI pipeline.
+4. When returning early or handling edge cases, ensure appropriate user-facing notifications (log/debug/warn) are provided—avoid silent failures without explanation.
+5. APPLY the fix using 'edit'.
+6. VERIFY with a quick targeted check (e.g., compile the affected file, run the specific failing test). You MAY run the checks script (e.g., ./checks.sh or the command in `{{ check_cmd }}`) using the 'bash' tool to verify your fix. Prefer targeted invocations over running the full CI pipeline.

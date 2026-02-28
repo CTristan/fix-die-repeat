@@ -5,6 +5,10 @@ and the diff of changes made.
 Your task is to produce a YAML document that categorizes each PR thread for future prompt improvement.
 This data will be used later to identify gaps in the review and fix prompt templates.
 
+For each thread, also assess whether the issue is language-specific. If so, check whether
+the current language-specific checklist (lang_checks/*.j2) would catch it. If not, suggest
+a concrete checklist item that could be added to the appropriate language partial.
+
 For each thread, provide:
 - id: The exact GraphQL thread ID (copy from the input data)
 - title: A concise, descriptive title (max 10 words)
@@ -13,6 +17,7 @@ For each thread, provide:
 - summary: 1-2 sentences describing what the reviewer flagged and what the agent did
 - reason: (only for wont-fix) Why the agent declined to fix
 - relevance: 1-2 sentences assessing whether this type of issue could be caught earlier by improved review/fix prompt templates
+- lang_check_gap: If this issue is language-specific, would an existing lang_checks partial have caught it? If not, suggest a specific checklist item to add. Write "n/a" if the issue is language-agnostic.
 
 Output ONLY valid YAML matching this structure (no markdown fencing, no extra text):
 
@@ -32,5 +37,7 @@ threads:
       <reason for wont-fix (omit for fixed)>
     relevance: >
       <relevance assessment>
+    lang_check_gap: >
+      <language-specific gap analysis or n/a>
 
 Use the 'write' tool to save the YAML output to '{{ output_path }}'.

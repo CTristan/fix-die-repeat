@@ -16,6 +16,7 @@ from fix_die_repeat.config import (
 from fix_die_repeat.config import (
     get_introspection_file_path as _get_introspection_file_path,
 )
+from fix_die_repeat.lang import filter_supported_languages, resolve_languages
 from fix_die_repeat.messages import (
     git_checkout_instructions,
     git_diff_instructions,
@@ -416,6 +417,10 @@ class PiRunner:
         if context_mode == "push":
             pi_args.extend(f"@{filepath}" for filepath in changed_files)
 
+        # Detect languages for language-specific checks
+        languages = resolve_languages(changed_files, self.settings.languages)
+        languages = filter_supported_languages(languages)
+
         prompt = render_prompt(
             "fix_checks.j2",
             check_cmd=self.settings.check_cmd,
@@ -425,6 +430,7 @@ class PiRunner:
             context_mode=context_mode,
             large_context_list=large_context_list,
             large_file_warning=large_file_warning,
+            languages=sorted(languages),
         )
 
         self.logger.info("Running pi to fix errors (attempt %s)...", fix_attempt)
@@ -1730,10 +1736,16 @@ class PiRunner:
         if self.paths.review_file.exists():
             pi_args.append(f"@{self.paths.review_file}")
 
+        # Detect languages for language-specific checks
+        changed_files = get_changed_files(self.paths.project_root)
+        languages = resolve_languages(changed_files, self.settings.languages)
+        languages = filter_supported_languages(languages)
+
         review_prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix=review_prompt_prefix,
             has_agents_file=(self.paths.project_root / "AGENTS.md").exists(),
+            languages=sorted(languages),
         )
 
         returncode, _, _ = run_pi_callback(*pi_args, review_prompt)

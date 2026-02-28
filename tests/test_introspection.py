@@ -351,6 +351,7 @@ class TestIntrospectionPayloadValidation:
                     "outcome": "fixed",
                     "summary": "Fixed the issue",
                     "relevance": "high",
+                    "lang_check_gap": "No language-specific checks needed",
                 }
             ],
         }

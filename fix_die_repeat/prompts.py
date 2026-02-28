@@ -7,7 +7,7 @@ from jinja2 import Environment, PackageLoader, StrictUndefined, select_autoescap
 # Types that Jinja2 can render natively in our templates.
 # Using a union instead of Any enables type checking while maintaining
 # flexibility for future template additions.
-TemplateContextValue = str | int | bool | None
+TemplateContextValue = str | int | bool | list[str] | None
 
 
 @lru_cache(maxsize=1)
@@ -34,7 +34,7 @@ def render_prompt(template_name: str, **context: TemplateContextValue) -> str:
 
     Args:
         template_name: Template filename (e.g., "review_prompt.j2")
-        **context: Template variables (str, int, bool, or None)
+        **context: Template variables (str, int, bool, list[str], or None)
 
     Returns:
         Rendered prompt text
