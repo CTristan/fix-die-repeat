@@ -5,7 +5,6 @@ import hashlib
 import importlib.metadata
 import json
 import logging
-import re
 import shlex
 import subprocess
 import sys
@@ -24,6 +23,10 @@ LOGGER_NAME = "fix_die_repeat"
 
 # Prohibited ruff rules that must NEVER be ignored (see AGENTS.md)
 PROHIBITED_RUFF_RULES = {"C901", "PLR0913", "PLR2004", "PLC0415"}
+
+# Exit codes
+EXIT_COMMAND_NOT_FOUND = 127
+EXIT_TIMEOUT = 124
 
 
 class RuffConfigParseError(Exception):
@@ -64,15 +67,13 @@ def is_running_in_dev_mode() -> bool:
 
     # Check for direct_url.json which indicates editable install
     try:
-        dist_path = getattr(dist, "_path", None)
-        if dist_path:
-            direct_url_file = Path(dist_path) / "direct_url.json"
-            if direct_url_file.exists():
-                data = json.loads(direct_url_file.read_text())
-                # Editable installs have "dir_info": {"editable": true}
-                if data.get("dir_info", {}).get("editable") is True:
-                    return True
-    except (AttributeError, FileNotFoundError, json.JSONDecodeError, OSError):
+        content = dist.read_text("direct_url.json")
+        if content:
+            data = json.loads(content)
+            # Editable installs have "dir_info": {"editable": true}
+            if data.get("dir_info", {}).get("editable") is True:
+                return True
+    except (json.JSONDecodeError, OSError):
         pass
 
     # Fallback: check if __file__ contains "site-packages"
@@ -169,6 +170,7 @@ def run_command(
     *,
     capture_output: bool = True,
     check: bool = False,
+    timeout: float | None = None,
 ) -> tuple[int, str, str]:
     """Run a command without invoking a shell.
 
@@ -181,6 +183,7 @@ def run_command(
         cwd: Working directory
         capture_output: Capture stdout and stderr
         check: Raise exception on non-zero exit code
+        timeout: Command timeout in seconds
 
     Returns:
         Tuple of (exit_code, stdout, stderr)
@@ -195,15 +198,23 @@ def run_command(
         return (2, "", "No command provided")
 
     try:
-        result = subprocess.run(  # noqa: S603  # args are tokenized argv with shell disabled.
+        result = subprocess.run(
             args,
             cwd=cwd,
             capture_output=capture_output,
             text=True,
             check=check,
+            timeout=timeout,
         )
     except FileNotFoundError:
-        return (127, "", f"Command not found: {args[0]}")
+        return (EXIT_COMMAND_NOT_FOUND, "", f"Command not found: {args[0]}")
+    except subprocess.TimeoutExpired as exc:
+        # exc.stdout is bytes | str | None (exception type is shared)
+        if isinstance(exc.stdout, bytes):
+            stdout_str = exc.stdout.decode("utf-8")
+        else:
+            stdout_str = exc.stdout or ""
+        return (EXIT_TIMEOUT, stdout_str, f"Command timed out after {timeout}s")
     else:
         return (result.returncode, result.stdout or "", result.stderr or "")
 
@@ -421,79 +432,6 @@ def play_completion_sound() -> None:
     # Last resort
     sys.stdout.write("\a")
     sys.stdout.flush()
-
-
-def sanitize_ntfy_topic(text: str) -> str:
-    """Sanitize text for ntfy topic name.
-
-    Args:
-        text: Text to sanitize
-
-    Returns:
-        Sanitized topic name
-
-    """
-    # ntfy allows alphanumeric, hyphen, underscore, and dot
-    return re.sub(r"[^a-z0-9._-]", "-", text.lower()).strip("-")
-
-
-def send_ntfy_notification(
-    exit_code: int,
-    duration_str: str,
-    repo_name: str,
-    ntfy_url: str,
-    logger: logging.Logger | None = None,
-) -> None:
-    """Send ntfy notification (best-effort).
-
-    Args:
-        exit_code: Process exit code
-        duration_str: Duration string
-        repo_name: Repository name
-        ntfy_url: ntfy server URL
-        logger: Logger instance for debug output
-
-    """
-    # Check if curl is available
-    returncode, _, _ = run_command(["which", "curl"], check=False)
-    if returncode != 0:
-        return
-
-    topic = sanitize_ntfy_topic(repo_name)
-
-    if exit_code == 0:
-        title = "✓ fix-die-repeat completed"
-        tags = "white_check_mark,done"
-        priority = "default"
-    else:
-        title = "✗ fix-die-repeat failed"
-        tags = "warning,x"
-        priority = "high"
-
-    message = f"{title} ({duration_str}) in {topic}"
-
-    # Send notification (ignore errors)
-    run_command(
-        [
-            "curl",
-            "-sS",
-            "-X",
-            "POST",
-            f"{ntfy_url}/{topic}",
-            "-H",
-            f"Title: {title}",
-            "-H",
-            f"Tags: {tags}",
-            "-H",
-            f"Priority: {priority}",
-            "-d",
-            message,
-        ],
-        check=False,
-    )
-
-    if logger:
-        logger.debug("Sent ntfy notification to %s/%s", ntfy_url, topic)
 
 
 def find_prohibited_ruff_ignores(

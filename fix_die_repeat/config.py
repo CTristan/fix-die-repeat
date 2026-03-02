@@ -103,6 +103,37 @@ class Settings(BaseSettings):
         description="ntfy server URL",
     )
 
+    # Zulip notification settings
+    zulip_enabled: bool = pyd.Field(
+        default=False,
+        alias="FDR_ZULIP_ENABLED",
+        description="Enable Zulip notifications",
+    )
+
+    zulip_server_url: str | None = pyd.Field(
+        default=None,
+        alias="FDR_ZULIP_SERVER_URL",
+        description="Zulip server base URL",
+    )
+
+    zulip_bot_email: str | None = pyd.Field(
+        default=None,
+        alias="FDR_ZULIP_BOT_EMAIL",
+        description="Zulip bot email for authentication",
+    )
+
+    zulip_bot_api_key: str | None = pyd.Field(
+        default=None,
+        alias="FDR_ZULIP_BOT_API_KEY",
+        description="Zulip bot API key for authentication",
+    )
+
+    zulip_stream: str = pyd.Field(
+        default="fix-die-repeat",
+        alias="FDR_ZULIP_STREAM",
+        description="Zulip stream name",
+    )
+
     # Thresholds
     auto_attach_threshold: int = pyd.Field(
         default=200 * 1024,

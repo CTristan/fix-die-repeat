@@ -154,17 +154,54 @@ Creates timestamped session logs in `.fix-die-repeat/` and enables verbose conso
 
 ## Notifications (Optional)
 
-Notifications are optional. If you have an [ntfy](https://ntfy.sh/) server running, fix-die-repeat can notify you when runs complete. If no server is reachable, the tool silently continues — no setup is required to use fix-die-repeat without notifications.
+Notifications are optional. fix-die-repeat can notify you when runs complete or fail, and when oscillation is detected. If a notification backend is not configured or reachable, the tool silently continues — no setup is required to use fix-die-repeat without notifications.
 
-The notification topic is derived from your repository name.
+### ntfy
+
+If you have an [ntfy](https://ntfy.sh/) server running, fix-die-repeat can send notifications when runs complete. The notification topic is derived from your repository name.
 
 ```bash
-# Disable notifications explicitly
+# Disable ntfy notifications explicitly
 export FDR_NTFY_ENABLED=0
 
 # Point to your ntfy server (default: http://localhost:2586)
 export FDR_NTFY_URL="http://your-server:2586"
 ```
+
+### Zulip
+
+fix-die-repeat can also send notifications to [Zulip](https://zulip.com/) chats. Notifications include repository name, branch, duration, and iteration count.
+
+```bash
+# Enable Zulip notifications
+export FDR_ZULIP_ENABLED=1
+
+# Zulip server base URL (required if enabled)
+export FDR_ZULIP_SERVER_URL="https://your-zulip-server.example.com"
+
+# Zulip bot email for authentication (required if enabled)
+export FDR_ZULIP_BOT_EMAIL="your-bot@example.com"
+
+# Zulip bot API key for authentication (required if enabled)
+export FDR_ZULIP_BOT_API_KEY="your-api-key-here"
+
+# Zulip stream name (optional, defaults to "fix-die-repeat")
+export FDR_ZULIP_STREAM="fix-die-repeat"
+```
+
+**Note**: The Zulip stream must exist or the bot must have permission to create it.
+
+### Notification Events
+
+fix-die-repeat sends notifications for these events:
+
+| Event | Description |
+|-------|-------------|
+| **Run completed** | All checks pass and no review issues found |
+| **Run failed** | Max iterations exceeded or unexpected error |
+| **Oscillation detected** | Same check output repeats across iterations |
+
+**Best-effort behavior**: Notification failures never block or crash the main fix loop. If a backend fails, it's logged and the tool continues.
 
 ---
 

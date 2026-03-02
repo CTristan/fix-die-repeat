@@ -1,5 +1,6 @@
 """Command-line interface for fix-die-repeat."""
 
+import logging
 import traceback
 
 import click
@@ -15,6 +16,10 @@ from fix_die_repeat.runner import PiRunner
 from fix_die_repeat.utils import is_running_in_dev_mode
 
 console = Console()
+logger = logging.getLogger(__name__)
+
+# Exit codes
+EXIT_INTERRUPTED = 130
 
 
 @click.command()
@@ -175,8 +180,9 @@ def _run_main_with_error_handling(
         return 1
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted by user[/yellow]")
-        return 130
+        return EXIT_INTERRUPTED
     except Exception as e:
+        logger.exception("Unexpected error in CLI entrypoint")
         console.print(f"[red]Unexpected error: {e}[/red]")
         if debug:
             console.print(traceback.format_exc())

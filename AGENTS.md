@@ -123,6 +123,12 @@ fix-die-repeat/
 │   ├── detection.py       # Check command resolution and auto-detection
 │   ├── lang.py           # Language detection from file extensions
 │   ├── messages.py        # User-facing message generators
+│   ├── notifications/     # Notification system (extensible backends)
+│   │   ├── __init__.py  # Exports NotificationManager, NotificationEvent
+│   │   ├── base.py      # EventType enum, NotificationEvent, Notifier protocol
+│   │   ├── manager.py   # NotificationManager (dispatches to all backends)
+│   │   ├── ntfy.py      # NtfyNotifier implementation
+│   │   └── zulip.py     # ZulipNotifier implementation
 │   ├── prompts.py         # Jinja template rendering helpers
 │   ├── runner.py          # Core PiRunner class - main loop
 │   ├── utils.py           # Utility functions (logging, git, file ops)
@@ -139,6 +145,7 @@ fix-die-repeat/
 │   ├── test_detection.py  # Check command resolution tests
 │   ├── test_lang.py      # Language detection tests
 │   ├── test_messages.py   # Message generator tests
+│   ├── test_notifications.py  # Notification system tests
 │   ├── test_prompts.py   # Prompt rendering tests
 │   └── test_utils.py     # Utility function tests
 ├── pyproject.toml          # uv configuration, dependencies, tooling
@@ -195,6 +202,11 @@ Configuration with environment variable support via Pydantic.
 - `pi_sequential_delay_seconds`: `1`
 - `ntfy_enabled`: `True`
 - `ntfy_url`: `"http://localhost:2586"`
+- `zulip_enabled`: `False`
+- `zulip_server_url`: `None`
+- `zulip_bot_email`: `None`
+- `zulip_bot_api_key`: `None`
+- `zulip_stream`: `"fix-die-repeat"`
 
 **Optional/Null Defaults**:
 - `model`: `None`
@@ -473,6 +485,41 @@ Analyzes what PR reviewers caught, how the agent responded (fixed vs. won't fix)
 - Main loop result is preserved
 
 **Pi Skill**: `.pi/skills/prompt-introspect/`
+
+### 9. Notification System
+
+Extensible notification architecture supporting multiple backends (ntfy, Zulip) with best-effort delivery. Uses a strategy pattern with a `Notifier` protocol, allowing future backends (Slack, etc.) to be added without changing the core runner loop.
+
+**Why**: Users want to be notified when runs complete, fail, or when oscillation is detected. Supporting multiple backends provides flexibility for different team communication preferences.
+
+**Notification Events**:
+- `RUN_COMPLETED`: All checks pass and no review issues found
+- `RUN_FAILED`: Max iterations exceeded or unexpected error
+- `OSCILLATION_DETECTED`: Same check output repeats across iterations
+
+**Architecture**:
+- `NotificationEvent` dataclass: Holds event type, exit code, duration, repo name, branch, iteration count, and message
+- `Notifier` protocol: Defines interface for notification backends (`send()`, `is_enabled()`)
+- `NotificationManager`: Dispatches events to all enabled backends, catching and logging exceptions per-backend
+- `NtfyNotifier`: Existing ntfy backend implementation (refactored from `utils.py`)
+- `ZulipNotifier`: New Zulip backend implementation using `urllib.request` (no new dependencies)
+
+**Best-Effort Behavior**:
+- Notification failures never block or crash the main fix loop
+- Each backend's exceptions are caught and logged independently
+- Failed backends don't prevent other backends from sending
+
+**Configuration**:
+- Each backend has its own `FDR_*` environment variables
+- Multiple backends can be enabled simultaneously
+- Zulip stream/topic are configurable via environment variables
+
+**Adding a New Backend**:
+1. Create a new file in `notifications/` (e.g., `slack.py`)
+2. Implement `Notifier` protocol with `send()` and `is_enabled()` methods
+3. Add backend-specific settings to `Settings` class in `config.py`
+4. Register the notifier in `PiRunner._init_notification_manager()`
+No changes to `NotificationManager`, runner loop, or existing backends are required.
 - Reads global introspection file
 - Filters to `status: pending` entries
 - Analyzes patterns across projects

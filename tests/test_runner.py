@@ -1,12 +1,14 @@
 """Tests for runner module."""
 
 import sys
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from fix_die_repeat import runner_introspection as runner_introspection_module
+from fix_die_repeat.notifications import EventType
 from fix_die_repeat.runner import PiRunner
 from fix_die_repeat.runner_introspection import (  # Testing private class is intentional
     _FileLock,
@@ -229,7 +231,12 @@ class TestRunFixAttempt:
         runner = PiRunner.__new__(PiRunner)
         runner.settings = settings
         runner.paths = paths
+        runner.project_root = paths.project_root
         runner.iteration = 1
+        runner.script_start_time = time.time()
+        runner.repo_name = paths.project_root.name  # type: ignore[attr-defined]
+        runner.branch_name = "main"  # type: ignore[attr-defined]
+        runner.notification_manager = MagicMock()
         runner.logger = MagicMock()
         runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
@@ -1471,6 +1478,7 @@ class TestCompleteSuccess:
         """Test completing the run successfully."""
         settings = MagicMock()
         settings.ntfy_enabled = False
+        settings.max_iters = 10
         paths = MagicMock()
         paths.fdr_dir = tmp_path
         paths.review_file = tmp_path / "review.md"
@@ -1482,6 +1490,10 @@ class TestCompleteSuccess:
         runner = PiRunner.__new__(PiRunner)
         runner.settings = settings
         runner.paths = paths
+        runner.project_root = paths.project_root
+        runner.repo_name = paths.project_root.name  # type: ignore[attr-defined]
+        runner.branch_name = "main"  # type: ignore[attr-defined]
+        runner.notification_manager = MagicMock()
         runner.iteration = 1
         runner.script_start_time = 0
         runner.session_log = tmp_path / "session.log"
@@ -1494,8 +1506,10 @@ class TestCompleteSuccess:
         with (
             patch("fix_die_repeat.runner.play_completion_sound"),
             patch("fix_die_repeat.runner.format_duration") as mock_format,
+            patch("fix_die_repeat.runner._detect_branch_name") as mock_branch,
         ):
             mock_format.return_value = "0s"
+            mock_branch.return_value = "main"
             result = runner.complete_success()
 
             # Check that the method returns 0
@@ -1503,12 +1517,15 @@ class TestCompleteSuccess:
             # Check that temporary files were cleaned up
             assert not paths.review_current_file.exists()
             assert not paths.start_sha_file.exists()
+            # Verify notification was sent
+            runner.notification_manager.notify.assert_called_once()
 
-    def test_complete_success_with_ntfy(self, tmp_path: Path) -> None:
-        """Test completing the run with ntfy notification."""
+    def test_complete_success_with_notifications(self, tmp_path: Path) -> None:
+        """Test completing the run with notifications."""
         settings = MagicMock()
         settings.ntfy_enabled = True
         settings.ntfy_url = "http://localhost:2586"
+        settings.max_iters = 10
         paths = MagicMock()
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
@@ -1520,6 +1537,10 @@ class TestCompleteSuccess:
         runner = PiRunner.__new__(PiRunner)
         runner.settings = settings
         runner.paths = paths
+        runner.project_root = paths.project_root
+        runner.repo_name = paths.project_root.name  # type: ignore[attr-defined]
+        runner.branch_name = "main"  # type: ignore[attr-defined]
+        runner.notification_manager = MagicMock()
         runner.iteration = 1
         runner.script_start_time = 330  # 5 min 30 sec
         runner.session_log = tmp_path / "session.log"
@@ -1531,22 +1552,21 @@ class TestCompleteSuccess:
 
         with (
             patch("fix_die_repeat.runner.play_completion_sound"),
-            patch("fix_die_repeat.runner.send_ntfy_notification") as mock_ntfy,
             patch("fix_die_repeat.runner.format_duration") as mock_format,
+            patch("fix_die_repeat.runner._detect_branch_name") as mock_branch,
         ):
             mock_format.return_value = "5m 30s"
+            mock_branch.return_value = "main"
             result = runner.complete_success()
 
             # Check that the method returns 0
             assert result == 0
-            # Check that ntfy notification was sent with correct parameters
-            mock_ntfy.assert_called_once_with(
-                exit_code=0,
-                duration_str="5m 30s",
-                repo_name=tmp_path.name,
-                ntfy_url="http://localhost:2586",
-                logger=runner.logger,
-            )
+            # Verify notification was sent with correct parameters
+            runner.notification_manager.notify.assert_called_once()
+            event = runner.notification_manager.notify.call_args[0][0]
+            assert event.event_type == EventType.RUN_COMPLETED
+            assert event.duration_str == "5m 30s"
+            assert event.repo_name == tmp_path.name
 
 
 class TestFileLock:

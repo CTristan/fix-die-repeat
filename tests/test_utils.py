@@ -24,8 +24,6 @@ from fix_die_repeat.utils import (
     is_running_in_dev_mode,
     play_completion_sound,
     run_command,
-    sanitize_ntfy_topic,
-    send_ntfy_notification,
 )
 
 # Constants for utils test values
@@ -84,10 +82,11 @@ class TestIsRunningInDevMode:
         dist_path.mkdir()
 
         direct_url_file = dist_path / "direct_url.json"
-        direct_url_file.write_text('{"dir_info": {"editable": true}, "url_info": {}}')
+        content = '{"dir_info": {"editable": true}, "url_info": {}}'
+        direct_url_file.write_text(content)
 
         mock_dist = MagicMock()
-        mock_dist._path = str(dist_path)  # noqa: SLF001
+        mock_dist.read_text.return_value = content
         mock_distribution.return_value = mock_dist
 
         result = is_running_in_dev_mode()
@@ -104,10 +103,11 @@ class TestIsRunningInDevMode:
 
         # direct_url.json doesn't exist or has editable: false
         direct_url_file = dist_path / "direct_url.json"
-        direct_url_file.write_text('{"dir_info": {"editable": false}, "url_info": {}}')
+        content = '{"dir_info": {"editable": false}, "url_info": {}}'
+        direct_url_file.write_text(content)
 
         mock_dist = MagicMock()
-        mock_dist._path = str(dist_path)  # noqa: SLF001
+        mock_dist.read_text.return_value = content
         mock_distribution.return_value = mock_dist
 
         result = is_running_in_dev_mode()
@@ -206,24 +206,6 @@ class TestDetectLargeFiles:
         assert "CRITICAL WARNING" in warning
         assert "large1.py (2200 lines)" in warning
         assert "large2.py (3000 lines)" in warning
-
-
-class TestSanitizeNtfyTopic:
-    """Tests for sanitize_ntfy_topic function."""
-
-    def test_alphanumeric(self) -> None:
-        """Test sanitizing alphanumeric string."""
-        assert sanitize_ntfy_topic("TestRepo123") == "testrepo123"
-
-    def test_special_chars(self) -> None:
-        """Test sanitizing string with special characters."""
-        assert sanitize_ntfy_topic("test-repo_name") == "test-repo_name"
-        assert sanitize_ntfy_topic("test.repo") == "test.repo"
-
-    def test_spaces_and_specials(self) -> None:
-        """Test sanitizing string with spaces and other specials."""
-        assert sanitize_ntfy_topic("My Test Repo!") == "my-test-repo"
-        assert sanitize_ntfy_topic("test@repo#123") == "test-repo-123"
 
 
 class TestConfigureLogger:
@@ -427,70 +409,6 @@ class TestPlayCompletionSound:
 
         # Should not raise any exceptions (best-effort function)
         play_completion_sound()
-
-
-class TestSendNtfyNotification:
-    """Tests for send_ntfy_notification function."""
-
-    def test_send_ntfy_success(self, tmp_path: Path) -> None:
-        """Test sending notification successfully."""
-        log_file = tmp_path / "test.log"
-        logger = configure_logger(fdr_log=log_file, session_log=None, debug=False)
-
-        # Mock curl to succeed
-        with patch("fix_die_repeat.utils.run_command") as mock_run:
-            mock_run.return_value = (0, "", "")
-
-            send_ntfy_notification(
-                exit_code=0,
-                duration_str="5m 30s",
-                repo_name="test-repo",
-                ntfy_url="http://localhost:2586",
-                logger=logger,
-            )
-
-            # Check that curl was called (at least for the 'which curl' check)
-            assert mock_run.called
-
-    def test_send_ntfy_curl_not_available(self, tmp_path: Path) -> None:
-        """Test notification when curl is not available."""
-        log_file = tmp_path / "test.log"
-        logger = configure_logger(fdr_log=log_file, session_log=None, debug=False)
-
-        # Mock curl check to fail
-        with patch("fix_die_repeat.utils.run_command") as mock_run:
-            mock_run.return_value = (127, "", "")
-
-            send_ntfy_notification(
-                exit_code=0,
-                duration_str="5m 30s",
-                repo_name="test-repo",
-                ntfy_url="http://localhost:2586",
-                logger=logger,
-            )
-
-            # Should return early without trying to send
-            # Only the 'which curl' call
-            assert mock_run.call_count == 1
-
-    def test_send_ntfy_failure_exit_code(self, tmp_path: Path) -> None:
-        """Test notification for failed exit code."""
-        log_file = tmp_path / "test.log"
-        logger = configure_logger(fdr_log=log_file, session_log=None, debug=False)
-
-        with patch("fix_die_repeat.utils.run_command") as mock_run:
-            mock_run.return_value = (0, "", "")
-
-            send_ntfy_notification(
-                exit_code=1,
-                duration_str="1m 0s",
-                repo_name="test-repo",
-                ntfy_url="http://localhost:2586",
-                logger=logger,
-            )
-
-            # Check that curl was called
-            assert mock_run.called
 
 
 class TestCollectGitFiles:

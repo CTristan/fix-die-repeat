@@ -63,6 +63,11 @@ class TestSettings:
         assert not settings.debug
         assert settings.ntfy_enabled
         assert settings.ntfy_url == "http://localhost:2586"
+        assert not settings.zulip_enabled
+        assert settings.zulip_server_url is None
+        assert settings.zulip_bot_email is None
+        assert settings.zulip_bot_api_key is None
+        assert settings.zulip_stream == "fix-die-repeat"
 
     def test_settings_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test settings from environment variables."""
@@ -74,6 +79,21 @@ class TestSettings:
         assert settings.check_cmd == "make test"
         assert settings.max_iters == TEST_MAX_ITERS
         assert settings.model == "anthropic/claude-sonnet-4-5"
+
+    def test_zulip_settings_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that Zulip settings can be set via environment variables."""
+        monkeypatch.setenv("FDR_ZULIP_ENABLED", "1")
+        monkeypatch.setenv("FDR_ZULIP_SERVER_URL", "https://zulip.example.com")
+        monkeypatch.setenv("FDR_ZULIP_BOT_EMAIL", "bot@example.com")
+        monkeypatch.setenv("FDR_ZULIP_BOT_API_KEY", "test-api-key")
+        monkeypatch.setenv("FDR_ZULIP_STREAM", "my-stream")
+
+        settings = Settings()
+        assert settings.zulip_enabled
+        assert settings.zulip_server_url == "https://zulip.example.com"
+        assert settings.zulip_bot_email == "bot@example.com"
+        assert settings.zulip_bot_api_key == "test-api-key"
+        assert settings.zulip_stream == "my-stream"
 
     def test_languages_default_none(self) -> None:
         """Test that languages defaults to None."""

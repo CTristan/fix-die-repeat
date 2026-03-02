@@ -23,6 +23,21 @@ from fix_die_repeat.messages import (
     model_recommendations_full,
     oscillation_warning,
 )
+from fix_die_repeat.notifications import (
+    EventType,
+    NotificationEvent,
+    NotificationManager,
+    Notifier,
+    NtfyNotifier,
+    ZulipConfig,
+    ZulipNotifier,
+)
+from fix_die_repeat.notifications import (
+    detect_branch_name as _detect_branch_name,
+)
+from fix_die_repeat.notifications import (
+    detect_repo_name as _detect_repo_name,
+)
 from fix_die_repeat.prompts import render_prompt
 from fix_die_repeat.runner_artifacts import ArtifactManager
 from fix_die_repeat.runner_introspection import (
@@ -42,7 +57,6 @@ from fix_die_repeat.utils import (
     get_git_revision_hash,
     play_completion_sound,
     run_command,
-    send_ntfy_notification,
 )
 
 
@@ -96,6 +110,43 @@ class PiRunner:
         self.introspection_manager = IntrospectionManager(
             self.settings, self.paths, self.project_root, self.logger
         )
+
+        # Initialize notification manager
+        self._init_notification_manager()
+
+    def _init_notification_manager(self) -> None:
+        """Initialize the notification manager with configured backends."""
+        notifiers: list[Notifier] = []
+
+        # Detect repo and branch once for consistency across backends and reuse in PiRunner
+        self.repo_name = _detect_repo_name(self.project_root)
+        self.branch_name = _detect_branch_name(self.project_root)
+
+        # Add ntfy notifier if enabled
+        if self.settings.ntfy_enabled:
+            ntfy_notifier = NtfyNotifier(
+                enabled=self.settings.ntfy_enabled,
+                url=self.settings.ntfy_url,
+                logger=self.logger,
+            )
+            notifiers.append(ntfy_notifier)
+
+        # Add Zulip notifier if enabled and configured
+        if self.settings.zulip_enabled:
+            zulip_config = ZulipConfig(
+                enabled=self.settings.zulip_enabled,
+                server_url=self.settings.zulip_server_url,
+                bot_email=self.settings.zulip_bot_email,
+                bot_api_key=self.settings.zulip_bot_api_key,
+                stream=self.settings.zulip_stream,
+            )
+            zulip_notifier = ZulipNotifier(
+                config=zulip_config,
+                logger=self.logger,
+            )
+            notifiers.append(zulip_notifier)
+
+        self.notification_manager = NotificationManager(notifiers, self.logger)
 
     def _get_artifact_manager(self) -> ArtifactManager | None:
         """Return the artifact manager when initialized."""
@@ -390,6 +441,22 @@ class PiRunner:
             oscillation_warning = artifact_manager.check_oscillation(self.iteration)
         else:
             oscillation_warning = self.check_oscillation()
+
+        # Send oscillation notification
+        if oscillation_warning:
+            end_time = int(time.time())
+            duration = int(end_time - self.script_start_time)
+            event = NotificationEvent(
+                event_type=EventType.OSCILLATION_DETECTED,
+                exit_code=0,
+                duration_str=format_duration(duration),
+                repo_name=self.repo_name,
+                branch=self.branch_name,
+                iteration=self.iteration,
+                max_iters=self.settings.max_iters,
+                message=oscillation_warning,
+            )
+            self.notification_manager.notify(event)
 
         self.logger.info(
             "[Step 2A] Checks failed (fix attempt %s/%s). Running pi to fix errors...",
@@ -1335,6 +1402,25 @@ class PiRunner:
             self.logger.error(git_diff_instructions(self.start_sha))
             self.logger.error(git_checkout_instructions(self.start_sha))
         self._run_post_run_introspection()
+
+        # Send notification
+        end_time = int(time.time())
+        duration = int(end_time - self.script_start_time)
+        event = NotificationEvent(
+            event_type=EventType.RUN_FAILED,
+            exit_code=1,
+            duration_str=format_duration(duration),
+            repo_name=self.repo_name,
+            branch=self.branch_name,
+            iteration=self.iteration,
+            max_iters=self.settings.max_iters,
+            message=(
+                f"fix-die-repeat failed after {self.iteration}/{self.settings.max_iters} iterations"
+            ),
+        )
+        self.notification_manager.notify(event)
+        self.notification_manager.wait()
+
         return 1
 
     def _handle_fix_loop_failure(self, exit_code: int) -> int:
@@ -1348,6 +1434,23 @@ class PiRunner:
 
         """
         self._run_post_run_introspection()
+
+        # Send notification
+        end_time = int(time.time())
+        duration = int(end_time - self.script_start_time)
+        event = NotificationEvent(
+            event_type=EventType.RUN_FAILED,
+            exit_code=exit_code,
+            duration_str=format_duration(duration),
+            repo_name=self.repo_name,
+            branch=self.branch_name,
+            iteration=self.iteration,
+            max_iters=self.settings.max_iters,
+            message=f"fix-die-repeat failed with exit code {exit_code}",
+        )
+        self.notification_manager.notify(event)
+        self.notification_manager.wait()
+
         return exit_code
 
     def complete_success(self) -> int:
@@ -1377,14 +1480,18 @@ class PiRunner:
         play_completion_sound()
 
         # Send notification
-        if self.settings.ntfy_enabled:
-            send_ntfy_notification(
-                exit_code=0,
-                duration_str=format_duration(duration),
-                repo_name=self.paths.project_root.name,
-                ntfy_url=self.settings.ntfy_url,
-                logger=self.logger,
-            )
+        event = NotificationEvent(
+            event_type=EventType.RUN_COMPLETED,
+            exit_code=0,
+            duration_str=format_duration(duration),
+            repo_name=self.repo_name,
+            branch=self.branch_name,
+            iteration=self.iteration,
+            max_iters=self.settings.max_iters,
+            message="fix-die-repeat completed",
+        )
+        self.notification_manager.notify(event)
+        self.notification_manager.wait()
 
         return 0
 
