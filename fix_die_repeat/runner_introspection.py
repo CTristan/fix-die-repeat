@@ -7,99 +7,21 @@ feedback to improve future prompts.
 import json
 import logging
 import os
-import sys
-import types
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
+from typing import cast
 
 import yaml
 
-# Platform-specific file locking imports
-if sys.platform == "win32":  # pragma: no cover
-    import msvcrt
-else:  # pragma: no cover
-    import fcntl
-
 from fix_die_repeat.config import Paths, Settings, get_introspection_file_path
 from fix_die_repeat.prompts import render_prompt
-from fix_die_repeat.utils import run_command
-
-if TYPE_CHECKING:
-    from typing import Self
-
-
-@runtime_checkable
-class _FileHandle(Protocol):
-    """Protocol for objects that support file descriptor access.
-
-    Used for type-checking the file lock context manager.
-    """
-
-    def fileno(self) -> int:
-        """Return the file descriptor for the file handle."""
-        ...
-
-    def seek(self, offset: int, whence: int = 0) -> int:
-        """Move to a new file position."""
-        ...
-
-
-class _FileLock:
-    """Context manager for cross-platform file locking.
-
-    Provides exclusive file locking to prevent concurrent writes from
-    corrupting shared files like the global introspection.yaml.
-
-    Uses fcntl on Unix and msvcrt on Windows.
-    """
-
-    def __init__(self, file_handle: _FileHandle) -> None:
-        """Initialize the file lock.
-
-        Args:
-            file_handle: Open file handle to lock
-
-        """
-        self.file_handle = file_handle
-
-    def __enter__(self) -> "Self":
-        """Acquire the lock."""
-        if sys.platform == "win32":  # pragma: no cover
-            # Windows: use msvcrt.locking
-            # Seek to start of file because msvcrt.locking locks a region
-            # starting from the current file position. We lock a large region
-            # (0xFFFF bytes) so all processes contend for the same range even
-            # as the file grows.
-            self.file_handle.seek(0)
-            lock_length = 0xFFFF
-            msvcrt.locking(self.file_handle.fileno(), msvcrt.LK_LOCK, lock_length)
-        else:  # pragma: no cover
-            # Unix: use fcntl.flock with LOCK_EX
-            fcntl.flock(self.file_handle.fileno(), fcntl.LOCK_EX)
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: types.TracebackType | None,
-    ) -> None:
-        """Release the lock."""
-        if sys.platform == "win32":  # pragma: no cover
-            # Windows: use msvcrt.locking with LK_UNLCK
-            # Seek to start of file because msvcrt.locking locks a region
-            # starting from the current file position. We must unlock the
-            # same 0xFFFF-byte region that was locked in __enter__.
-            self.file_handle.seek(0)
-            lock_length = 0xFFFF
-            msvcrt.locking(self.file_handle.fileno(), msvcrt.LK_UNLCK, lock_length)
-        else:  # pragma: no cover
-            # Unix: use fcntl.flock with LOCK_UN
-            fcntl.flock(self.file_handle.fileno(), fcntl.LOCK_UN)
-
+from fix_die_repeat.utils import (
+    YAML_SEPARATOR,
+    _FileLock,
+    run_command,
+)
 
 STATUS_PENDING = "pending"
 STATUS_REVIEWED = "reviewed"
@@ -255,14 +177,19 @@ class IntrospectionManager:
 
             # Append to global introspection file with file locking for atomicity
             global_introspection_file = get_introspection_file_path()
-            separator = "\n---\n"
 
-            with global_introspection_file.open("a+") as f, _FileLock(f):
+            with global_introspection_file.open("a+", encoding="utf-8") as f, _FileLock(f):
                 f.seek(0, os.SEEK_END)
                 is_empty = f.tell() == 0
                 if not is_empty:
-                    f.write(separator)
+                    # Ensure preceding newline
+                    f.seek(f.tell() - 1)
+                    if f.read(1) != "\n":
+                        f.write("\n")
+                    f.write(YAML_SEPARATOR)
                 f.write(result_content)
+                if not result_content.endswith("\n"):
+                    f.write("\n")
 
             self.logger.info(
                 "[Introspection] Appended analysis to %s",

@@ -23,6 +23,7 @@ from fix_die_repeat.utils import (
     is_excluded_file,
     is_running_in_dev_mode,
     play_completion_sound,
+    rotate_file,
     run_command,
 )
 
@@ -576,3 +577,103 @@ class TestPlayCompletionSoundFallback:
         )
         mock_write.assert_called_once_with("\a")
         mock_flush.assert_called_once()
+
+
+class TestRotateFile:
+    """Tests for rotate_file function."""
+
+    def test_rotate_file_no_rotation_under_threshold(self, tmp_path: Path) -> None:
+        """Test that file is not rotated when under threshold."""
+        test_file = tmp_path / "test.yaml"
+        test_file.write_text("line1\nline2")
+
+        result = rotate_file(test_file, max_lines=10)
+
+        assert result is None
+        assert test_file.exists()
+        assert not any(tmp_path.glob("test-*.yaml"))
+
+    def test_rotate_file_rename_on_rotation(self, tmp_path: Path) -> None:
+        """Test that file is renamed when over threshold."""
+        test_file = tmp_path / "test.yaml"
+        test_file.write_text("line1\nline2\nline3")
+
+        result = rotate_file(test_file, max_lines=2, date_suffix="2026-03")
+
+        expected_rotated = tmp_path / "test-2026-03.yaml"
+        assert result == expected_rotated
+        assert not test_file.exists()
+        assert expected_rotated.exists()
+        assert expected_rotated.read_text() == "line1\nline2\nline3"
+
+    def test_rotate_file_append_if_exists(self, tmp_path: Path) -> None:
+        """Test that file content is appended if rotated file already exists."""
+        test_file = tmp_path / "test.yaml"
+        test_file.write_text("line1\nline2\nline3")
+
+        rotated_file = tmp_path / "test-2026-03.yaml"
+        rotated_file.write_text("old content\n")
+
+        result = rotate_file(test_file, max_lines=2, date_suffix="2026-03")
+
+        assert result == rotated_file
+        assert not test_file.exists()
+        # My new implementation uses YAML separator and ensures newlines
+        content = rotated_file.read_text()
+        assert "old content\n" in content
+        assert "\n---\n" in content
+        assert "line1" in content
+
+    def test_rotate_file_no_separator_for_txt(self, tmp_path: Path) -> None:
+        """Test that non-YAML files don't get a separator on append."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("line1\nline2\nline3")
+
+        rotated_file = tmp_path / "test-2026-03.txt"
+        rotated_file.write_text("old text")
+
+        rotate_file(test_file, max_lines=2, date_suffix="2026-03")
+
+        # My new implementation ensures newlines between appends
+        assert rotated_file.read_text() == "old text\nline1\nline2\nline3\n"
+
+    def test_rotate_file_is_directory(self, tmp_path: Path) -> None:
+        """Test rotation fails if path is a directory."""
+        test_dir = tmp_path / "test_dir"
+        test_dir.mkdir()
+        result = rotate_file(test_dir)
+        assert result is None
+
+    def test_rotate_file_not_existent(self, tmp_path: Path) -> None:
+        """Test rotation of non-existent file."""
+        result = rotate_file(tmp_path / "missing.yaml")
+        assert result is None
+
+    def test_rotate_file_malformed_yaml(self, tmp_path: Path) -> None:
+        """Test rotation with malformed YAML file."""
+        test_file = tmp_path / "test.yaml"
+        # Invalid YAML (mapping key without value)
+        test_file.write_text("invalid: yaml: content\n" * 10)
+
+        rotated_file = tmp_path / "test-2026-03.yaml"
+        rotated_file.write_text("old content\n")
+
+        # No need to patch get_file_line_count as rotate_file counts lines itself.
+        # With 10 lines and max_lines=2, rotation should occur.
+        rotate_file(test_file, max_lines=2, date_suffix="2026-03")
+
+        # Should fallback to string concatenation
+        content = rotated_file.read_text()
+        assert "old content\n" in content
+        assert "\n---\n" in content
+        assert "invalid: yaml: content" in content
+
+    def test_rotate_file_permission_error(self, tmp_path: Path) -> None:
+        """Test rotation behavior under permission errors."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("content\n" * 10)
+
+        # Mock open to raise PermissionError
+        with patch.object(Path, "open", side_effect=PermissionError("Permission denied")):
+            with pytest.raises(PermissionError):
+                rotate_file(test_file, max_lines=2)

@@ -328,6 +328,9 @@ Prompt text is stored in Jinja templates under `fix_die_repeat/templates/` and r
 - `pr_threads_header.j2` - Header/instructions for fetched PR thread context
 - `introspect_pr_review.j2` - Prompt for PR review introspection (includes language gap analysis)
 
+**Size Budgets**:
+To ensure high-quality LLM instruction-following, templates follow strict size budgets. If a template exceeds its budget, it must be consolidated. See `.pi/skills/prompt-introspect/references/template-budgets.md` for the budget table.
+
 **Language-specific partials** (`templates/lang_checks/*.j2`):
 - `python.j2` - Python-specific checks (eval/exec, bare except, mutable defaults, context managers, assert, SQL/shell injection)
 - `rust.j2` - Rust-specific checks (unsafe blocks, unwrap/expect, unbounded collect, mutex across await, clippy allows, as casts)
@@ -449,16 +452,16 @@ After resolution completes, verify the command is executable before entering the
 
 ### 8. PR Review Introspection
 
-Analyzes what PR reviewers caught, how the agent responded (fixed vs. won't fix), and writes categorized insights to a global file. Creates a meta-feedback loop where real-world PR reviews improve future prompts.
+Analyzes what PR reviewers caught, how the agent responded (fixed vs. won't fix), and maintains a cumulative Markdown summary of insights. Creates a meta-feedback loop where real-world PR reviews improve future prompts via the `prompt-introspect` skill.
 
 **Why**: Real-world PR feedback is the best signal for prompt quality gaps. By systematically capturing and analyzing this data across projects, we can continuously improve review and fix prompts.
 
 **CLI Flag**: `--pr-review-introspect` (implies `--pr-review`)
 
 **Global Storage**:
-- Location: `~/.config/fix-die-repeat/introspection.yaml`
-- Format: Multi-document YAML (`---` separated)
-- One document per PR review run with `status: pending` or `reviewed`
+- Inbox: `~/.config/fix-die-repeat/introspection.yaml` (pending entries)
+- Summary: `~/.config/fix-die-repeat/introspection-summary.md` (cumulative insights)
+- Archives: `~/.config/fix-die-repeat/introspection-archive.yaml` (rotated raw data)
 
 **Data Collected**:
 - PR metadata (number, URL, date, project)
@@ -476,7 +479,7 @@ Analyzes what PR reviewers caught, how the agent responded (fixed vs. won't fix)
    - Fix/wont-fix outcomes by comparing in-scope vs. resolved thread IDs
    - Diff of changes made by the agent
 2. Call pi with `introspect_pr_review.j2` template
-3. Validate YAML output and append to global file
+3. Validate YAML output and append to `introspection.yaml`
 4. Clean up temporary files
 
 **Non-Blocking**:
@@ -485,6 +488,12 @@ Analyzes what PR reviewers caught, how the agent responded (fixed vs. won't fix)
 - Main loop result is preserved
 
 **Pi Skill**: `.pi/skills/prompt-introspect/`
+- Reads `introspection.yaml` (inbox) and `introspection-summary.md` (context)
+- Analyzes patterns across projects
+- Edits templates directly to address identified gaps
+- Marks entries as `status: reviewed` and moves them to archive
+- Regenerates the cumulative summary
+- Performs **Template Health Check** (size budgets, redundancy, effectiveness)
 
 ### 9. Notification System
 
@@ -520,11 +529,6 @@ Extensible notification architecture supporting multiple backends (ntfy, Zulip) 
 3. Add backend-specific settings to `Settings` class in `config.py`
 4. Register the notifier in `PiRunner._init_notification_manager()`
 No changes to `NotificationManager`, runner loop, or existing backends are required.
-- Reads global introspection file
-- Filters to `status: pending` entries
-- Analyzes patterns across projects
-- Edits templates directly to address identified gaps
-- Marks entries as `status: reviewed`
 
 ---
 

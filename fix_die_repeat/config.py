@@ -349,7 +349,7 @@ class Paths:
 
 
 def get_introspection_file_path() -> Path:
-    """Return the global introspection file path.
+    """Return the global introspection file path (inbox).
 
     Returns ~/.config/fix-die-repeat/introspection.yaml,
     respecting XDG_CONFIG_HOME if set.
@@ -362,3 +362,35 @@ def get_introspection_file_path() -> Path:
     introspection_dir = config_home / "fix-die-repeat"
     introspection_dir.mkdir(parents=True, exist_ok=True)
     return introspection_dir / "introspection.yaml"
+
+
+def get_introspection_summary_path() -> Path:
+    """Return the global introspection summary path.
+
+    Returns ~/.config/fix-die-repeat/introspection-summary.md,
+    respecting XDG_CONFIG_HOME if set.
+
+    Returns:
+        Path to global introspection summary file
+
+    """
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    introspection_dir = config_home / "fix-die-repeat"
+    introspection_dir.mkdir(parents=True, exist_ok=True)
+    return introspection_dir / "introspection-summary.md"
+
+
+def get_introspection_archive_path() -> Path:
+    """Return the global introspection archive path.
+
+    Returns ~/.config/fix-die-repeat/introspection-archive.yaml,
+    respecting XDG_CONFIG_HOME if set.
+
+    Returns:
+        Path to global introspection archive file
+
+    """
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    introspection_dir = config_home / "fix-die-repeat"
+    introspection_dir.mkdir(parents=True, exist_ok=True)
+    return introspection_dir / "introspection-archive.yaml"

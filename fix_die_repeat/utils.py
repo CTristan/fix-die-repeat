@@ -1,20 +1,35 @@
 """Utility functions for fix-die-repeat."""
 
+import contextlib
 import fnmatch
 import hashlib
 import importlib.metadata
 import json
 import logging
+import os
 import shlex
 import subprocess
 import sys
 import tomllib
+import types
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import IO, TYPE_CHECKING, Protocol, runtime_checkable
 
+import yaml
 from rich.console import Console
 from rich.logging import RichHandler
 
 from fix_die_repeat.messages import build_large_file_warning
+
+if TYPE_CHECKING:
+    from typing import Self
+
+# Platform-specific file locking imports
+if sys.platform == "win32":  # pragma: no cover
+    import msvcrt
+else:  # pragma: no cover
+    import fcntl
 
 console = Console()
 LOG_FORMAT = "[%(asctime)s] [fdr] [%(levelname)s] %(message)s"
@@ -25,8 +40,88 @@ LOGGER_NAME = "fix_die_repeat"
 PROHIBITED_RUFF_RULES = {"C901", "PLR0913", "PLR2004", "PLC0415"}
 
 # Exit codes
+EXIT_INVALID_COMMAND = 2
 EXIT_COMMAND_NOT_FOUND = 127
 EXIT_TIMEOUT = 124
+
+# Rotation constants
+DEFAULT_MAX_LINES = 2000
+YAML_SUFFIXES = {".yaml", ".yml"}
+YAML_SEPARATOR = "\n---\n"
+DATE_FORMAT_MONTHLY = "%Y-%m"
+WINDOWS_LOCK_LENGTH = 0xFFFF
+
+
+@runtime_checkable
+class _FileHandle(Protocol):
+    """Protocol for objects that support file descriptor access.
+
+    Used for type-checking the file lock context manager.
+    """
+
+    def fileno(self) -> int:
+        """Return the file descriptor for the file handle."""
+        ...
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        """Move to a new file position."""
+        ...
+
+    def tell(self) -> int:
+        """Return the current file position."""
+        ...
+
+
+class _FileLock:
+    """Context manager for cross-platform file locking.
+
+    Provides exclusive file locking to prevent concurrent writes from
+    corrupting shared files.
+
+    Uses fcntl on Unix and msvcrt on Windows.
+    """
+
+    def __init__(self, file_handle: _FileHandle) -> None:
+        """Initialize the file lock.
+
+        Args:
+            file_handle: Open file handle to lock
+
+        """
+        self.file_handle = file_handle
+
+    def __enter__(self) -> "Self":
+        """Acquire the lock."""
+        if sys.platform == "win32":  # pragma: no cover
+            # Windows: use msvcrt.locking
+            # Seek to start of file because msvcrt.locking locks a region
+            # starting from the current file position. We lock a large region
+            # (WINDOWS_LOCK_LENGTH bytes) so all processes contend for the same range even
+            # as the file grows.
+            self.file_handle.seek(0)
+            msvcrt.locking(self.file_handle.fileno(), msvcrt.LK_LOCK, WINDOWS_LOCK_LENGTH)
+        else:  # pragma: no cover
+            # Unix: use fcntl.flock with LOCK_EX
+            fcntl.flock(self.file_handle.fileno(), fcntl.LOCK_EX)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: types.TracebackType | None,
+    ) -> None:
+        """Release the lock."""
+        if sys.platform == "win32":  # pragma: no cover
+            # Windows: use msvcrt.locking with LK_UNLCK
+            # Seek to start of file because msvcrt.locking locks a region
+            # starting from the current file position. We must unlock the
+            # same WINDOWS_LOCK_LENGTH-byte region that was locked in __enter__.
+            self.file_handle.seek(0)
+            msvcrt.locking(self.file_handle.fileno(), msvcrt.LK_UNLCK, WINDOWS_LOCK_LENGTH)
+        else:  # pragma: no cover
+            # Unix: use fcntl.flock with LOCK_UN
+            fcntl.flock(self.file_handle.fileno(), fcntl.LOCK_UN)
 
 
 class RuffConfigParseError(Exception):
@@ -192,10 +287,10 @@ def run_command(
     try:
         args = shlex.split(command) if isinstance(command, str) else command
     except ValueError as exc:
-        return (2, "", f"Invalid command syntax: {exc}")
+        return (EXIT_INVALID_COMMAND, "", f"Invalid command syntax: {exc}")
 
     if not args:
-        return (2, "", "No command provided")
+        return (EXIT_INVALID_COMMAND, "", "No command provided")
 
     try:
         result = subprocess.run(
@@ -432,6 +527,185 @@ def play_completion_sound() -> None:
     # Last resort
     sys.stdout.write("\a")
     sys.stdout.flush()
+
+
+def append_to_file(
+    path: Path,
+    content: str,
+    *,
+    use_yaml_separator: bool = False,
+    use_safe_serializer: bool = False,
+) -> None:
+    """Safely append content to a file with locking.
+
+    Args:
+        path: Path to the file
+        content: Content to append
+        use_yaml_separator: Whether to prepend YAML document separator
+        use_safe_serializer: Whether to use safe YAML serializer for appending
+
+    """
+    with path.open("a+", encoding="utf-8") as f, _FileLock(f):
+        # Ensure file ends with newline
+        f.seek(0, os.SEEK_END)
+        if f.tell() > 0:
+            f.seek(f.tell() - 1)
+            if f.read(1) != "\n":
+                f.write("\n")
+
+        if use_yaml_separator or use_safe_serializer:
+            f.write(YAML_SEPARATOR)
+
+        if use_safe_serializer:
+            try:
+                # Use safe serializer as per policy
+                docs = list(yaml.safe_load_all(content))
+                yaml.safe_dump_all(
+                    docs,
+                    f,
+                    default_flow_style=False,
+                    sort_keys=False,
+                )
+            except yaml.YAMLError:
+                # Fallback to raw content if malformed to avoid data loss
+                f.write(content)
+        else:
+            f.write(content)
+
+        # Ensure trailing newline
+        if not content.endswith("\n"):
+            f.write("\n")
+
+
+def rotate_file(
+    path: Path,
+    max_lines: int = DEFAULT_MAX_LINES,
+    date_suffix: str | None = None,
+) -> Path | None:
+    """Rotate a file if it exceeds a line count threshold.
+
+    Uses atomic operations to prevent data duplication or loss across
+    multiple processes and crashes.
+
+    Args:
+        path: Path to the file to rotate
+        max_lines: Maximum line count before rotation
+        date_suffix: Optional date suffix (defaults to YYYY-MM).
+
+    Returns:
+        The path to the rotated file, or None if no rotation occurred.
+
+    """
+    if not path.is_file():
+        return None
+
+    if date_suffix is None:
+        date_suffix = datetime.now(tz=UTC).strftime(DATE_FORMAT_MONTHLY)
+
+    # Construct rotated filename
+    rotated_path = path.parent / f"{path.stem}-{date_suffix}{path.suffix}"
+
+    # Use a sidecar lock file to coordinate rotation.
+    # This allows us to rename the source file safely.
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with lock_path.open("a+", encoding="utf-8") as lock_file, _FileLock(lock_file):
+        # Check if rotation is still needed inside the lock
+        if not path.is_file() or get_file_line_count(path) < max_lines:
+            return None
+
+        # Determine if we append or perform initial rotation
+        if rotated_path.exists():
+            # Atomic move to temporary file on same partition
+            tmp_rotating = path.with_suffix(path.suffix + f".{os.getpid()}.rotating")
+            try:
+                path.rename(tmp_rotating)
+            except OSError:
+                # Source vanished or was renamed by another process
+                return rotated_path if rotated_path.exists() else None
+
+            # Append content from temporary file to rotated file
+            with tmp_rotating.open("r", encoding="utf-8") as src:
+                _append_to_rotated_file(src, rotated_path)
+
+            # Cleanup temporary file
+            with contextlib.suppress(OSError):
+                tmp_rotating.unlink()
+            return rotated_path
+
+        # Initial rotation for this period
+        if _try_initial_rotation(path, rotated_path):
+            return rotated_path
+
+    return None
+
+
+def _try_initial_rotation(path: Path, rotated_path: Path) -> bool:
+    """Try to rename the file to the rotated path.
+
+    Returns:
+        True if successful, False if rotation should be retried.
+
+    """
+    try:
+        # On Unix, os.rename silently overwrites. Use os.link to ensure failure if exists.
+        # os.link is atomic and fails with FileExistsError if rotated_path already exists.
+        os.link(path, rotated_path)
+        path.unlink()
+    except (FileExistsError, AttributeError, OSError):
+        # Fallback for Windows (no os.link) or cross-partition links.
+        # On Windows, os.rename already fails if destination exists.
+        # On Unix cross-partition, check existence first to minimize race window.
+        if rotated_path.exists():
+            return False
+        try:
+            path.rename(rotated_path)
+        except (FileExistsError, OSError):
+            return False
+        else:
+            return True
+    else:
+        return True
+
+
+def _append_to_rotated_file(src: IO[str], rotated_path: Path) -> None:
+    """Append content of source file to an existing rotated file."""
+    with rotated_path.open("a+", encoding="utf-8") as target, _FileLock(target):
+        # Ensure target ends with newline to avoid malformed appends
+        target.seek(0, os.SEEK_END)
+        if target.tell() > 0:
+            target.seek(target.tell() - 1)
+            if target.read(1) != "\n":
+                target.write("\n")
+
+        src.seek(0)
+        content = src.read()
+
+        if rotated_path.suffix in YAML_SUFFIXES:
+            _append_yaml_to_rotated(content, target)
+        else:
+            target.write(content)
+
+        # Ensure rotated file always ends with newline
+        if not content.endswith("\n"):
+            target.write("\n")
+
+
+def _append_yaml_to_rotated(content: str, target: IO[str]) -> None:
+    """Append YAML content with document separator and safe serialization."""
+    try:
+        # Use safe serializer for YAML rotation as per policy
+        docs = list(yaml.safe_load_all(content))
+        target.write(YAML_SEPARATOR)
+        yaml.safe_dump_all(
+            docs,
+            target,
+            default_flow_style=False,
+            sort_keys=False,
+        )
+    except yaml.YAMLError:
+        # Fallback for malformed YAML to avoid data loss
+        target.write(YAML_SEPARATOR)
+        target.write(content)
 
 
 def find_prohibited_ruff_ignores(

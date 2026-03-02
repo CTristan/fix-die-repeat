@@ -11,7 +11,9 @@ from fix_die_repeat.config import (
     CliOptions,
     Paths,
     Settings,
+    get_introspection_archive_path,
     get_introspection_file_path,
+    get_introspection_summary_path,
     get_settings,
 )
 from fix_die_repeat.utils import run_command
@@ -367,3 +369,29 @@ class TestGetIntrospectionFilePath:
         # Verify parent directories were created
         assert path.parent.exists()
         assert path.parent.is_dir()
+
+
+class TestGetIntrospectionSummaryPath:
+    """Tests for get_introspection_summary_path function."""
+
+    def test_default_location(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Test default location is ~/.config/fix-die-repeat/introspection-summary.md."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+        path = get_introspection_summary_path()
+        expected = tmp_path / ".config" / "fix-die-repeat" / "introspection-summary.md"
+        assert path == expected
+
+
+class TestGetIntrospectionArchivePath:
+    """Tests for get_introspection_archive_path function."""
+
+    def test_default_location(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Test default location is ~/.config/fix-die-repeat/introspection-archive.yaml."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+        path = get_introspection_archive_path()
+        expected = tmp_path / ".config" / "fix-die-repeat" / "introspection-archive.yaml"
+        assert path == expected

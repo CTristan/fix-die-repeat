@@ -7,12 +7,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fix_die_repeat import runner_introspection as runner_introspection_module
+from fix_die_repeat import utils as utils_module
 from fix_die_repeat.notifications import EventType
 from fix_die_repeat.runner import PiRunner
-from fix_die_repeat.runner_introspection import (  # Testing private class is intentional
-    _FileLock,
-)
+from fix_die_repeat.utils import _FileLock
 
 # Constants for runner test values
 TEST_PI_DELAY_SECONDS = 2
@@ -1579,7 +1577,7 @@ class TestFileLock:
         test_file.write_text("test content")
 
         with test_file.open() as f:
-            with patch("fix_die_repeat.runner_introspection.fcntl") as mock_fcntl:
+            with patch("fix_die_repeat.utils.fcntl") as mock_fcntl:
                 file_lock = _FileLock(f)
 
                 with file_lock:
@@ -1607,9 +1605,9 @@ class TestFileLock:
             # Set platform to Windows
             sys.platform = "win32"
 
-            # Inject msvcrt into the runner_introspection module namespace
+            # Inject msvcrt into the utils module namespace
             # (This is intentional: we're simulating Windows behavior on a non-Windows platform)
-            runner_introspection_module.msvcrt = mock_msvcrt  # type: ignore[attr-defined]
+            utils_module.msvcrt = mock_msvcrt  # type: ignore[attr-defined]
 
             with test_file.open() as f:
                 # Wrap f.seek so we can assert it is called with position 0 before unlocking
@@ -1631,8 +1629,8 @@ class TestFileLock:
             # Restore original platform
             sys.platform = original_platform
             # Clean up injected msvcrt
-            if hasattr(runner_introspection_module, "msvcrt"):
-                delattr(runner_introspection_module, "msvcrt")
+            if hasattr(utils_module, "msvcrt"):
+                delattr(utils_module, "msvcrt")
 
     def test_file_lock_returns_self_on_enter(self, tmp_path: Path) -> None:
         """Test that _FileLock __enter__ returns self."""
@@ -1640,7 +1638,7 @@ class TestFileLock:
         test_file.write_text("test content")
 
         with test_file.open() as f:
-            with patch("fix_die_repeat.runner_introspection.fcntl"):
+            with patch("fix_die_repeat.utils.fcntl"):
                 file_lock = _FileLock(f)
 
                 with file_lock as acquired_lock:
@@ -1653,7 +1651,7 @@ class TestFileLock:
         test_file.write_text("test content")
 
         with test_file.open() as f:
-            with patch("fix_die_repeat.runner_introspection.fcntl") as mock_fcntl:
+            with patch("fix_die_repeat.utils.fcntl") as mock_fcntl:
                 file_lock = _FileLock(f)
                 test_exception = ValueError("Test exception")
 
