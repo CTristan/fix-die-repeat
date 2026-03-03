@@ -21,6 +21,7 @@ from fix_die_repeat.utils import (
     is_running_in_dev_mode,
     rotate_file,
 )
+from fix_die_repeat.wizard import run_wizard
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -126,6 +127,12 @@ def main(ctx: click.Context, **kwargs: str | int | bool | None) -> None:
         debug = bool(kwargs.get("debug", False))
         exit_code = _run_main_with_error_handling(kwargs, debug=debug)
         raise SystemExit(exit_code)
+
+
+@main.command(name="config")
+def config_cmd() -> None:
+    """Configure notification backends interactively."""
+    run_wizard()
 
 
 @main.group()

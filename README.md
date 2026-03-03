@@ -59,6 +59,9 @@ fix-die-repeat -c "pytest -xvs"
 
 # With a specific model
 fix-die-repeat -c "make test" -m anthropic/claude-sonnet-4-5
+
+# Configure notification backends interactively
+fix-die-repeat config
 ```
 
 On first run, fix-die-repeat [detects your project type](docs/guide.md#check-command-resolution) and asks you to confirm the check command. The choice is saved so subsequent runs use it automatically.

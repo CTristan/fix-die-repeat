@@ -123,6 +123,7 @@ fix-die-repeat/
 │   ├── detection.py       # Check command resolution and auto-detection
 │   ├── lang.py           # Language detection from file extensions
 │   ├── messages.py        # User-facing message generators
+│   ├── notification_config.py  # Notification config file management and validation
 │   ├── notifications/     # Notification system (extensible backends)
 │   │   ├── __init__.py  # Exports NotificationManager, NotificationEvent
 │   │   ├── base.py      # EventType enum, NotificationEvent, Notifier protocol
@@ -132,6 +133,7 @@ fix-die-repeat/
 │   ├── prompts.py         # Jinja template rendering helpers
 │   ├── runner.py          # Core PiRunner class - main loop
 │   ├── utils.py           # Utility functions (logging, git, file ops)
+│   ├── wizard.py         # Interactive configuration wizard
 │   └── templates/         # Prompt templates consumed by prompts.py
 │       └── lang_checks/  # Language-specific checklists
 │           ├── python.j2    # Python-specific checklist
@@ -145,9 +147,11 @@ fix-die-repeat/
 │   ├── test_detection.py  # Check command resolution tests
 │   ├── test_lang.py      # Language detection tests
 │   ├── test_messages.py   # Message generator tests
+│   ├── test_notification_config.py  # Notification config tests
 │   ├── test_notifications.py  # Notification system tests
 │   ├── test_prompts.py   # Prompt rendering tests
-│   └── test_utils.py     # Utility function tests
+│   ├── test_utils.py     # Utility function tests
+│   └── test_wizard.py    # Wizard tests
 ├── pyproject.toml          # uv configuration, dependencies, tooling
 ├── README.md              # User documentation
 ├── CONTRIBUTING.md        # Developer setup, testing, architecture
@@ -522,12 +526,30 @@ Extensible notification architecture supporting multiple backends (ntfy, Zulip) 
 - Each backend has its own `FDR_*` environment variables
 - Multiple backends can be enabled simultaneously
 - Zulip stream/topic are configurable via environment variables
+- **Global config file**: `~/.config/fix-die-repeat/notifications.json` (created via `fix-die-repeat config` wizard)
+- **Project-level override**: Zulip stream can be overridden in `.fix-die-repeat/config` with `zulip_stream = "my-stream"`
+- **Config merge priority**: Environment variables > Project config > Global config (wizard-managed)
+- The `fix-die-repeat config` command provides an interactive wizard for setting up notification backends with credential validation and test notifications
+
+**Config Merge Priority**:
+1. **Environment variables** (`FDR_ZULIP_*`, `FDR_NTFY_*`) — highest priority, always wins
+2. **Project config** (`.fix-die-repeat/config`) — per-project stream override
+3. **Global config** (`~/.config/fix-die-repeat/notifications.json`) — wizard-managed defaults
+
+**Wizard Features**:
+- Interactive menu-driven setup for Zulip and ntfy
+- Credential validation via API calls before saving
+- Test notifications sent after configuration
+- Secure file permissions (`0o600` on config file, `0o700` on directory)
+- Backward compatible with existing `FDR_*` environment variable users
 
 **Adding a New Backend**:
 1. Create a new file in `notifications/` (e.g., `slack.py`)
 2. Implement `Notifier` protocol with `send()` and `is_enabled()` methods
 3. Add backend-specific settings to `Settings` class in `config.py`
-4. Register the notifier in `PiRunner._init_notification_manager()`
+4. Update `_apply_notification_config()` in `config.py` to load from global config
+5. Add configuration flow in `fix_die_repeat/wizard.py`
+6. Register the notifier in `PiRunner._init_notification_manager()`
 No changes to `NotificationManager`, runner loop, or existing backends are required.
 
 ---
