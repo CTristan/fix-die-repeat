@@ -182,10 +182,9 @@ class IntrospectionManager:
                 f.seek(0, os.SEEK_END)
                 is_empty = f.tell() == 0
                 if not is_empty:
-                    # Ensure preceding newline
-                    f.seek(f.tell() - 1)
-                    if f.read(1) != "\n":
-                        f.write("\n")
+                    # For non-empty files, ensure a newline before starting a new YAML document.
+                    # Avoid math on text-mode tell() cookies by not using relative seeks.
+                    f.write("\n")
                     f.write(YAML_SEPARATOR)
                 f.write(result_content)
                 if not result_content.endswith("\n"):

@@ -2,6 +2,7 @@
 
 import base64
 import logging
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -172,7 +173,7 @@ class ZulipNotifier(Notifier):
         iter_info = f"{event.iteration}/{event.max_iters} iterations"
         message = (
             f"{emoji} {event.message} ({iter_info}) "
-            f"in {event.duration_str} in **{event.repo_name}** on `{event.branch}`"
+            f"after {event.duration_str} in **{event.repo_name}** on `{event.branch}`"
         )
 
         # Validate server URL scheme to prevent security issues (S310)

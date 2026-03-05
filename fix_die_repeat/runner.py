@@ -118,9 +118,17 @@ class PiRunner:
         """Initialize the notification manager with configured backends."""
         notifiers: list[Notifier] = []
 
-        # Detect repo and branch once for consistency across backends and reuse in PiRunner
-        self.repo_name = _detect_repo_name(self.project_root)
-        self.branch_name = _detect_branch_name(self.project_root)
+        # Detect repo and branch once for consistency across backends and reuse in PiRunner.
+        # Only run git-based detection when at least one notifier is enabled to avoid
+        # unnecessary subprocess calls in non-notification contexts.
+        has_notifier = self.settings.ntfy_enabled or self.settings.zulip_enabled
+        if has_notifier:
+            self.repo_name = _detect_repo_name(self.project_root)
+            self.branch_name = _detect_branch_name(self.project_root)
+        else:
+            # Ensure attributes are always defined even when no notifier is configured.
+            self.repo_name = ""
+            self.branch_name = ""
 
         # Add ntfy notifier if enabled
         if self.settings.ntfy_enabled:

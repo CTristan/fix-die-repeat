@@ -38,6 +38,9 @@ lint.ignore = ["COM812", "D203", "D213"]
 extend-exclude = ["*.j2"]
 
 [tool.ruff.lint.per-file-ignores]
+"fix_die_repeat/cli.py" = [
+    "BLE001",  # CLI entrypoint intentionally uses broad exception handling to convert unexpected errors into user-friendly messages and non-zero exit codes without exposing raw tracebacks by default.
+]
 "fix_die_repeat/notifications/*.py" = [
     "S310",  # Server URLs from config are validated to ensure http:// or https:// schemes before use; addresses security concern even if heuristic doesn't recognize the pattern.
 ]

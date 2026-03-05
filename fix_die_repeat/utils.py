@@ -549,9 +549,9 @@ def append_to_file(
         # Ensure file ends with newline
         f.seek(0, os.SEEK_END)
         if f.tell() > 0:
-            f.seek(f.tell() - 1)
-            if f.read(1) != "\n":
-                f.write("\n")
+            # For non-empty files, ensure a newline before appending.
+            # Avoid arithmetic on text-mode tell() cookies by unconditionally writing a newline.
+            f.write("\n")
 
         if use_yaml_separator or use_safe_serializer:
             f.write(YAML_SEPARATOR)
@@ -610,7 +610,7 @@ def rotate_file(
     lock_path = path.with_suffix(path.suffix + ".lock")
     with lock_path.open("a+", encoding="utf-8") as lock_file, _FileLock(lock_file):
         # Check if rotation is still needed inside the lock
-        if not path.is_file() or get_file_line_count(path) < max_lines:
+        if not path.is_file() or get_file_line_count(path) <= max_lines:
             return None
 
         # Determine if we append or perform initial rotation
