@@ -96,13 +96,13 @@ class TestRenderPrompt:
             "Data serialization: structured outputs (JSON/YAML/etc.) use safe serializers" in prompt
         )
         assert (
-            "docs/prompts/config instructions and examples match actual behavior "
+            "Docs/prompts/config instructions and examples match actual behavior "
             "and required fields" in prompt
         )
-        assert "avoid terminating the process from library/orchestration code" in prompt
+        assert "Avoid terminating the process from library/orchestration code" in prompt
         assert "propagate internal failure codes to process exit status" in prompt
-        assert "tests assert observable behavior" in prompt
-        assert "user-facing logs/errors clearly explain limits, skips, or partial results" in prompt
+        assert "Tests assert observable behavior" in prompt
+        assert "User-facing logs/errors clearly explain limits, skips, or partial results" in prompt
         assert "LANGUAGE-SPECIFIC CHECKS:" not in prompt
 
     def test_introspect_pr_review_template(self, tmp_path: Path) -> None:

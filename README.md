@@ -59,6 +59,9 @@ fix-die-repeat -c "pytest -xvs"
 
 # With a specific model
 fix-die-repeat -c "make test" -m anthropic/claude-sonnet-4-5
+
+# Configure notification backends interactively
+fix-die-repeat config
 ```
 
 On first run, fix-die-repeat [detects your project type](docs/guide.md#check-command-resolution) and asks you to confirm the check command. The choice is saved so subsequent runs use it automatically.
@@ -70,7 +73,7 @@ On first run, fix-die-repeat [detects your project type](docs/guide.md#check-com
 - **[PR review introspection](docs/guide.md)** — analyzes PR reviews to identify prompt improvement opportunities
 - **[Oscillation detection](docs/guide.md#oscillation-detection)** — warns when the same failure keeps repeating
 - **[Context management](docs/guide.md#context-management)** — keeps pi's prompt efficient by attaching or compacting artifacts
-- **[Notifications](docs/guide.md#notifications-optional)** — optional [ntfy](https://ntfy.sh/) alerts when runs complete
+- **[Notifications](docs/guide.md#notifications-optional)** — optional [ntfy](https://ntfy.sh/) and [Zulip](https://zulip.com/) alerts for run completion, failures, and oscillation
 - **[Debug mode](docs/guide.md#debug-mode)** — timestamped session logs and verbose output
 
 For full CLI reference, environment variables, and detailed usage, see the **[User's Guide](docs/guide.md)**.

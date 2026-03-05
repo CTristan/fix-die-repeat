@@ -43,14 +43,15 @@ def _parse_config_value(value: str) -> str:
     return value
 
 
-def read_config_file(path: object) -> str | None:
+def read_config_file(path: object, key: str = "check_cmd") -> str | None:
     """Read and parse a simple key-value config file.
 
     Args:
         path: Path to config file
+        key: The key to look for (default: "check_cmd")
 
     Returns:
-        check_cmd value if found, None otherwise
+        Value if found, None otherwise
 
     """
     if not isinstance(path, (str, os.PathLike)):
@@ -65,7 +66,7 @@ def read_config_file(path: object) -> str | None:
                 if not line or line.startswith("#"):
                     continue
                 # Parse key = value or key = "value"
-                if line.startswith("check_cmd ="):
+                if line.startswith((f"{key} =", f"{key}=")):
                     value = line.split("=", 1)[1].strip()
                     return _parse_config_value(value)
     except OSError:

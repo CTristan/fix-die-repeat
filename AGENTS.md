@@ -123,9 +123,17 @@ fix-die-repeat/
 │   ├── detection.py       # Check command resolution and auto-detection
 │   ├── lang.py           # Language detection from file extensions
 │   ├── messages.py        # User-facing message generators
+│   ├── notification_config.py  # Notification config file management and validation
+│   ├── notifications/     # Notification system (extensible backends)
+│   │   ├── __init__.py  # Exports NotificationManager, NotificationEvent
+│   │   ├── base.py      # EventType enum, NotificationEvent, Notifier protocol
+│   │   ├── manager.py   # NotificationManager (dispatches to all backends)
+│   │   ├── ntfy.py      # NtfyNotifier implementation
+│   │   └── zulip.py     # ZulipNotifier implementation
 │   ├── prompts.py         # Jinja template rendering helpers
 │   ├── runner.py          # Core PiRunner class - main loop
 │   ├── utils.py           # Utility functions (logging, git, file ops)
+│   ├── wizard.py         # Interactive configuration wizard
 │   └── templates/         # Prompt templates consumed by prompts.py
 │       └── lang_checks/  # Language-specific checklists
 │           ├── python.j2    # Python-specific checklist
@@ -139,8 +147,11 @@ fix-die-repeat/
 │   ├── test_detection.py  # Check command resolution tests
 │   ├── test_lang.py      # Language detection tests
 │   ├── test_messages.py   # Message generator tests
+│   ├── test_notification_config.py  # Notification config tests
+│   ├── test_notifications.py  # Notification system tests
 │   ├── test_prompts.py   # Prompt rendering tests
-│   └── test_utils.py     # Utility function tests
+│   ├── test_utils.py     # Utility function tests
+│   └── test_wizard.py    # Wizard tests
 ├── pyproject.toml          # uv configuration, dependencies, tooling
 ├── README.md              # User documentation
 ├── CONTRIBUTING.md        # Developer setup, testing, architecture
@@ -195,6 +206,11 @@ Configuration with environment variable support via Pydantic.
 - `pi_sequential_delay_seconds`: `1`
 - `ntfy_enabled`: `True`
 - `ntfy_url`: `"http://localhost:2586"`
+- `zulip_enabled`: `False`
+- `zulip_server_url`: `None`
+- `zulip_bot_email`: `None`
+- `zulip_bot_api_key`: `None`
+- `zulip_stream`: `"fix-die-repeat"`
 
 **Optional/Null Defaults**:
 - `model`: `None`
@@ -315,6 +331,9 @@ Prompt text is stored in Jinja templates under `fix_die_repeat/templates/` and r
 - `resolve_review_issues.j2` - Prompt for applying review fixes
 - `pr_threads_header.j2` - Header/instructions for fetched PR thread context
 - `introspect_pr_review.j2` - Prompt for PR review introspection (includes language gap analysis)
+
+**Size Budgets**:
+To ensure high-quality LLM instruction-following, templates follow strict size budgets. If a template exceeds its budget, it must be consolidated. See `.pi/skills/prompt-introspect/references/template-budgets.md` for the budget table.
 
 **Language-specific partials** (`templates/lang_checks/*.j2`):
 - `python.j2` - Python-specific checks (eval/exec, bare except, mutable defaults, context managers, assert, SQL/shell injection)
@@ -437,16 +456,16 @@ After resolution completes, verify the command is executable before entering the
 
 ### 8. PR Review Introspection
 
-Analyzes what PR reviewers caught, how the agent responded (fixed vs. won't fix), and writes categorized insights to a global file. Creates a meta-feedback loop where real-world PR reviews improve future prompts.
+Analyzes what PR reviewers caught, how the agent responded (fixed vs. won't fix), and maintains a cumulative Markdown summary of insights. Creates a meta-feedback loop where real-world PR reviews improve future prompts via the `prompt-introspect` skill.
 
 **Why**: Real-world PR feedback is the best signal for prompt quality gaps. By systematically capturing and analyzing this data across projects, we can continuously improve review and fix prompts.
 
 **CLI Flag**: `--pr-review-introspect` (implies `--pr-review`)
 
 **Global Storage**:
-- Location: `~/.config/fix-die-repeat/introspection.yaml`
-- Format: Multi-document YAML (`---` separated)
-- One document per PR review run with `status: pending` or `reviewed`
+- Inbox: `~/.config/fix-die-repeat/introspection.yaml` (pending entries)
+- Summary: `~/.config/fix-die-repeat/introspection-summary.md` (cumulative insights)
+- Archives: `~/.config/fix-die-repeat/introspection-archive.yaml` (rotated raw data)
 
 **Data Collected**:
 - PR metadata (number, URL, date, project)
@@ -464,7 +483,7 @@ Analyzes what PR reviewers caught, how the agent responded (fixed vs. won't fix)
    - Fix/wont-fix outcomes by comparing in-scope vs. resolved thread IDs
    - Diff of changes made by the agent
 2. Call pi with `introspect_pr_review.j2` template
-3. Validate YAML output and append to global file
+3. Validate YAML output and append to `introspection.yaml`
 4. Clean up temporary files
 
 **Non-Blocking**:
@@ -473,11 +492,65 @@ Analyzes what PR reviewers caught, how the agent responded (fixed vs. won't fix)
 - Main loop result is preserved
 
 **Pi Skill**: `.pi/skills/prompt-introspect/`
-- Reads global introspection file
-- Filters to `status: pending` entries
+- Reads `introspection.yaml` (inbox) and `introspection-summary.md` (context)
 - Analyzes patterns across projects
 - Edits templates directly to address identified gaps
-- Marks entries as `status: reviewed`
+- Marks entries as `status: reviewed` and moves them to archive
+- Regenerates the cumulative summary
+- Performs **Template Health Check** (size budgets, redundancy, effectiveness)
+
+### 9. Notification System
+
+Extensible notification architecture supporting multiple backends (ntfy, Zulip) with best-effort delivery. Uses a strategy pattern with a `Notifier` protocol, allowing future backends (Slack, etc.) to be added without changing the core runner loop.
+
+**Why**: Users want to be notified when runs complete, fail, or when oscillation is detected. Supporting multiple backends provides flexibility for different team communication preferences.
+
+**Notification Events**:
+- `RUN_COMPLETED`: All checks pass and no review issues found
+- `RUN_FAILED`: Max iterations exceeded or unexpected error
+- `OSCILLATION_DETECTED`: Same check output repeats across iterations
+
+**Architecture**:
+- `NotificationEvent` dataclass: Holds event type, exit code, duration, repo name, branch, iteration count, and message
+- `Notifier` protocol: Defines interface for notification backends (`send()`, `is_enabled()`)
+- `NotificationManager`: Dispatches events to all enabled backends, catching and logging exceptions per-backend
+- `NtfyNotifier`: Existing ntfy backend implementation (refactored from `utils.py`)
+- `ZulipNotifier`: New Zulip backend implementation using `urllib.request` (no new dependencies)
+
+**Best-Effort Behavior**:
+- Notification failures never block or crash the main fix loop
+- Each backend's exceptions are caught and logged independently
+- Failed backends don't prevent other backends from sending
+
+**Configuration**:
+- Each backend has its own `FDR_*` environment variables
+- Multiple backends can be enabled simultaneously
+- Zulip stream/topic are configurable via environment variables
+- **Global config file**: `~/.config/fix-die-repeat/notifications.json` (created via `fix-die-repeat config` wizard)
+- **Project-level override**: Zulip stream can be overridden in `.fix-die-repeat/config` with `zulip_stream = "my-stream"`
+- **Config merge priority**: Environment variables > Project config > Global config (wizard-managed)
+- The `fix-die-repeat config` command provides an interactive wizard for setting up notification backends with credential validation and test notifications
+
+**Config Merge Priority**:
+1. **Environment variables** (`FDR_ZULIP_*`, `FDR_NTFY_*`) — highest priority, always wins
+2. **Project config** (`.fix-die-repeat/config`) — per-project stream override
+3. **Global config** (`~/.config/fix-die-repeat/notifications.json`) — wizard-managed defaults
+
+**Wizard Features**:
+- Interactive menu-driven setup for Zulip and ntfy
+- Credential validation via API calls before saving
+- Test notifications sent after configuration
+- Secure file permissions (`0o600` on config file, `0o700` on directory)
+- Backward compatible with existing `FDR_*` environment variable users
+
+**Adding a New Backend**:
+1. Create a new file in `notifications/` (e.g., `slack.py`)
+2. Implement `Notifier` protocol with `send()` and `is_enabled()` methods
+3. Add backend-specific settings to `Settings` class in `config.py`
+4. Update `_apply_notification_config()` in `config.py` to load from global config
+5. Add configuration flow in `fix_die_repeat/wizard.py`
+6. Register the notifier in `PiRunner._init_notification_manager()`
+No changes to `NotificationManager`, runner loop, or existing backends are required.
 
 ---
 

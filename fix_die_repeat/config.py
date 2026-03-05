@@ -8,6 +8,8 @@ from pathlib import Path
 import pydantic as pyd
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from fix_die_repeat.detection import read_config_file
+from fix_die_repeat.notification_config import load_notification_config
 from fix_die_repeat.utils import run_command
 
 
@@ -103,6 +105,37 @@ class Settings(BaseSettings):
         description="ntfy server URL",
     )
 
+    # Zulip notification settings
+    zulip_enabled: bool = pyd.Field(
+        default=False,
+        alias="FDR_ZULIP_ENABLED",
+        description="Enable Zulip notifications",
+    )
+
+    zulip_server_url: str | None = pyd.Field(
+        default=None,
+        alias="FDR_ZULIP_SERVER_URL",
+        description="Zulip server base URL",
+    )
+
+    zulip_bot_email: str | None = pyd.Field(
+        default=None,
+        alias="FDR_ZULIP_BOT_EMAIL",
+        description="Zulip bot email for authentication",
+    )
+
+    zulip_bot_api_key: str | None = pyd.Field(
+        default=None,
+        alias="FDR_ZULIP_BOT_API_KEY",
+        description="Zulip bot API key for authentication",
+    )
+
+    zulip_stream: str = pyd.Field(
+        default="fix-die-repeat",
+        alias="FDR_ZULIP_STREAM",
+        description="Zulip stream name",
+    )
+
     # Thresholds
     auto_attach_threshold: int = pyd.Field(
         default=200 * 1024,
@@ -166,6 +199,77 @@ class CliOptions:
     debug: bool = False
 
 
+def _apply_default_if_unset(
+    settings: Settings,
+    *,
+    settings_field: str,
+    config_values: dict[str, object],
+    config_key: str,
+) -> None:
+    """Apply a config value only when that settings field was not set by env/CLI."""
+    if settings_field in settings.model_fields_set:
+        return
+    if config_key not in config_values:
+        return
+    setattr(settings, settings_field, config_values[config_key])
+
+
+def _apply_global_notification_defaults(settings: Settings) -> None:
+    """Apply notification defaults from global config file."""
+    global_config = load_notification_config()
+
+    zulip_config = dict(global_config.get("zulip", {}))
+    for settings_field, config_key in (
+        ("zulip_enabled", "enabled"),
+        ("zulip_server_url", "server_url"),
+        ("zulip_bot_email", "bot_email"),
+        ("zulip_bot_api_key", "bot_api_key"),
+        ("zulip_stream", "stream"),
+    ):
+        _apply_default_if_unset(
+            settings,
+            settings_field=settings_field,
+            config_values=zulip_config,
+            config_key=config_key,
+        )
+
+    ntfy_config = dict(global_config.get("ntfy", {}))
+    for settings_field, config_key in (
+        ("ntfy_enabled", "enabled"),
+        ("ntfy_url", "url"),
+    ):
+        _apply_default_if_unset(
+            settings,
+            settings_field=settings_field,
+            config_values=ntfy_config,
+            config_key=config_key,
+        )
+
+
+def _apply_project_stream_override(settings: Settings) -> None:
+    """Apply project-level Zulip stream override when env/CLI did not set one."""
+    paths = Paths()
+    project_stream = read_config_file(paths.config_file, key="zulip_stream")
+    if project_stream is None:
+        return
+    if "zulip_stream" in settings.model_fields_set:
+        return
+    settings.zulip_stream = project_stream
+
+
+def _apply_notification_config(settings: Settings) -> None:
+    """Apply global and project-level notification config as defaults.
+
+    Env vars (model_fields_set) take priority, then project config, then global config.
+
+    Args:
+        settings: Settings instance to modify
+
+    """
+    _apply_global_notification_defaults(settings)
+    _apply_project_stream_override(settings)
+
+
 def get_settings(options: CliOptions | None = None) -> Settings:
     """Create Settings instance from command line args and environment.
 
@@ -178,6 +282,9 @@ def get_settings(options: CliOptions | None = None) -> Settings:
     """
     # Get base settings from environment
     settings = Settings()
+
+    # Apply notification defaults from config files
+    _apply_notification_config(settings)
 
     # Apply CLI overrides if provided
     if options is not None:
@@ -318,7 +425,7 @@ class Paths:
 
 
 def get_introspection_file_path() -> Path:
-    """Return the global introspection file path.
+    """Return the global introspection file path (inbox).
 
     Returns ~/.config/fix-die-repeat/introspection.yaml,
     respecting XDG_CONFIG_HOME if set.
@@ -331,3 +438,35 @@ def get_introspection_file_path() -> Path:
     introspection_dir = config_home / "fix-die-repeat"
     introspection_dir.mkdir(parents=True, exist_ok=True)
     return introspection_dir / "introspection.yaml"
+
+
+def get_introspection_summary_path() -> Path:
+    """Return the global introspection summary path.
+
+    Returns ~/.config/fix-die-repeat/introspection-summary.md,
+    respecting XDG_CONFIG_HOME if set.
+
+    Returns:
+        Path to global introspection summary file
+
+    """
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    introspection_dir = config_home / "fix-die-repeat"
+    introspection_dir.mkdir(parents=True, exist_ok=True)
+    return introspection_dir / "introspection-summary.md"
+
+
+def get_introspection_archive_path() -> Path:
+    """Return the global introspection archive path.
+
+    Returns ~/.config/fix-die-repeat/introspection-archive.yaml,
+    respecting XDG_CONFIG_HOME if set.
+
+    Returns:
+        Path to global introspection archive file
+
+    """
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    introspection_dir = config_home / "fix-die-repeat"
+    introspection_dir.mkdir(parents=True, exist_ok=True)
+    return introspection_dir / "introspection-archive.yaml"

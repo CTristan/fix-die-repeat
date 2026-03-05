@@ -7,13 +7,63 @@ Classify issues as:
 - [NIT]: Style issues, minor optimizations, comments, formatting.
 
 CRITICAL REVIEW CHECKLIST (LANGUAGE-AGNOSTIC):
-- [ ] Security: no injection flaws, auth/permission bypasses, secret exposure, unsafe deserialization, or insecure defaults
-- [ ] Performance: no obvious regressions, unbounded growth, heavy work in hot paths, or N+1 style patterns
-- [ ] Correctness/reliability: no missing input validation (especially for external tool output or parsed JSON/YAML), unsafe error handling, resource leaks, or concurrency hazards (including file I/O and locking best practices like lock scope/byte ranges/seek position plus atomic append/locking for shared artifacts); test fixtures match implementation expectations; early returns or edge case handling include appropriate user-facing notifications (no silent failures)
+- [ ] Security: no injection flaws, auth/permission bypasses, secret exposure, unsafe deserialization, or insecure defaults; files recreated after deletion/rotation re-enforce secure permissions (not relying on initial setup alone)
+- [ ] Performance: no obvious regressions, unbounded growth, heavy work in hot paths, or N+1 style patterns; check for redundant function/API calls across overlapping call chains (e.g., a caller and callee both performing the same operation)
+- [ ] Correctness/reliability:
+    - No missing input validation (especially for external tool output or parsed JSON/YAML)
+    - User inputs are normalized (e.g., case-insensitive, trimmed) and validated with strict parsing (e.g., specific type conversion instead of loose casting)
+    - Validation runs consistently across all code paths (not skipped by early returns)
+    - No unsafe error handling, resource leaks, or concurrency hazards
+    - File I/O and locking best practices: lock scope/byte ranges/seek position plus atomic append/locking for shared artifacts
+    - Blocking network/IO operations (including timers, retries, polling, backoff loops) are cancellation/abort-aware and have timeouts so execution or shutdown is not delayed
+    - Test fixtures match implementation expectations
+    - Early returns or edge case handling include appropriate user-facing notifications (no silent failures)
+    - Boundary conditions analyzed for edge values (empty strings, zero as sentinel, null/root paths) with appropriate fallbacks
+    - Equivalent user flows produce semantically consistent results (e.g., two paths that achieve the same outcome store the same data representation)
+    - Algorithm implementations (truncation budgets, allocation splits) match their documented contracts
+    - Operations ordered so failures happen before user-visible side effects (e.g., validate/subscribe before posting messages)
+    - HTTP/stream response bodies consumed at most once (store in a variable before branching)
+    - Retry/attempt counters incremented before the operation, not after success, so transient failures consume retries
+    - Functions documented as "never throws" or "fail-silent" have error handling on all internal syscalls (filesystem, network)
+    - Wrapper/utility methods don't perform unintended side effects beyond their stated purpose (e.g., a "check existence" method should not create resources; a "subscribe" method should not auto-create the target)
+    - API responses scoped by permissions or visibility don't make absolute claims (e.g., prefer "not visible to this client" over "does not exist" when the API cannot distinguish the two)
+    - Layered validation does not produce duplicate or conflicting error messages for the same field (e.g., an "invalid format" error should suppress a subsequent "missing required field" error for the same input)
 - [ ] Data serialization: structured outputs (JSON/YAML/etc.) use safe serializers (not string interpolation) and are normalized/validated against expected schema when appending or combining documents before persisting
-- [ ] Code quality: no unjustified suppression of errors or warnings; avoid terminating the process from library/orchestration code (return status instead); ensure CLI/entrypoint layers propagate internal failure codes to process exit status; return helper results instead of discarding them or duplicating return logic; prefer explicit guards/failures
-- [ ] Accuracy: docs/prompts/config instructions and examples match actual behavior and required fields (no false claims); user-facing logs/errors clearly explain limits, skips, or partial results (especially for fallback paths and edge cases); non-obvious platform-specific behavior, concurrency patterns, or API quirks have inline documentation; platform-specific commands (e.g., in CI scripts) check for availability or provide fallbacks
-- [ ] Testing: new utility classes, functions with platform-specific code paths, or complex logic have corresponding unit tests; tests assert observable behavior (no empty tests that only exercise code paths); test logic actually exercises intended paths (not unreachable due to environment constraints); tests that mutate global state (e.g., process.env) properly restore it in finally/cleanup blocks
+- [ ] Code quality:
+    - No unjustified suppression of errors or warnings
+    - Avoid terminating the process from library/orchestration code (return status instead)
+    - Ensure CLI/entrypoint layers propagate internal failure codes to process exit status
+    - Return helper results instead of discarding them or duplicating return logic
+    - Use validated/narrowed local variables consistently (don't reach back to unvalidated input objects)
+    - Prefer explicit guards/failures
+    - Check for duplicated validation/parsing logic across multiple entry points and recommend shared helpers/constants
+    - Use centralized constants/config defaults instead of hard-coded duplicate values
+    - Related configuration values share consistent sourcing (when one is overridden, related values must be cleared or co-updated)
+    - Empty or whitespace-only environment variable values are treated as "not set" rather than overriding valid configuration from other sources
+    - Singleton/once-per-lifecycle initialization is verified (e.g., file truncation, cache seeding)
+- [ ] Accuracy:
+    - Docs/prompts/config instructions and examples match actual behavior and required fields (no false claims)
+    - Type definitions in code match their documentation (e.g., docstrings, comments)
+    - Cross-reference template instructions with corresponding validation schemas to ensure emitted fields are actually validated
+    - User-facing logs/errors clearly explain limits, skips, or partial results (especially for fallback paths and edge cases)
+    - Error/validation messages match the specific failure type (not generic catch-all text)
+    - Non-obvious platform-specific behavior, concurrency patterns, or API quirks have inline documentation
+    - Platform-specific commands check for availability or provide fallbacks
+    - All declared/parsed configuration options are actually referenced and used in code (no dead config)
+    - README/doc examples validated against actual formatter or output code (sample messages, CLI output, config snippets match real behavior)
+    - Inline comments accurately reflect variable scope, lifecycle, and all code paths that reach them (especially after adding new conditions or filtering logic)
+- [ ] Testing:
+    - New utility classes, functions with platform-specific code paths, or complex logic have corresponding unit tests
+    - Tests assert observable behavior (no empty tests that only exercise code paths)
+    - Test logic actually exercises intended paths (not unreachable due to environment constraints)
+    - Tests that mutate global state (e.g., environment variables, global mocks, system clock) properly restore it in teardown/cleanup blocks
+    - Async tests wait for all asynchronous operations—no unawaited tasks or futures with assertions that could be skipped or silently pass
+    - Mock/timer/global setup must have symmetric teardown (every mock/fake setup needs a guaranteed restoration in teardown or finally)
+    - Shared module-level mutable state (queues, registries, caches) is reset in setup hooks to prevent order-dependent test results
+    - Test environment variables are cleared/controlled in setup rather than inheriting host values
+    - Allocated filesystem resources (temp directories, created files) have corresponding cleanup in teardown
+    - Test assertions match actual API contracts—check for presence vs absence of optional fields and verify schema alignment between test expectations and implementation
+    - Mock return values match the actual values produced by the code under test (not stale, approximate, or placeholder strings—especially for UI option labels and formatted output)
 {% if has_agents_file %}- [ ] Project policy: no violations of AGENTS.md
 {% endif -%}
 - [ ] No test configuration changes without explicit approval
