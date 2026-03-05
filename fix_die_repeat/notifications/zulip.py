@@ -13,6 +13,7 @@ from fix_die_repeat.utils import run_command
 
 # Zulip-specific constants
 REQUEST_TIMEOUT = 10.0
+ZULIP_MESSAGES_ENDPOINT = "/api/v1/messages"
 
 # Module-level logger for repo detection functions
 logger = logging.getLogger(__name__)
@@ -149,9 +150,9 @@ class ZulipNotifier(Notifier):
         """
         return (
             self.config.enabled
-            and self.config.server_url is not None
-            and self.config.bot_email is not None
-            and self.config.bot_api_key is not None
+            and bool(self.config.server_url and self.config.server_url.strip())
+            and bool(self.config.bot_email and self.config.bot_email.strip())
+            and bool(self.config.bot_api_key and self.config.bot_api_key.strip())
         )
 
     def send(self, event: NotificationEvent) -> None:
@@ -187,7 +188,7 @@ class ZulipNotifier(Notifier):
             return
 
         # Build request with proper URL encoding
-        url = f"{self.config.server_url}/api/v1/messages"
+        url = f"{self.config.server_url.rstrip('/')}{ZULIP_MESSAGES_ENDPOINT}"
         payload = {
             "type": "stream",
             "to": self.config.stream,

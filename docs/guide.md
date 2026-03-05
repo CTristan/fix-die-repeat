@@ -154,7 +154,7 @@ Creates timestamped session logs in `.fix-die-repeat/` and enables verbose conso
 
 ## Notifications (Optional)
 
-Notifications are optional. fix-die-repeat can notify you when runs complete or fail, and when oscillation is detected. If a notification backend is not configured or reachable, the tool silently continues — no setup is required to use fix-die-repeat without notifications.
+Notifications are optional. fix-die-repeat can notify you when runs complete or fail, and when oscillation is detected. If a notification backend is not configured, notifications are simply skipped; if a configured backend is unreachable or fails, the tool logs the error but continues running — no setup is required to use fix-die-repeat without notifications.
 
 ### ntfy
 

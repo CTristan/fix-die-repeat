@@ -1570,6 +1570,7 @@ class TestCompleteSuccess:
 class TestFileLock:
     """Tests for _FileLock context manager."""
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="fcntl not available on Windows")
     def test_file_lock_acquires_and_releases_on_unix(self, tmp_path: Path) -> None:
         """Test that _FileLock acquires and releases lock on Unix systems."""
         # Create a test file

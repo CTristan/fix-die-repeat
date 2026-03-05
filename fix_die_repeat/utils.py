@@ -4,6 +4,7 @@ import contextlib
 import fnmatch
 import hashlib
 import importlib.metadata
+import io
 import json
 import logging
 import os
@@ -14,7 +15,7 @@ import tomllib
 import types
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Protocol, runtime_checkable
+from typing import IO, TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 import yaml
 from rich.console import Console
@@ -50,6 +51,11 @@ YAML_SUFFIXES = {".yaml", ".yml"}
 YAML_SEPARATOR = "\n---\n"
 DATE_FORMAT_MONTHLY = "%Y-%m"
 WINDOWS_LOCK_LENGTH = 0xFFFF
+
+# Constants for file handling and rotation to avoid magic values (PLR2004)
+SEEK_BACK_ONE = -1
+BINARY_NEWLINE = b"\n"
+BINARY_EMPTY = b""
 
 
 @runtime_checkable
@@ -306,7 +312,7 @@ def run_command(
     except subprocess.TimeoutExpired as exc:
         # exc.stdout is bytes | str | None (exception type is shared)
         if isinstance(exc.stdout, bytes):
-            stdout_str = exc.stdout.decode("utf-8")
+            stdout_str = exc.stdout.decode("utf-8", errors="replace")
         else:
             stdout_str = exc.stdout or ""
         return (EXIT_TIMEOUT, stdout_str, f"Command timed out after {timeout}s")
@@ -646,36 +652,51 @@ def _try_initial_rotation(path: Path, rotated_path: Path) -> bool:
         True if successful, False if rotation should be retried.
 
     """
+    # Use os.link() as an atomic check-and-reserve for the rotated path.
+    # If rotated_path already exists, this atomically raises FileExistsError
+    # without overwriting, preventing race conditions in concurrent environments.
     try:
-        # On Unix, os.rename silently overwrites. Use os.link to ensure failure if exists.
-        # os.link is atomic and fails with FileExistsError if rotated_path already exists.
         os.link(path, rotated_path)
+    except (FileExistsError, OSError):
+        # Destination exists or link failed (e.g., cross-device), cannot rotate safely
+        return False
+
+    # Successfully created hard link; remove original to complete rotation
+    try:
         path.unlink()
-    except (FileExistsError, AttributeError, OSError):
-        # Fallback for Windows (no os.link) or cross-partition links.
-        # On Windows, os.rename already fails if destination exists.
-        # On Unix cross-partition, check existence first to minimize race window.
-        if rotated_path.exists():
-            return False
-        try:
-            path.rename(rotated_path)
-        except (FileExistsError, OSError):
-            return False
-        else:
-            return True
-    else:
-        return True
+    except OSError:
+        # If we failed to unlink, we can't claim success because the original
+        # file still exists. The next run would try to rotate it again,
+        # leading to duplication since rotated_path now also exists.
+        return False
+
+    return True
 
 
 def _append_to_rotated_file(src: IO[str], rotated_path: Path) -> None:
     """Append content of source file to an existing rotated file."""
     with rotated_path.open("a+", encoding="utf-8") as target, _FileLock(target):
-        # Ensure target ends with newline to avoid malformed appends
-        target.seek(0, os.SEEK_END)
-        if target.tell() > 0:
-            target.seek(target.tell() - 1)
-            if target.read(1) != "\n":
-                target.write("\n")
+        # Ensure target ends with newline to avoid malformed appends.
+        # Use the existing handle's binary buffer to safely inspect the last byte
+        # to avoid reopening the file and potential sharing issues.
+        last_byte = BINARY_EMPTY
+        try:
+            # Use cast to Any to avoid mypy confusion with internal _WrappedBuffer
+            # and to handle potential Buffer return type in Python 3.12+
+            buffer = cast("Any", target.buffer)
+            buffer.seek(0, os.SEEK_END)
+            if buffer.tell() > 0:
+                buffer.seek(SEEK_BACK_ONE, os.SEEK_END)
+                last_byte = bytes(buffer.read(1))
+            # Re-sync TextIOWrapper after buffer manipulation
+            target.seek(0, os.SEEK_END)
+        except (OSError, io.UnsupportedOperation):
+            # If we can't inspect the file safely, fall back to not
+            # inserting a pre-append newline.
+            last_byte = BINARY_EMPTY
+
+        if last_byte not in (BINARY_EMPTY, BINARY_NEWLINE):
+            target.write("\n")
 
         src.seek(0)
         content = src.read()
