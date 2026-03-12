@@ -89,6 +89,12 @@ class NtfyNotifier(Notifier):
         iter_info = f"{event.iteration}/{event.max_iters} iterations"
         message = f"{event.message} ({iter_info}) in {event.duration_str} on {event.branch}"
 
+        # Build URL: handle both base server URL and full topic URL cases
+        # If self.url already contains a path component (e.g., "https://ntfy.sh/mytopic"),
+        # use it directly; otherwise append the topic
+        base_url = self.url.rstrip("/")
+        post_url = base_url if "/" in base_url.split("://", 1)[-1] else f"{base_url}/{topic}"
+
         # Send notification (ignore errors)
         run_command(
             [
@@ -96,7 +102,7 @@ class NtfyNotifier(Notifier):
                 "-sS",
                 "-X",
                 "POST",
-                f"{self.url}/{topic}",
+                post_url,
                 "-H",
                 f"Title: {title}",
                 "-H",
@@ -113,4 +119,4 @@ class NtfyNotifier(Notifier):
         )
 
         if self.logger:
-            self.logger.debug("Sent ntfy notification to %s/%s", self.url, topic)
+            self.logger.debug("Sent ntfy notification to %s", post_url)

@@ -226,5 +226,7 @@ class ZulipNotifier(Notifier):
             # URL scheme validated above (S310)
             with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as _response:
                 pass
+        except urllib.error.URLError:
+            self.logger.exception("Zulip notification failed")
         except Exception:
             self.logger.exception("Zulip notification failed")

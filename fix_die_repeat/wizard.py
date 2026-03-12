@@ -96,7 +96,7 @@ def _configure_ntfy(config: NotificationFileConfig) -> None:
     n: NtfyFileConfig = config.get("ntfy", {})
 
     url = click.prompt(
-        "ntfy topic URL (e.g., http://localhost:2586/mytopic)",
+        "ntfy server URL (e.g., http://localhost:2586)",
         default=n.get("url", "http://localhost:2586"),
     )
     enabled = click.confirm("Enable ntfy notifications?", default=n.get("enabled", True))
@@ -113,7 +113,7 @@ def _configure_ntfy(config: NotificationFileConfig) -> None:
 
     if click.confirm("Send a test notification now?", default=True):
         try:
-            send_ntfy_test_notification(url)
+            send_ntfy_test_notification(url, "test")
             console.print("✅ [green]Test notification sent successfully![/green]")
         except Exception as e:  # noqa: BLE001
             console.print(f"❌ [red]Failed to send test notification: {e}[/red]")

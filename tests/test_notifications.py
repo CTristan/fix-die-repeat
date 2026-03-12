@@ -349,6 +349,53 @@ class TestNtfyNotifier:
             # Only 'which curl' should have been called
             assert mock_run.call_count == 1
 
+    def test_send_with_url_already_containing_topic(self, tmp_path: Path) -> None:
+        """Test URL handling when URL already contains a path component."""
+        log_file = tmp_path / "test.log"
+        logger = configure_logger(fdr_log=log_file, session_log=None, debug=False)
+
+        # URL with embedded topic should be used directly
+        notifier = NtfyNotifier(
+            enabled=True,
+            url="http://localhost:2586/mytopic",
+            logger=logger,
+        )
+
+        event = NotificationEvent(
+            event_type=EventType.RUN_COMPLETED,
+            exit_code=0,
+            duration_str="5m 30s",
+            repo_name="test-repo",
+            branch="main",
+            iteration=TEST_ITERATION,
+            max_iters=TEST_MAX_ITERS,
+            message="Test message",
+        )
+
+        with (
+            patch("fix_die_repeat.notifications.ntfy.shutil") as mock_shutil,
+            patch("fix_die_repeat.notifications.ntfy.run_command") as mock_run,
+        ):
+            mock_shutil.which.return_value = "/usr/bin/curl"
+            mock_run.return_value = (0, "", "")
+            notifier.send(event)
+
+            # Check that curl was called with the embedded topic URL directly
+            calls = mock_run.call_args_list
+            assert len(calls) >= 1
+            # Find the curl POST call
+            post_call = None
+            for call in calls:
+                args = call[0][0]
+                if isinstance(args, list) and "-X" in args and "POST" in args:
+                    post_call = args
+                    break
+            assert post_call is not None
+            # The URL should NOT have another topic appended
+            assert "http://localhost:2586/mytopic" in post_call
+            # Should not have double topic like /mytopic/test-repo
+            assert "/test-repo" not in post_call
+
 
 class TestSanitizeNtfyTopic:
     """Tests for sanitize_ntfy_topic function."""

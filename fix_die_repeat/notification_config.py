@@ -228,11 +228,14 @@ def send_zulip_test_notification(
         raise ValueError(msg) from e
 
 
-def send_ntfy_test_notification(url: str) -> None:
+def send_ntfy_test_notification(url: str, topic: str = "fix-die-repeat-test") -> None:
     """Send a test notification to a ntfy URL.
 
     Args:
-        url: Full ntfy topic URL (e.g., http://localhost:2586/mytopic)
+        url: ntfy server URL (base or with embedded topic, e.g.,
+             http://localhost:2586 or http://localhost:2586/mytopic)
+        topic: ntfy topic name to post to (default: fix-die-repeat-test)
+               Ignored if url already contains a path component
 
     Raises:
         ValueError: If sending fails
@@ -242,8 +245,14 @@ def send_ntfy_test_notification(url: str) -> None:
         msg = "URL must start with http:// or https://"
         raise ValueError(msg)
 
+    # Handle both base server URL and full topic URL cases
+    # If url already contains a path component (e.g., "http://localhost:2586/test"),
+    # use it directly; otherwise append the topic
+    base_url = url.rstrip("/")
+    post_url = base_url if "/" in base_url.split("://", 1)[-1] else f"{base_url}/{topic}"
+
     request = urllib.request.Request(  # noqa: S310
-        url,
+        post_url,
         data="✅ fix-die-repeat: Test notification successful!".encode(),
         headers={
             "Title": "fix-die-repeat Test",

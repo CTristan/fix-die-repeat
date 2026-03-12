@@ -138,7 +138,7 @@ def test_configure_ntfy_success(
     assert saved_config["ntfy"]["url"] == "http://n.com"
     assert saved_config["ntfy"]["enabled"] is True
 
-    mock_send_ntfy.assert_called_once_with("http://n.com")
+    mock_send_ntfy.assert_called_once_with("http://n.com", "test")
 
 
 def test_configure_zulip_validation_failure_abort(

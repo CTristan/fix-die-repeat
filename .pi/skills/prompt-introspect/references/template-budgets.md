@@ -8,7 +8,7 @@ If a template exceeds **either** its line or byte budget after edits, the skill 
 
 | Template | Current Size | Budget (Lines) | Budget (Bytes) | Token Estimate |
 |---|---|---|---|---|
-| `local_review.j2` | 88 lines / 8.3KB | 100 lines | 8KB | ~2,000 tokens |
+| `local_review.j2` | 88 lines / 8.3KB | 100 lines | 8.5KB | ~2,000 tokens |
 | `fix_checks.j2` | 34 lines / 3.3KB | 50 lines | 5KB | ~1,200 tokens |
 | `resolve_review_issues.j2` | 24 lines / 1.4KB | 40 lines | 3KB | ~750 tokens |
 | `introspect_pr_review.j2` | 43 lines / 2.1KB | 60 lines | 4KB | ~1,000 tokens |

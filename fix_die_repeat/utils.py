@@ -658,18 +658,30 @@ def _try_initial_rotation(path: Path, rotated_path: Path) -> bool:
     # without overwriting, preventing race conditions in concurrent environments.
     try:
         os.link(path, rotated_path)
-    except (FileExistsError, OSError):
-        # Destination exists or link failed (e.g., cross-device), cannot rotate safely
+    except FileExistsError:
+        # Destination already exists, cannot rotate safely without overwriting
         return False
-
-    # Successfully created hard link; remove original to complete rotation
-    try:
-        path.unlink()
     except OSError:
-        # If we failed to unlink, we can't claim success because the original
-        # file still exists. The next run would try to rotate it again,
-        # leading to duplication since rotated_path now also exists.
-        return False
+        # Hardlink failed (e.g., cross-device, permissions, filesystem doesn't support it).
+        # Fall back to rename which works on same filesystem but isn't atomic for
+        # the existence check - we rely on the lock file for coordination.
+        try:
+            # Check if destination exists before rename to avoid silent overwrite
+            if rotated_path.exists():
+                return False
+            path.rename(rotated_path)
+        except OSError:
+            # Rename failed (e.g., cross-device), give up on initial rotation
+            return False
+    else:
+        # Successfully created hard link; remove original to complete rotation
+        try:
+            path.unlink()
+        except OSError:
+            # If we failed to unlink, we can't claim success because the original
+            # file still exists. The next run would try to rotate it again,
+            # leading to duplication since rotated_path now also exists.
+            return False
 
     return True
 
