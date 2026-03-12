@@ -2,6 +2,7 @@
 
 import logging
 import re
+import shutil
 
 from fix_die_repeat.notifications.base import EventType, NotificationEvent, Notifier
 from fix_die_repeat.utils import run_command
@@ -64,8 +65,7 @@ class NtfyNotifier(Notifier):
 
         """
         # Check if curl is available
-        returncode, _, _ = run_command(["which", "curl"], check=False)
-        if returncode != 0:
+        if shutil.which("curl") is None:
             return
 
         topic = sanitize_ntfy_topic(event.repo_name)

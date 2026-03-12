@@ -270,11 +270,18 @@ def _apply_notification_config(settings: Settings) -> None:
     _apply_project_stream_override(settings)
 
 
-def get_settings(options: CliOptions | None = None) -> Settings:
+def get_settings(
+    options: CliOptions | None = None,
+    *,
+    load_notification_config: bool = False,
+) -> Settings:
     """Create Settings instance from command line args and environment.
 
     Args:
         options: CLI override options grouped into a dataclass
+        load_notification_config: Whether to load notification config from files.
+            Defaults to False to maintain hermetic behavior for tests and library usage.
+            Set to True in the CLI entrypoint where config files should be loaded.
 
     Returns:
         Settings instance
@@ -283,8 +290,9 @@ def get_settings(options: CliOptions | None = None) -> Settings:
     # Get base settings from environment
     settings = Settings()
 
-    # Apply notification defaults from config files
-    _apply_notification_config(settings)
+    # Apply notification defaults from config files (only in CLI context)
+    if load_notification_config:
+        _apply_notification_config(settings)
 
     # Apply CLI overrides if provided
     if options is not None:

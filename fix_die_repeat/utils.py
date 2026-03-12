@@ -554,9 +554,10 @@ def append_to_file(
     with path.open("a+", encoding="utf-8") as f, _FileLock(f):
         # Ensure file ends with newline
         f.seek(0, os.SEEK_END)
-        if f.tell() > 0:
-            # For non-empty files, ensure a newline before appending.
+        if f.tell() > 0 and not (use_yaml_separator or use_safe_serializer):
+            # For non-empty files without YAML separator, ensure a newline before appending.
             # Avoid arithmetic on text-mode tell() cookies by unconditionally writing a newline.
+            # Note: YAML_SEPARATOR already begins with a newline, so we skip the extra newline.
             f.write("\n")
 
         if use_yaml_separator or use_safe_serializer:

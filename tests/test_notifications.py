@@ -20,7 +20,6 @@ from fix_die_repeat.utils import configure_logger
 # Constants for test event values
 TEST_ITERATION = 4
 TEST_MAX_ITERS = 10
-TEST_MIN_CALLS = 2
 TEST_OSCILLATION_ITERATION = 5
 TEST_DEFAULT_ITERATIONS = 10
 
@@ -240,16 +239,21 @@ class TestNtfyNotifier:
             message="Test message",
         )
 
-        with patch("fix_die_repeat.notifications.ntfy.run_command") as mock_run:
+        with (
+            patch("fix_die_repeat.notifications.ntfy.shutil") as mock_shutil,
+            patch("fix_die_repeat.notifications.ntfy.run_command") as mock_run,
+        ):
+            mock_shutil.which.return_value = "/usr/bin/curl"
             mock_run.return_value = (0, "", "")
             notifier.send(event)
 
-            # Should have been called (at least for 'which curl' and POST)
+            # Should have called run_command (for the curl POST)
             assert mock_run.called
             # Check that curl POST was called by examining call arguments
             calls = mock_run.call_args_list
-            # The first call is 'which curl', the second is the POST command
-            assert len(calls) >= TEST_MIN_CALLS
+            # Only 1 call expected: the curl POST command
+            # (shutil.which is mocked, not run via run_command)
+            assert len(calls) >= 1
             # Check that curl POST was called with --data-raw
             has_data_raw = any(
                 len(call[0]) > 0 and isinstance(call[0][0], list) and "--data-raw" in call[0][0]

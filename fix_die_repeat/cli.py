@@ -285,8 +285,8 @@ def _run_main(options: CliOptions) -> int:
     if is_running_in_dev_mode():
         console.print("[cyan]⚡ Running in DEV mode (editable install)[/cyan]")
 
-    # Get settings
-    settings = get_settings(options)
+    # Get settings (load notification config files)
+    settings = get_settings(options, load_notification_config=True)
 
     # Initialize paths
     paths = Paths()

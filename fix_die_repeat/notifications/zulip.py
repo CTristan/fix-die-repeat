@@ -162,6 +162,11 @@ class ZulipNotifier(Notifier):
             event: The notification event to send
 
         """
+        # Normalize config fields (strip whitespace)
+        server_url = self.config.server_url.strip() if self.config.server_url else ""
+        bot_email = self.config.bot_email.strip() if self.config.bot_email else ""
+        bot_api_key = self.config.bot_api_key.strip() if self.config.bot_api_key else ""
+
         # Format message based on event type
         if event.event_type == EventType.RUN_COMPLETED:
             emoji = "✓"
@@ -178,9 +183,7 @@ class ZulipNotifier(Notifier):
         )
 
         # Validate server URL scheme to prevent security issues (S310)
-        if not self.config.server_url or not self.config.server_url.startswith(
-            ("http://", "https://"),
-        ):
+        if not server_url or not server_url.startswith(("http://", "https://")):
             self.logger.error(
                 "Invalid Zulip server URL: must use http:// or https:// (got '%s')",
                 self.config.server_url,
@@ -188,7 +191,7 @@ class ZulipNotifier(Notifier):
             return
 
         # Build request with proper URL encoding
-        url = f"{self.config.server_url.rstrip('/')}{ZULIP_MESSAGES_ENDPOINT}"
+        url = f"{server_url.rstrip('/')}{ZULIP_MESSAGES_ENDPOINT}"
         payload = {
             "type": "stream",
             "to": self.config.stream,
@@ -198,7 +201,7 @@ class ZulipNotifier(Notifier):
         data = urllib.parse.urlencode(payload).encode()
 
         # Basic auth header
-        credentials = f"{self.config.bot_email}:{self.config.bot_api_key}"
+        credentials = f"{bot_email}:{bot_api_key}"
         auth_header = f"Basic {base64.b64encode(credentials.encode()).decode()}"
 
         # Validate URL scheme again before use (S310)
