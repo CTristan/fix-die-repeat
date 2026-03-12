@@ -261,7 +261,10 @@ def _run_main_with_error_handling(
         console.print("\n[yellow]Interrupted by user[/yellow]")
         return EXIT_INTERRUPTED
     except Exception as e:
-        logger.exception("Unexpected error in CLI entrypoint")
+        if debug:
+            logger.exception("Unexpected error in CLI entrypoint")
+        else:
+            logger.error("Unexpected error in CLI entrypoint: %s", e)  # noqa: TRY400
         console.print(f"[red]Unexpected error: {e}[/red]")
         if debug:
             console.print(traceback.format_exc())

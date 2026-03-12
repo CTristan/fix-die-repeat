@@ -1,16 +1,21 @@
 """Configuration management for fix-die-repeat."""
 
+import logging
 import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast, get_args, get_origin
 
 import pydantic as pyd
+from pydantic import TypeAdapter
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fix_die_repeat.detection import read_config_file
 from fix_die_repeat.notification_config import load_notification_config
 from fix_die_repeat.utils import run_command
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -206,12 +211,62 @@ def _apply_default_if_unset(
     config_values: dict[str, object],
     config_key: str,
 ) -> None:
-    """Apply a config value only when that settings field was not set by env/CLI."""
+    """Apply a config value only when that settings field was not set by env/CLI.
+
+    Validates the config value against the expected field type before setting.
+    Logs a warning and skips if the value is invalid or cannot be coerced.
+
+    """
     if settings_field in settings.model_fields_set:
         return
     if config_key not in config_values:
         return
-    setattr(settings, settings_field, config_values[config_key])
+
+    raw_value = config_values[config_key]
+    field = Settings.model_fields.get(settings_field)
+
+    if field is None:
+        logger.warning(
+            "Config key '%s' has no corresponding Settings field, skipping",
+            config_key,
+        )
+        return
+
+    # Get the expected type from the field
+    # field.annotation is type[Any] | None, but we handle None below
+    raw_field_type = field.annotation
+    if raw_field_type is None:
+        logger.warning(
+            "Config key '%s' has no type annotation, skipping",
+            config_key,
+        )
+        return
+    field_type: type[Any] = cast("type[Any]", raw_field_type)
+
+    # Handle optional types - extract inner type for validation
+    origin = get_origin(field_type)
+    if origin is not None:
+        # Union type (including Optional[T] which is Union[T, None])
+        args = get_args(field_type)
+        # Check if this is Optional (i.e., Union with NoneType)
+        non_none_types = [arg for arg in args if arg is not type(None)]
+        if len(non_none_types) == 1 and type(None) in args:
+            # This is Optional[T] - use the inner type
+            field_type = non_none_types[0]  # type: ignore[assignment]
+
+    # Validate/coerce the value using TypeAdapter
+    try:
+        type_adapter: TypeAdapter[Any] = TypeAdapter(field_type)
+        validated_value = type_adapter.validate_python(raw_value)
+        setattr(settings, settings_field, validated_value)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "Invalid value '%s' for config key '%s' (expected %s): %s. Skipping.",
+            raw_value,
+            config_key,
+            field_type.__name__ if hasattr(field_type, "__name__") else str(field_type),
+            e,
+        )
 
 
 def _apply_global_notification_defaults(settings: Settings) -> None:
@@ -260,7 +315,8 @@ def _apply_project_stream_override(settings: Settings) -> None:
 def _apply_notification_config(settings: Settings) -> None:
     """Apply global and project-level notification config as defaults.
 
-    Env vars (model_fields_set) take priority, then project config, then global config.
+    Application order: global config first, then project-level config,
+    with env vars (model_fields_set) taking final priority.
 
     Args:
         settings: Settings instance to modify
