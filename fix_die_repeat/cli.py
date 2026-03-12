@@ -162,7 +162,7 @@ def introspection_rotate(file_path: Path, max_lines: int) -> None:
 @click.option("--content", help="Content to append")
 @click.option(
     "--content-file",
-    type=click.Path(path_type=Path),
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="File containing content to append",
 )
 @click.option("--use-yaml-separator", is_flag=True, help="Add YAML separator before appending")

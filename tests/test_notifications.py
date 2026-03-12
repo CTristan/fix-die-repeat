@@ -283,7 +283,11 @@ class TestNtfyNotifier:
             message="Test message",
         )
 
-        with patch("fix_die_repeat.notifications.ntfy.run_command") as mock_run:
+        with (
+            patch("fix_die_repeat.notifications.ntfy.shutil") as mock_shutil,
+            patch("fix_die_repeat.notifications.ntfy.run_command") as mock_run,
+        ):
+            mock_shutil.which.return_value = "/usr/bin/curl"
             mock_run.return_value = (0, "", "")
             notifier.send(event)
 
@@ -312,7 +316,11 @@ class TestNtfyNotifier:
             message="Oscillation detected",
         )
 
-        with patch("fix_die_repeat.notifications.ntfy.run_command") as mock_run:
+        with (
+            patch("fix_die_repeat.notifications.ntfy.shutil") as mock_shutil,
+            patch("fix_die_repeat.notifications.ntfy.run_command") as mock_run,
+        ):
+            mock_shutil.which.return_value = "/usr/bin/curl"
             mock_run.return_value = (0, "", "")
             notifier.send(event)
 
@@ -341,13 +349,16 @@ class TestNtfyNotifier:
             message="Test message",
         )
 
-        with patch("fix_die_repeat.notifications.ntfy.run_command") as mock_run:
-            # Mock curl check to fail
-            mock_run.return_value = (127, "", "")
+        with (
+            patch("fix_die_repeat.notifications.ntfy.shutil") as mock_shutil,
+            patch("fix_die_repeat.notifications.ntfy.run_command") as mock_run,
+        ):
+            # Mock curl check to return None (curl not available)
+            mock_shutil.which.return_value = None
             notifier.send(event)
 
-            # Only 'which curl' should have been called
-            assert mock_run.call_count == 1
+            # run_command should not be called since we return early when curl is unavailable
+            assert not mock_run.called
 
     def test_send_with_url_already_containing_topic(self, tmp_path: Path) -> None:
         """Test URL handling when URL already contains a path component."""
