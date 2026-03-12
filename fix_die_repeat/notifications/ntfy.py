@@ -96,7 +96,7 @@ class NtfyNotifier(Notifier):
         post_url = base_url if "/" in base_url.split("://", 1)[-1] else f"{base_url}/{topic}"
 
         # Send notification (ignore errors)
-        run_command(
+        returncode, _stdout, stderr = run_command(
             [
                 "curl",
                 "-sS",
@@ -119,4 +119,12 @@ class NtfyNotifier(Notifier):
         )
 
         if self.logger:
-            self.logger.debug("Sent ntfy notification to %s", post_url)
+            if returncode == 0:
+                self.logger.debug("Sent ntfy notification to %s", post_url)
+            else:
+                self.logger.debug(
+                    "Failed to send ntfy notification to %s (exit code %d): %s",
+                    post_url,
+                    returncode,
+                    stderr,
+                )

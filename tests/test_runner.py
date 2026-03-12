@@ -1504,10 +1504,8 @@ class TestCompleteSuccess:
         with (
             patch("fix_die_repeat.runner.play_completion_sound"),
             patch("fix_die_repeat.runner.format_duration") as mock_format,
-            patch("fix_die_repeat.runner._detect_branch_name") as mock_branch,
         ):
             mock_format.return_value = "0s"
-            mock_branch.return_value = "main"
             result = runner.complete_success()
 
             # Check that the method returns 0
@@ -1551,10 +1549,8 @@ class TestCompleteSuccess:
         with (
             patch("fix_die_repeat.runner.play_completion_sound"),
             patch("fix_die_repeat.runner.format_duration") as mock_format,
-            patch("fix_die_repeat.runner._detect_branch_name") as mock_branch,
         ):
             mock_format.return_value = "5m 30s"
-            mock_branch.return_value = "main"
             result = runner.complete_success()
 
             # Check that the method returns 0

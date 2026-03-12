@@ -17,6 +17,7 @@ Options:
   --archive-artifacts       Archive existing artifacts to a timestamped folder
   --no-compact              Skip automatic compaction of large artifacts
   --pr-review               Enable PR review mode
+  --pr-review-introspect    Enable PR review mode with prompt introspection
   --test-model TEXT         Test model compatibility before running (exits after test)
   -d, --debug               Enable debug mode (timestamped session logs and verbose logging)
   --version                 Show the version and exit.
@@ -37,6 +38,7 @@ All options can be set via `FDR_`-prefixed environment variables:
 | `FDR_ARCHIVE_ARTIFACTS` | Archive existing artifacts | `0` |
 | `FDR_COMPACT_ARTIFACTS` | Auto-compact large artifacts | `1` |
 | `FDR_PR_REVIEW` | Enable PR review mode | `0` |
+| `FDR_PR_REVIEW_INTROSPECT` | Enable PR review with introspection | `0` |
 | `FDR_DEBUG` | Enable debug mode | `0` |
 | `FDR_NTFY_ENABLED` | Enable ntfy notifications | `1` |
 | `FDR_NTFY_URL` | ntfy server URL | `http://localhost:2586` |
@@ -139,6 +141,154 @@ Requirements: you must be on a branch with an open PR, and `gh auth status` must
 ```bash
 fix-die-repeat --pr-review --max-pr-threads 3
 ```
+
+---
+
+## PR Review Introspection
+
+PR review introspection analyzes completed PR review runs to identify gaps in your review and fix prompt templates. This helps you understand what types of issues are being missed and how to improve your prompts over time.
+
+### The Full Workflow
+
+Introspection works in two phases:
+
+**Phase 1: Collect** — Run `--pr-review-introspect` on each PR to accumulate data
+**Phase 2: Analyze** — Use the `prompt-introspect` skill to update prompts based on patterns
+
+### Phase 1: Collecting Introspection Data
+
+When enabled, introspection runs as a post-processing step after a successful PR review. It:
+
+1. **Collects data** about the PR threads processed, which ones were fixed, and which were declined
+2. **Analyzes the diff** of changes made by the agent
+3. **Categorizes each thread** with metadata about the issue type, language-specific gaps, and prompt improvement opportunities
+4. **Appends the analysis** to the global introspection inbox file
+
+#### Enabling Introspection
+
+```bash
+# Enable with CLI flag
+fix-die-repeat --pr-review-introspect
+
+# Or with environment variable
+export FDR_PR_REVIEW_INTROSPECT=1
+fix-die-repeat --pr-review
+```
+
+The `--pr-review-introspect` flag automatically enables PR review mode.
+
+Repeat this for each PR you want to analyze. Each run appends to the same inbox file.
+
+### Introspection Files
+
+| File | Purpose |
+|------|---------|
+| `introspection.yaml` | Inbox — pending entries waiting to be processed |
+| `introspection-summary.md` | Cumulative Markdown summary for trend context |
+| `introspection-archive.yaml` | Processed entries (marked `reviewed`) |
+
+Location: `~/.config/fix-die-repeat/` (respects `XDG_CONFIG_HOME`)
+
+### Understanding the Output
+
+Each introspection entry contains:
+
+| Field | Description |
+|-------|-------------|
+| `date` | Date of the introspection run |
+| `project` | Project name |
+| `pr_number` | PR number |
+| `pr_url` | URL to the PR |
+| `status` | `pending` or `reviewed` |
+| `threads` | List of thread analyses |
+
+Each thread includes:
+
+| Field | Description |
+|-------|-------------|
+| `id` | GraphQL thread ID |
+| `title` | Concise title (max 10 words) |
+| `category` | Issue category: security, error-handling, performance, correctness, code-quality, testing, documentation, configuration |
+| `outcome` | `fixed` or `wont-fix` |
+| `summary` | 1-2 sentences describing what was flagged and what the agent did |
+| `reason` | (wont-fix only) Why the agent declined to fix |
+| `relevance` | Assessment of whether improved prompts could catch this earlier |
+| `lang_check_gap` | For language-specific issues: would a lang_checks partial have caught it? If not, suggests a checklist item. |
+
+### Example Entry
+
+```yaml
+date: "2026-03-12"
+project: "my-project"
+pr_number: 42
+pr_url: "https://github.com/user/my-project/pull/42"
+status: pending
+threads:
+  - id: "PRR_abc123"
+    title: "Add null check for user object"
+    category: "error-handling"
+    outcome: fixed
+    summary: >
+      Reviewer flagged potential NPE if user object is null.
+      Agent added null check before accessing user fields.
+    relevance: >
+      Could be caught by requiring defensive null checks in prompts.
+    lang_check_gap: n/a
+```
+
+### Phase 2: Analyzing and Updating Prompts
+
+Once you've collected entries from multiple PRs, use the `prompt-introspect` skill to analyze patterns and update templates:
+
+```
+/skill:prompt-introspect
+```
+
+This skill:
+
+1. Reads pending entries from `introspection.yaml`
+2. Analyzes patterns across all entries using the summary for context
+3. Updates prompt templates to address identified gaps:
+   - `templates/local_review.j2` — for general review checklist items
+   - `templates/fix_checks.j2` — for fix patterns
+   - `templates/resolve_review_issues.j2` — for issue types the agent struggled with
+   - `templates/lang_checks/*.j2` — for language-specific patterns
+4. Marks processed entries as `status: reviewed`
+5. Archives reviewed entries and regenerates the summary
+
+#### Template Size Budgets
+
+Templates have size limits to ensure high-quality LLM instruction-following:
+
+| Template | Budget (Lines) | Budget (Bytes) |
+|----------|----------------|----------------|
+| `local_review.j2` | 100 lines | 8.5KB |
+| `fix_checks.j2` | 50 lines | 5KB |
+| `resolve_review_issues.j2` | 40 lines | 3KB |
+| `introspect_pr_review.j2` | 60 lines | 4KB |
+| Lang check partials (each) | 15 lines | 1KB |
+
+The skill enforces these budgets by consolidating items if needed.
+
+### Managing Introspection Files
+
+fix-die-repeat provides CLI commands to manage introspection files:
+
+```bash
+# Rotate a file when it exceeds a size limit
+fix-die-repeat introspection rotate ~/.config/fix-die-repeat/introspection.yaml
+
+# Append content safely with locking
+fix-die-repeat introspection append ~/.config/fix-die-repeat/introspection.yaml \
+  --content-file new-entry.yaml --use-yaml-separator
+```
+
+### Best Practices
+
+- **Collect data first**: Run `--pr-review-introspect` on several PRs before running the analysis skill
+- **Be conservative**: Only add template changes when there's a clear pattern (2+ entries in the same category)
+- **Stay language-agnostic**: Use `lang_checks/*.j2` for language-specific patterns, keep main templates generic
+- **Review changes**: The skill summarizes what was changed — verify each change makes sense
 
 ---
 

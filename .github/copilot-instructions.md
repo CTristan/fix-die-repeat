@@ -85,5 +85,64 @@ These ruff rules must NEVER be added to per-file-ignores in pyproject.toml. CI w
 - Test files mirror source structure in `tests/`
 - Use assert statements (pytest idiom)
 
+## PR Review Introspection
+
+Fix-die-repeat has a built-in introspection system for analyzing PR review patterns and improving prompts. This is a two-phase workflow:
+
+### Phase 1: Collect
+
+Run with `--pr-review-introspect` on each PR to accumulate data:
+
+```bash
+fix-die-repeat --pr-review-introspect
+```
+
+This appends YAML entries to `~/.config/fix-die-repeat/introspection.yaml`.
+
+### Phase 2: Analyze
+
+Use the `prompt-introspect` skill to analyze patterns and update templates:
+
+```
+/skill:prompt-introspect
+```
+
+This skill:
+- Reads pending entries from `introspection.yaml`
+- Analyzes patterns using `introspection-summary.md` for trend context
+- Updates templates to close identified gaps
+- Marks processed entries as `status: reviewed`
+- Archives entries and regenerates the summary
+
+### Key Files and Locations
+
+| Path | Purpose |
+|------|---------|
+| `.pi/skills/prompt-introspect/SKILL.md` | Full skill documentation |
+| `.pi/skills/prompt-introspect/references/` | Reference docs (categories, budgets, summary format) |
+| `~/.config/fix-die-repeat/introspection.yaml` | Inbox with pending entries |
+| `~/.config/fix-die-repeat/introspection-summary.md` | Cumulative Markdown summary |
+| `~/.config/fix-die-repeat/introspection-archive.yaml` | Processed entries |
+
+### Template Budgets
+
+Templates have size limits enforced by the skill:
+
+| Template | Max Lines | Max Bytes |
+|----------|-----------|-----------|
+| `local_review.j2` | 100 | 8.5KB |
+| `fix_checks.j2` | 50 | 5KB |
+| `resolve_review_issues.j2` | 40 | 3KB |
+| `introspect_pr_review.j2` | 60 | 4KB |
+| Lang check partials | 15 | 1KB |
+
+### When Working on Introspection
+
+1. **Read the skill first**: `.pi/skills/prompt-introspect/SKILL.md` has the authoritative workflow
+2. **Check reference docs**: `.pi/skills/prompt-introspect/references/` has categories, budgets, and summary format
+3. **Don't exceed budgets**: The skill enforces template size limits — consolidate items rather than adding more
+4. **Be conservative**: Only add template changes for clear patterns (2+ similar entries)
+5. **Keep templates language-agnostic**: Use `lang_checks/*.j2` for language-specific issues
+
 ## See Also
 - `CONTRIBUTING.md` — Dev setup, aliases, state file reference

@@ -76,17 +76,11 @@ class TestIsRunningInDevMode:
         assert result is False
 
     @patch("fix_die_repeat.utils.importlib.metadata.distribution")
-    def test_editable_install_detection(self, mock_distribution: MagicMock, tmp_path: Path) -> None:
+    def test_editable_install_detection(self, mock_distribution: MagicMock) -> None:
         """Test detection of editable install via direct_url.json."""
         # Create a mock distribution with direct_url.json
-        dist_path = tmp_path / "dist"
-        dist_path.mkdir()
-
-        direct_url_file = dist_path / "direct_url.json"
-        content = '{"dir_info": {"editable": true}, "url_info": {}}'
-        direct_url_file.write_text(content)
-
         mock_dist = MagicMock()
+        content = '{"dir_info": {"editable": true}, "url_info": {}}'
         mock_dist.read_text.return_value = content
         mock_distribution.return_value = mock_dist
 
@@ -94,20 +88,15 @@ class TestIsRunningInDevMode:
 
         # Should detect editable install
         assert result is True
+        # Verify that read_text was called with the correct filename
+        mock_dist.read_text.assert_called_once_with("direct_url.json")
 
     @patch("fix_die_repeat.utils.importlib.metadata.distribution")
-    def test_non_editable_install(self, mock_distribution: MagicMock, tmp_path: Path) -> None:
+    def test_non_editable_install(self, mock_distribution: MagicMock) -> None:
         """Test detection of non-editable install."""
-        # Create a mock distribution without direct_url.json or with editable: false
-        dist_path = tmp_path / "dist"
-        dist_path.mkdir()
-
-        # direct_url.json doesn't exist or has editable: false
-        direct_url_file = dist_path / "direct_url.json"
-        content = '{"dir_info": {"editable": false}, "url_info": {}}'
-        direct_url_file.write_text(content)
-
+        # Create a mock distribution with editable: false
         mock_dist = MagicMock()
+        content = '{"dir_info": {"editable": false}, "url_info": {}}'
         mock_dist.read_text.return_value = content
         mock_distribution.return_value = mock_dist
 
@@ -115,6 +104,8 @@ class TestIsRunningInDevMode:
 
         # Should detect non-editable (or handle gracefully)
         assert isinstance(result, bool)
+        # Verify that read_text was called with the correct filename
+        mock_dist.read_text.assert_called_once_with("direct_url.json")
 
     def test_exception_handling(self) -> None:
         """Test that exceptions are handled gracefully."""
