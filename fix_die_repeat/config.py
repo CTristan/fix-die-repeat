@@ -218,13 +218,17 @@ def _apply_default_if_unset(
 
     """
     if settings_field in settings.model_fields_set:
-        # Check if the field was set to an empty/whitespace value
-        # If so, treat it as unset to allow config file defaults to apply
+        # The field was explicitly set via env/CLI.
+        # Only treat it as unset if it is an empty/whitespace string.
         current_value = getattr(settings, settings_field, None)
-        if isinstance(current_value, str) and current_value.strip():
-            # Non-empty string - user explicitly set it, don't override
+        if isinstance(current_value, str):
+            if current_value.strip():
+                # Non-empty string - user explicitly set it, don't override
+                return
+            # Empty/whitespace string - treat as unset, allow config default
+        else:
+            # Non-string field explicitly set - do not override from config
             return
-        # None or empty/whitespace string - allow config default
     if config_key not in config_values:
         return
 

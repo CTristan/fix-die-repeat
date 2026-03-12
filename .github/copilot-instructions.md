@@ -49,9 +49,10 @@ These ruff rules must NEVER be added to per-file-ignores in pyproject.toml. CI w
 | **PLR2004** (magic numbers) | Extract to SCREAMING_SNAKE_CASE constants |
 | **PLC0415** (import not at top) | Move imports to top of file |
 
-### File Size Limits
-- Max 100 lines per function
-- Max 400 lines per file (split into modules if exceeded)
+### File Size Guidelines
+- Target ~100 lines per function (refactor or extract helpers when functions grow larger)
+- Target ~400 lines per file (consider splitting into modules when much larger, especially for non-test code)
+- Max 2000 lines per file
 
 ### Ruff Configuration
 - Line length: 100
