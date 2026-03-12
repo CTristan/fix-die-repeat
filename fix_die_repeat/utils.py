@@ -620,30 +620,46 @@ def rotate_file(
         if not path.is_file() or get_file_line_count(path) <= max_lines:
             return None
 
+        result: Path | None = None
+
         # Determine if we append or perform initial rotation
         if rotated_path.exists():
+            # Safety check: if path and rotated_path are hard links to the same inode
+            # (can happen if previous rotation failed after os.link() succeeded but
+            # path.unlink() failed), complete the rotation by unlinking path so only
+            # rotated_path remains.
+            try:
+                if path.stat().st_ino == rotated_path.stat().st_ino:
+                    # Both are hard links to the same file - complete the rotation
+                    # by removing path, leaving only rotated_path
+                    with contextlib.suppress(OSError):
+                        path.unlink()
+                    return rotated_path
+            except OSError:
+                # If we can't stat either file, proceed with normal rotation logic
+                pass
+
             # Atomic move to temporary file on same partition
             tmp_rotating = path.with_suffix(path.suffix + f".{os.getpid()}.rotating")
             try:
                 path.rename(tmp_rotating)
             except OSError:
                 # Source vanished or was renamed by another process
-                return rotated_path if rotated_path.exists() else None
+                result = rotated_path if rotated_path.exists() else None
+            else:
+                # Append content from temporary file to rotated file
+                with tmp_rotating.open("r", encoding="utf-8") as src:
+                    _append_to_rotated_file(src, rotated_path)
 
-            # Append content from temporary file to rotated file
-            with tmp_rotating.open("r", encoding="utf-8") as src:
-                _append_to_rotated_file(src, rotated_path)
+                # Cleanup temporary file
+                with contextlib.suppress(OSError):
+                    tmp_rotating.unlink()
+                result = rotated_path
+        elif _try_initial_rotation(path, rotated_path):
+            # Initial rotation for this period
+            result = rotated_path
 
-            # Cleanup temporary file
-            with contextlib.suppress(OSError):
-                tmp_rotating.unlink()
-            return rotated_path
-
-        # Initial rotation for this period
-        if _try_initial_rotation(path, rotated_path):
-            return rotated_path
-
-    return None
+    return result
 
 
 def _try_initial_rotation(path: Path, rotated_path: Path) -> bool:
@@ -681,6 +697,10 @@ def _try_initial_rotation(path: Path, rotated_path: Path) -> bool:
             # If we failed to unlink, we can't claim success because the original
             # file still exists. The next run would try to rotate it again,
             # leading to duplication since rotated_path now also exists.
+            # Best-effort cleanup: remove the rotated copy to prevent content
+            # duplication on retry.
+            with contextlib.suppress(OSError):
+                rotated_path.unlink()
             return False
 
     return True
