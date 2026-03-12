@@ -5,3 +5,4 @@ Elixir/Phoenix:
 - [ ] GenServer `handle_call`/`handle_cast` includes timeout or handles unexpected messages
 - [ ] No sensitive data in Logger output (tokens, passwords, PII)
 - [ ] LiveView assigns are minimized — no large data structures pushed to the socket
+- [ ] HEEx templates (Phoenix 1.7+ / LiveView 0.18+): `{expression}` is valid for BOTH attribute values AND text content — do NOT flag this as an error. The legacy `<%= expression %>` form also works but `{expression}` is the modern syntax
