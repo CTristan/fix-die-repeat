@@ -7,7 +7,8 @@ Note: 'fix-die-repeat' is the name of this script, NOT a pi tool. Do not attempt
 For each issue in review_current.md:
 1. Use the 'read' tool to examine the relevant file
 2. Use the 'edit' tool to make the specific fix
-3. Move to the NEXT issue immediately after each fix
+3. If the same bug pattern appears in adjacent call sites/tests, apply the fix consistently in that scope before moving on
+4. Move to the NEXT issue immediately after each fix block
 
 DO NOT:
 - Generate pseudo-code or execution plans

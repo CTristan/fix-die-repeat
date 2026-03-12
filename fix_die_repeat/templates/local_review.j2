@@ -55,7 +55,7 @@ CRITICAL REVIEW CHECKLIST (LANGUAGE-AGNOSTIC):
 - [ ] Testing:
     - New utility classes, functions with platform-specific code paths, or complex logic have corresponding unit tests
     - Tests assert observable behavior (no empty tests that only exercise code paths)
-    - Test logic actually exercises intended paths (not unreachable due to environment constraints)
+    - Test logic actually exercises intended paths (no early-return skips/silent passes; not unreachable due to environment constraints)
     - Tests that mutate global state (e.g., environment variables, global mocks, system clock) properly restore it in teardown/cleanup blocks
     - Async tests wait for all asynchronous operations—no unawaited tasks or futures with assertions that could be skipped or silently pass
     - Mock/timer/global setup must have symmetric teardown (every mock/fake setup needs a guaranteed restoration in teardown or finally)
@@ -63,7 +63,7 @@ CRITICAL REVIEW CHECKLIST (LANGUAGE-AGNOSTIC):
     - Test environment variables are cleared/controlled in setup rather than inheriting host values
     - Allocated filesystem resources (temp directories, created files) have corresponding cleanup in teardown
     - Test assertions match actual API contracts—check for presence vs absence of optional fields and verify schema alignment between test expectations and implementation
-    - Mock return values match the actual values produced by the code under test (not stale, approximate, or placeholder strings—especially for UI option labels and formatted output)
+    - Mocks/patches are actually exercised, mock return values match real outputs, and tests avoid redundant real I/O when mocks already cover the path
 {% if has_agents_file %}- [ ] Project policy: no violations of AGENTS.md
 {% endif -%}
 - [ ] No test configuration changes without explicit approval

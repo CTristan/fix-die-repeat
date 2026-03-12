@@ -3,5 +3,6 @@ JavaScript/TypeScript:
 - [ ] No prototype pollution vectors (`__proto__`, `constructor.prototype`)
 - [ ] Strict equality (`===`) used — no implicit type coercion
 - [ ] Async error handling: all Promises have `.catch()` or are `await`ed in try/catch
+- [ ] Date/time logic with explicit timezones handles DST boundary cases; tests gate or mock timezone support when runtimes may lack IANA data
 - [ ] No `any` type in TypeScript unless explicitly justified
 - [ ] No secrets or API keys in client-side code or bundled assets
