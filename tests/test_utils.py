@@ -23,9 +23,8 @@ from fix_die_repeat.utils import (
     is_excluded_file,
     is_running_in_dev_mode,
     play_completion_sound,
+    rotate_file,
     run_command,
-    sanitize_ntfy_topic,
-    send_ntfy_notification,
 )
 
 # Constants for utils test values
@@ -77,43 +76,36 @@ class TestIsRunningInDevMode:
         assert result is False
 
     @patch("fix_die_repeat.utils.importlib.metadata.distribution")
-    def test_editable_install_detection(self, mock_distribution: MagicMock, tmp_path: Path) -> None:
+    def test_editable_install_detection(self, mock_distribution: MagicMock) -> None:
         """Test detection of editable install via direct_url.json."""
         # Create a mock distribution with direct_url.json
-        dist_path = tmp_path / "dist"
-        dist_path.mkdir()
-
-        direct_url_file = dist_path / "direct_url.json"
-        direct_url_file.write_text('{"dir_info": {"editable": true}, "url_info": {}}')
-
         mock_dist = MagicMock()
-        mock_dist._path = str(dist_path)  # noqa: SLF001
+        content = '{"dir_info": {"editable": true}, "url_info": {}}'
+        mock_dist.read_text.return_value = content
         mock_distribution.return_value = mock_dist
 
         result = is_running_in_dev_mode()
 
         # Should detect editable install
         assert result is True
+        # Verify that read_text was called with the correct filename
+        mock_dist.read_text.assert_called_once_with("direct_url.json")
 
     @patch("fix_die_repeat.utils.importlib.metadata.distribution")
-    def test_non_editable_install(self, mock_distribution: MagicMock, tmp_path: Path) -> None:
+    def test_non_editable_install(self, mock_distribution: MagicMock) -> None:
         """Test detection of non-editable install."""
-        # Create a mock distribution without direct_url.json or with editable: false
-        dist_path = tmp_path / "dist"
-        dist_path.mkdir()
-
-        # direct_url.json doesn't exist or has editable: false
-        direct_url_file = dist_path / "direct_url.json"
-        direct_url_file.write_text('{"dir_info": {"editable": false}, "url_info": {}}')
-
+        # Create a mock distribution with editable: false
         mock_dist = MagicMock()
-        mock_dist._path = str(dist_path)  # noqa: SLF001
+        content = '{"dir_info": {"editable": false}, "url_info": {}}'
+        mock_dist.read_text.return_value = content
         mock_distribution.return_value = mock_dist
 
         result = is_running_in_dev_mode()
 
         # Should detect non-editable (or handle gracefully)
         assert isinstance(result, bool)
+        # Verify that read_text was called with the correct filename
+        mock_dist.read_text.assert_called_once_with("direct_url.json")
 
     def test_exception_handling(self) -> None:
         """Test that exceptions are handled gracefully."""
@@ -206,24 +198,6 @@ class TestDetectLargeFiles:
         assert "CRITICAL WARNING" in warning
         assert "large1.py (2200 lines)" in warning
         assert "large2.py (3000 lines)" in warning
-
-
-class TestSanitizeNtfyTopic:
-    """Tests for sanitize_ntfy_topic function."""
-
-    def test_alphanumeric(self) -> None:
-        """Test sanitizing alphanumeric string."""
-        assert sanitize_ntfy_topic("TestRepo123") == "testrepo123"
-
-    def test_special_chars(self) -> None:
-        """Test sanitizing string with special characters."""
-        assert sanitize_ntfy_topic("test-repo_name") == "test-repo_name"
-        assert sanitize_ntfy_topic("test.repo") == "test.repo"
-
-    def test_spaces_and_specials(self) -> None:
-        """Test sanitizing string with spaces and other specials."""
-        assert sanitize_ntfy_topic("My Test Repo!") == "my-test-repo"
-        assert sanitize_ntfy_topic("test@repo#123") == "test-repo-123"
 
 
 class TestConfigureLogger:
@@ -429,70 +403,6 @@ class TestPlayCompletionSound:
         play_completion_sound()
 
 
-class TestSendNtfyNotification:
-    """Tests for send_ntfy_notification function."""
-
-    def test_send_ntfy_success(self, tmp_path: Path) -> None:
-        """Test sending notification successfully."""
-        log_file = tmp_path / "test.log"
-        logger = configure_logger(fdr_log=log_file, session_log=None, debug=False)
-
-        # Mock curl to succeed
-        with patch("fix_die_repeat.utils.run_command") as mock_run:
-            mock_run.return_value = (0, "", "")
-
-            send_ntfy_notification(
-                exit_code=0,
-                duration_str="5m 30s",
-                repo_name="test-repo",
-                ntfy_url="http://localhost:2586",
-                logger=logger,
-            )
-
-            # Check that curl was called (at least for the 'which curl' check)
-            assert mock_run.called
-
-    def test_send_ntfy_curl_not_available(self, tmp_path: Path) -> None:
-        """Test notification when curl is not available."""
-        log_file = tmp_path / "test.log"
-        logger = configure_logger(fdr_log=log_file, session_log=None, debug=False)
-
-        # Mock curl check to fail
-        with patch("fix_die_repeat.utils.run_command") as mock_run:
-            mock_run.return_value = (127, "", "")
-
-            send_ntfy_notification(
-                exit_code=0,
-                duration_str="5m 30s",
-                repo_name="test-repo",
-                ntfy_url="http://localhost:2586",
-                logger=logger,
-            )
-
-            # Should return early without trying to send
-            # Only the 'which curl' call
-            assert mock_run.call_count == 1
-
-    def test_send_ntfy_failure_exit_code(self, tmp_path: Path) -> None:
-        """Test notification for failed exit code."""
-        log_file = tmp_path / "test.log"
-        logger = configure_logger(fdr_log=log_file, session_log=None, debug=False)
-
-        with patch("fix_die_repeat.utils.run_command") as mock_run:
-            mock_run.return_value = (0, "", "")
-
-            send_ntfy_notification(
-                exit_code=1,
-                duration_str="1m 0s",
-                repo_name="test-repo",
-                ntfy_url="http://localhost:2586",
-                logger=logger,
-            )
-
-            # Check that curl was called
-            assert mock_run.called
-
-
 class TestCollectGitFiles:
     """Tests for _collect_git_files function."""
 
@@ -658,3 +568,103 @@ class TestPlayCompletionSoundFallback:
         )
         mock_write.assert_called_once_with("\a")
         mock_flush.assert_called_once()
+
+
+class TestRotateFile:
+    """Tests for rotate_file function."""
+
+    def test_rotate_file_no_rotation_under_threshold(self, tmp_path: Path) -> None:
+        """Test that file is not rotated when under threshold."""
+        test_file = tmp_path / "test.yaml"
+        test_file.write_text("line1\nline2")
+
+        result = rotate_file(test_file, max_lines=10)
+
+        assert result is None
+        assert test_file.exists()
+        assert not any(tmp_path.glob("test-*.yaml"))
+
+    def test_rotate_file_rename_on_rotation(self, tmp_path: Path) -> None:
+        """Test that file is renamed when over threshold."""
+        test_file = tmp_path / "test.yaml"
+        test_file.write_text("line1\nline2\nline3")
+
+        result = rotate_file(test_file, max_lines=2, date_suffix="2026-03")
+
+        expected_rotated = tmp_path / "test-2026-03.yaml"
+        assert result == expected_rotated
+        assert not test_file.exists()
+        assert expected_rotated.exists()
+        assert expected_rotated.read_text() == "line1\nline2\nline3"
+
+    def test_rotate_file_append_if_exists(self, tmp_path: Path) -> None:
+        """Test that file content is appended if rotated file already exists."""
+        test_file = tmp_path / "test.yaml"
+        test_file.write_text("line1\nline2\nline3")
+
+        rotated_file = tmp_path / "test-2026-03.yaml"
+        rotated_file.write_text("old content\n")
+
+        result = rotate_file(test_file, max_lines=2, date_suffix="2026-03")
+
+        assert result == rotated_file
+        assert not test_file.exists()
+        # My new implementation uses YAML separator and ensures newlines
+        content = rotated_file.read_text()
+        assert "old content\n" in content
+        assert "\n---\n" in content
+        assert "line1" in content
+
+    def test_rotate_file_no_separator_for_txt(self, tmp_path: Path) -> None:
+        """Test that non-YAML files don't get a separator on append."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("line1\nline2\nline3")
+
+        rotated_file = tmp_path / "test-2026-03.txt"
+        rotated_file.write_text("old text")
+
+        rotate_file(test_file, max_lines=2, date_suffix="2026-03")
+
+        # My new implementation ensures newlines between appends
+        assert rotated_file.read_text() == "old text\nline1\nline2\nline3\n"
+
+    def test_rotate_file_is_directory(self, tmp_path: Path) -> None:
+        """Test rotation fails if path is a directory."""
+        test_dir = tmp_path / "test_dir"
+        test_dir.mkdir()
+        result = rotate_file(test_dir)
+        assert result is None
+
+    def test_rotate_file_not_existent(self, tmp_path: Path) -> None:
+        """Test rotation of non-existent file."""
+        result = rotate_file(tmp_path / "missing.yaml")
+        assert result is None
+
+    def test_rotate_file_malformed_yaml(self, tmp_path: Path) -> None:
+        """Test rotation with malformed YAML file."""
+        test_file = tmp_path / "test.yaml"
+        # Invalid YAML (mapping key without value)
+        test_file.write_text("invalid: yaml: content\n" * 10)
+
+        rotated_file = tmp_path / "test-2026-03.yaml"
+        rotated_file.write_text("old content\n")
+
+        # rotate_file calls get_file_line_count internally to determine line count.
+        # With 10 lines and max_lines=2, rotation should occur.
+        rotate_file(test_file, max_lines=2, date_suffix="2026-03")
+
+        # Should fallback to string concatenation
+        content = rotated_file.read_text()
+        assert "old content\n" in content
+        assert "\n---\n" in content
+        assert "invalid: yaml: content" in content
+
+    def test_rotate_file_permission_error(self, tmp_path: Path) -> None:
+        """Test rotation behavior under permission errors."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("content\n" * 10)
+
+        # Mock open to raise PermissionError
+        with patch.object(Path, "open", side_effect=PermissionError("Permission denied")):
+            with pytest.raises(PermissionError):
+                rotate_file(test_file, max_lines=2)

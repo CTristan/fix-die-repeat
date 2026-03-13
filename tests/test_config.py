@@ -11,7 +11,9 @@ from fix_die_repeat.config import (
     CliOptions,
     Paths,
     Settings,
+    get_introspection_archive_path,
     get_introspection_file_path,
+    get_introspection_summary_path,
     get_settings,
 )
 from fix_die_repeat.utils import run_command
@@ -63,6 +65,11 @@ class TestSettings:
         assert not settings.debug
         assert settings.ntfy_enabled
         assert settings.ntfy_url == "http://localhost:2586"
+        assert not settings.zulip_enabled
+        assert settings.zulip_server_url is None
+        assert settings.zulip_bot_email is None
+        assert settings.zulip_bot_api_key is None
+        assert settings.zulip_stream == "fix-die-repeat"
 
     def test_settings_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test settings from environment variables."""
@@ -74,6 +81,21 @@ class TestSettings:
         assert settings.check_cmd == "make test"
         assert settings.max_iters == TEST_MAX_ITERS
         assert settings.model == "anthropic/claude-sonnet-4-5"
+
+    def test_zulip_settings_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that Zulip settings can be set via environment variables."""
+        monkeypatch.setenv("FDR_ZULIP_ENABLED", "1")
+        monkeypatch.setenv("FDR_ZULIP_SERVER_URL", "https://zulip.example.com")
+        monkeypatch.setenv("FDR_ZULIP_BOT_EMAIL", "bot@example.com")
+        monkeypatch.setenv("FDR_ZULIP_BOT_API_KEY", "test-api-key")
+        monkeypatch.setenv("FDR_ZULIP_STREAM", "my-stream")
+
+        settings = Settings()
+        assert settings.zulip_enabled
+        assert settings.zulip_server_url == "https://zulip.example.com"
+        assert settings.zulip_bot_email == "bot@example.com"
+        assert settings.zulip_bot_api_key == "test-api-key"
+        assert settings.zulip_stream == "my-stream"
 
     def test_languages_default_none(self) -> None:
         """Test that languages defaults to None."""
@@ -347,3 +369,29 @@ class TestGetIntrospectionFilePath:
         # Verify parent directories were created
         assert path.parent.exists()
         assert path.parent.is_dir()
+
+
+class TestGetIntrospectionSummaryPath:
+    """Tests for get_introspection_summary_path function."""
+
+    def test_default_location(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Test default location is ~/.config/fix-die-repeat/introspection-summary.md."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+        path = get_introspection_summary_path()
+        expected = tmp_path / ".config" / "fix-die-repeat" / "introspection-summary.md"
+        assert path == expected
+
+
+class TestGetIntrospectionArchivePath:
+    """Tests for get_introspection_archive_path function."""
+
+    def test_default_location(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Test default location is ~/.config/fix-die-repeat/introspection-archive.yaml."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+        path = get_introspection_archive_path()
+        expected = tmp_path / ".config" / "fix-die-repeat" / "introspection-archive.yaml"
+        assert path == expected

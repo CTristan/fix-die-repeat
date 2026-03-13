@@ -1,6 +1,9 @@
 """Command-line interface for fix-die-repeat."""
 
+import logging
 import traceback
+from pathlib import Path
+from typing import cast
 
 import click
 from rich.console import Console
@@ -12,12 +15,22 @@ from fix_die_repeat.detection import (
     validate_check_cmd_or_exit,
 )
 from fix_die_repeat.runner import PiRunner
-from fix_die_repeat.utils import is_running_in_dev_mode
+from fix_die_repeat.utils import (
+    DEFAULT_MAX_LINES,
+    append_to_file,
+    is_running_in_dev_mode,
+    rotate_file,
+)
+from fix_die_repeat.wizard import run_wizard
 
 console = Console()
+logger = logging.getLogger(__name__)
+
+# Exit codes
+EXIT_INTERRUPTED = 130
 
 
-@click.command()
+@click.group(invoke_without_command=True)
 @click.option(
     "-c",
     "--check-cmd",
@@ -79,7 +92,8 @@ console = Console()
     envvar="FDR_DEBUG",
 )
 @click.version_option()
-def main(**kwargs: str | int | bool | None) -> None:
+@click.pass_context
+def main(ctx: click.Context, **kwargs: str | int | bool | None) -> None:
     r"""Automated check, review, and fix loop using pi.
 
     \f
@@ -109,9 +123,79 @@ def main(**kwargs: str | int | bool | None) -> None:
       fix-die-repeat --pr-review
 
     """
-    debug = bool(kwargs.get("debug", False))
-    exit_code = _run_main_with_error_handling(kwargs, debug=debug)
-    raise SystemExit(exit_code)
+    if ctx.invoked_subcommand is None:
+        debug = bool(kwargs.get("debug", False))
+        exit_code = _run_main_with_error_handling(kwargs, debug=debug)
+        raise SystemExit(exit_code)
+
+
+@main.command(name="config")
+def config_cmd() -> None:
+    """Configure notification backends interactively."""
+    run_wizard()
+
+
+@main.group()
+def introspection() -> None:
+    """Introspection management commands."""
+
+
+@introspection.command(name="rotate")
+@click.argument("file_path", type=click.Path(path_type=Path))
+@click.option(
+    "--max-lines",
+    type=int,
+    default=DEFAULT_MAX_LINES,
+    help="Maximum lines before rotation",
+)
+def introspection_rotate(file_path: Path, max_lines: int) -> None:
+    """Safely rotate an introspection file with locking."""
+    result = rotate_file(file_path, max_lines=max_lines)
+    if result:
+        console.print(f"Rotated {file_path} to {result}")
+    else:
+        console.print(f"No rotation needed for {file_path}")
+
+
+@introspection.command(name="append")
+@click.argument("file_path", type=click.Path(path_type=Path))
+@click.option("--content", help="Content to append")
+@click.option(
+    "--content-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="File containing content to append",
+)
+@click.option("--use-yaml-separator", is_flag=True, help="Add YAML separator before appending")
+@click.option("--use-safe-serializer", is_flag=True, help="Use safe YAML serializer for appending")
+def introspection_append(**kwargs: str | int | bool | None) -> None:
+    """Safely append content to an introspection file with locking."""
+    # Click ensures the correct types for arguments and options.
+    file_path = cast("Path", kwargs.get("file_path"))
+    content = cast("str | None", kwargs.get("content"))
+    content_file = cast("Path | None", kwargs.get("content_file"))
+    use_yaml_separator = bool(kwargs.get("use_yaml_separator", False))
+    use_safe_serializer = bool(kwargs.get("use_safe_serializer", False))
+
+    if content_file:
+        append_content = content_file.read_text(encoding="utf-8")
+    elif content:
+        append_content = content
+    else:
+        console.print("[red]Error: Must provide --content or --content-file[/red]")
+        raise SystemExit(1)
+
+    try:
+        append_to_file(
+            file_path,
+            append_content,
+            use_yaml_separator=use_yaml_separator,
+            use_safe_serializer=use_safe_serializer,
+        )
+    except OSError as e:
+        console.print(f"[red]Error appending to file: {e}[/red]")
+        raise SystemExit(1) from e
+
+    console.print(f"Successfully appended to {file_path}")
 
 
 def _build_cli_options(kwargs: dict[str, str | int | bool | None]) -> CliOptions:
@@ -175,8 +259,12 @@ def _run_main_with_error_handling(
         return 1
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted by user[/yellow]")
-        return 130
+        return EXIT_INTERRUPTED
     except Exception as e:
+        if debug:
+            logger.exception("Unexpected error in CLI entrypoint")
+        else:
+            logger.error("Unexpected error in CLI entrypoint: %s", e)  # noqa: TRY400
         console.print(f"[red]Unexpected error: {e}[/red]")
         if debug:
             console.print(traceback.format_exc())
@@ -200,8 +288,8 @@ def _run_main(options: CliOptions) -> int:
     if is_running_in_dev_mode():
         console.print("[cyan]⚡ Running in DEV mode (editable install)[/cyan]")
 
-    # Get settings
-    settings = get_settings(options)
+    # Get settings (load notification config files)
+    settings = get_settings(options, load_notification_config=True)
 
     # Initialize paths
     paths = Paths()

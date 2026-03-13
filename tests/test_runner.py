@@ -1,16 +1,16 @@
 """Tests for runner module."""
 
 import sys
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fix_die_repeat import runner_introspection as runner_introspection_module
+from fix_die_repeat import utils as utils_module
+from fix_die_repeat.notifications import EventType
 from fix_die_repeat.runner import PiRunner
-from fix_die_repeat.runner_introspection import (  # Testing private class is intentional
-    _FileLock,
-)
+from fix_die_repeat.utils import _FileLock
 
 # Constants for runner test values
 TEST_PI_DELAY_SECONDS = 2
@@ -229,7 +229,12 @@ class TestRunFixAttempt:
         runner = PiRunner.__new__(PiRunner)
         runner.settings = settings
         runner.paths = paths
+        runner.project_root = paths.project_root
         runner.iteration = 1
+        runner.script_start_time = time.time()
+        runner.repo_name = paths.project_root.name  # type: ignore[attr-defined]
+        runner.branch_name = "main"  # type: ignore[attr-defined]
+        runner.notification_manager = MagicMock()
         runner.logger = MagicMock()
         runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
@@ -1471,6 +1476,7 @@ class TestCompleteSuccess:
         """Test completing the run successfully."""
         settings = MagicMock()
         settings.ntfy_enabled = False
+        settings.max_iters = 10
         paths = MagicMock()
         paths.fdr_dir = tmp_path
         paths.review_file = tmp_path / "review.md"
@@ -1482,6 +1488,10 @@ class TestCompleteSuccess:
         runner = PiRunner.__new__(PiRunner)
         runner.settings = settings
         runner.paths = paths
+        runner.project_root = paths.project_root
+        runner.repo_name = paths.project_root.name  # type: ignore[attr-defined]
+        runner.branch_name = "main"  # type: ignore[attr-defined]
+        runner.notification_manager = MagicMock()
         runner.iteration = 1
         runner.script_start_time = 0
         runner.session_log = tmp_path / "session.log"
@@ -1503,12 +1513,15 @@ class TestCompleteSuccess:
             # Check that temporary files were cleaned up
             assert not paths.review_current_file.exists()
             assert not paths.start_sha_file.exists()
+            # Verify notification was sent
+            runner.notification_manager.notify.assert_called_once()
 
-    def test_complete_success_with_ntfy(self, tmp_path: Path) -> None:
-        """Test completing the run with ntfy notification."""
+    def test_complete_success_with_notifications(self, tmp_path: Path) -> None:
+        """Test completing the run with notifications."""
         settings = MagicMock()
         settings.ntfy_enabled = True
         settings.ntfy_url = "http://localhost:2586"
+        settings.max_iters = 10
         paths = MagicMock()
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
@@ -1520,6 +1533,10 @@ class TestCompleteSuccess:
         runner = PiRunner.__new__(PiRunner)
         runner.settings = settings
         runner.paths = paths
+        runner.project_root = paths.project_root
+        runner.repo_name = paths.project_root.name  # type: ignore[attr-defined]
+        runner.branch_name = "main"  # type: ignore[attr-defined]
+        runner.notification_manager = MagicMock()
         runner.iteration = 1
         runner.script_start_time = 330  # 5 min 30 sec
         runner.session_log = tmp_path / "session.log"
@@ -1531,7 +1548,6 @@ class TestCompleteSuccess:
 
         with (
             patch("fix_die_repeat.runner.play_completion_sound"),
-            patch("fix_die_repeat.runner.send_ntfy_notification") as mock_ntfy,
             patch("fix_die_repeat.runner.format_duration") as mock_format,
         ):
             mock_format.return_value = "5m 30s"
@@ -1539,19 +1555,18 @@ class TestCompleteSuccess:
 
             # Check that the method returns 0
             assert result == 0
-            # Check that ntfy notification was sent with correct parameters
-            mock_ntfy.assert_called_once_with(
-                exit_code=0,
-                duration_str="5m 30s",
-                repo_name=tmp_path.name,
-                ntfy_url="http://localhost:2586",
-                logger=runner.logger,
-            )
+            # Verify notification was sent with correct parameters
+            runner.notification_manager.notify.assert_called_once()
+            event = runner.notification_manager.notify.call_args[0][0]
+            assert event.event_type == EventType.RUN_COMPLETED
+            assert event.duration_str == "5m 30s"
+            assert event.repo_name == tmp_path.name
 
 
 class TestFileLock:
     """Tests for _FileLock context manager."""
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="fcntl not available on Windows")
     def test_file_lock_acquires_and_releases_on_unix(self, tmp_path: Path) -> None:
         """Test that _FileLock acquires and releases lock on Unix systems."""
         # Create a test file
@@ -1559,7 +1574,7 @@ class TestFileLock:
         test_file.write_text("test content")
 
         with test_file.open() as f:
-            with patch("fix_die_repeat.runner_introspection.fcntl") as mock_fcntl:
+            with patch("fix_die_repeat.utils.fcntl") as mock_fcntl:
                 file_lock = _FileLock(f)
 
                 with file_lock:
@@ -1587,9 +1602,9 @@ class TestFileLock:
             # Set platform to Windows
             sys.platform = "win32"
 
-            # Inject msvcrt into the runner_introspection module namespace
+            # Inject msvcrt into the utils module namespace
             # (This is intentional: we're simulating Windows behavior on a non-Windows platform)
-            runner_introspection_module.msvcrt = mock_msvcrt  # type: ignore[attr-defined]
+            utils_module.msvcrt = mock_msvcrt  # type: ignore[attr-defined]
 
             with test_file.open() as f:
                 # Wrap f.seek so we can assert it is called with position 0 before unlocking
@@ -1611,8 +1626,8 @@ class TestFileLock:
             # Restore original platform
             sys.platform = original_platform
             # Clean up injected msvcrt
-            if hasattr(runner_introspection_module, "msvcrt"):
-                delattr(runner_introspection_module, "msvcrt")
+            if hasattr(utils_module, "msvcrt"):
+                delattr(utils_module, "msvcrt")
 
     def test_file_lock_returns_self_on_enter(self, tmp_path: Path) -> None:
         """Test that _FileLock __enter__ returns self."""
@@ -1620,7 +1635,7 @@ class TestFileLock:
         test_file.write_text("test content")
 
         with test_file.open() as f:
-            with patch("fix_die_repeat.runner_introspection.fcntl"):
+            with patch("fix_die_repeat.utils.fcntl"):
                 file_lock = _FileLock(f)
 
                 with file_lock as acquired_lock:
@@ -1633,7 +1648,7 @@ class TestFileLock:
         test_file.write_text("test content")
 
         with test_file.open() as f:
-            with patch("fix_die_repeat.runner_introspection.fcntl") as mock_fcntl:
+            with patch("fix_die_repeat.utils.fcntl") as mock_fcntl:
                 file_lock = _FileLock(f)
                 test_exception = ValueError("Test exception")
 
