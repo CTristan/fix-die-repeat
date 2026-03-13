@@ -49,13 +49,18 @@ class NtfyNotifier(Notifier):
         self.logger = logger
 
     def is_enabled(self) -> bool:
-        """Check if this notifier is enabled.
+        """Check if this notifier is enabled and properly configured.
 
         Returns:
-            True if enabled
+            True if enabled and URL is valid
 
         """
-        return self.enabled
+        # Check enabled flag and that URL is non-empty and has valid scheme
+        return (
+            self.enabled
+            and bool(self.url and self.url.strip())
+            and self.url.startswith(("http://", "https://"))
+        )
 
     def send(self, event: NotificationEvent) -> None:
         """Send a notification to ntfy.

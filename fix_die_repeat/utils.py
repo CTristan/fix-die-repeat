@@ -639,22 +639,7 @@ def rotate_file(
                 # If we can't stat either file, proceed with normal rotation logic
                 pass
 
-            # Atomic move to temporary file on same partition
-            tmp_rotating = path.with_suffix(path.suffix + f".{os.getpid()}.rotating")
-            try:
-                path.rename(tmp_rotating)
-            except OSError:
-                # Source vanished or was renamed by another process
-                result = rotated_path if rotated_path.exists() else None
-            else:
-                # Append content from temporary file to rotated file
-                with tmp_rotating.open("r", encoding="utf-8") as src:
-                    _append_to_rotated_file(src, rotated_path)
-
-                # Cleanup temporary file
-                with contextlib.suppress(OSError):
-                    tmp_rotating.unlink()
-                result = rotated_path
+            result = _rotate_with_existing_destination(path, rotated_path)
         elif _try_initial_rotation(path, rotated_path):
             # Initial rotation for this period
             result = rotated_path
@@ -704,6 +689,52 @@ def _try_initial_rotation(path: Path, rotated_path: Path) -> bool:
             return False
 
     return True
+
+
+def _rotate_with_existing_destination(
+    path: Path,
+    rotated_path: Path,
+) -> Path | None:
+    """Rotate a file when the rotated destination already exists.
+
+    This function handles the append-to-rotated case, ensuring that if the
+    append operation fails, the original file is restored to prevent data loss.
+
+    Args:
+        path: The source file to rotate
+        rotated_path: The existing rotated file to append to
+
+    Returns:
+        The path to the rotated file if successful, None otherwise
+
+    """
+    result: Path | None = None
+
+    # Atomic move to temporary file on same partition
+    tmp_rotating = path.with_suffix(path.suffix + f".{os.getpid()}.rotating")
+    try:
+        path.rename(tmp_rotating)
+    except OSError:
+        # Source vanished or was renamed by another process
+        return rotated_path if rotated_path.exists() else None
+
+    try:
+        # Append content from temporary file to rotated file
+        with tmp_rotating.open("r", encoding="utf-8") as src:
+            _append_to_rotated_file(src, rotated_path)
+    except Exception:
+        # If append fails, attempt to restore the original path
+        with contextlib.suppress(OSError):
+            tmp_rotating.rename(path)
+        # Re-raise so callers are aware of the failure
+        raise
+    else:
+        # Cleanup temporary file only on successful append
+        with contextlib.suppress(OSError):
+            tmp_rotating.unlink()
+        result = rotated_path
+
+    return result
 
 
 def _append_to_rotated_file(src: IO[str], rotated_path: Path) -> None:

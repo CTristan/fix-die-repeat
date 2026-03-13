@@ -1,6 +1,7 @@
 """Notification configuration file management and validation."""
 
 import base64
+import contextlib
 import json
 import logging
 import os
@@ -109,14 +110,28 @@ def save_notification_config(
     except OSError as e:
         logger.debug("Could not chmod directory %s: %s", parent_dir, e)
 
-    # Write file
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    # Write file with secure permissions applied at creation time
+    # Use os.open with mode 0o600 to avoid any window where file has insecure permissions
+    content = json.dumps(data, indent=2) + "\n"
+    content_bytes = content.encode("utf-8")
 
-    # Set secure permissions (0o600)
+    # Create temporary file in the same directory for atomic replacement
+    temp_path = parent_dir / f"{path.name}.tmp"
     try:
-        path.chmod(0o600)
-    except OSError as e:
-        logger.debug("Could not chmod file %s: %s", path, e)
+        # Open with restrictive permissions from the start
+        fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.write(fd, content_bytes)
+        finally:
+            os.close(fd)
+
+        # Atomically replace the target file
+        temp_path.replace(path)
+    except OSError:
+        # Clean up temporary file if anything fails
+        with contextlib.suppress(OSError):
+            temp_path.unlink()
+        raise
 
 
 def validate_zulip_credentials(server_url: str, bot_email: str, bot_api_key: str) -> str:

@@ -649,7 +649,7 @@ class TestRotateFile:
         rotated_file = tmp_path / "test-2026-03.yaml"
         rotated_file.write_text("old content\n")
 
-        # No need to patch get_file_line_count as rotate_file counts lines itself.
+        # rotate_file calls get_file_line_count internally to determine line count.
         # With 10 lines and max_lines=2, rotation should occur.
         rotate_file(test_file, max_lines=2, date_suffix="2026-03")
 
