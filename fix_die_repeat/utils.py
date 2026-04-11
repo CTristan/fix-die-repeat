@@ -317,6 +317,49 @@ def get_changed_files(
     return result
 
 
+def get_all_tracked_files(
+    project_root: Path,
+    exclude_patterns: list[str] | None = None,
+) -> list[str]:
+    """Get all files tracked by git (for full-codebase review).
+
+    Args:
+        project_root: Project root directory
+        exclude_patterns: Patterns to exclude
+
+    Returns:
+        Sorted list of tracked file paths relative to project root
+
+    """
+    exclude_patterns = exclude_patterns or [
+        "*.lock",
+        "*-lock.json",
+        "*-lock.yaml",
+        "go.sum",
+        "*.min.*",
+    ]
+
+    returncode, stdout, _ = run_command(
+        "git ls-files",
+        cwd=project_root,
+        check=False,
+    )
+    if returncode != 0:
+        return []
+
+    result = []
+    for f in sorted(stdout.strip().split("\n")):
+        if not f or f.startswith(".fix-die-repeat"):
+            continue
+        file_path = project_root / f
+        if not file_path.is_file():
+            continue
+        if not _should_exclude_file(file_path.name, exclude_patterns):
+            result.append(f)
+
+    return result
+
+
 def get_file_size(path: Path) -> int:
     """Get file size in bytes.
 

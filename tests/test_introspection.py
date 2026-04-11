@@ -7,7 +7,10 @@ import pytest
 
 from fix_die_repeat.config import Paths, Settings, get_introspection_file_path
 from fix_die_repeat.runner import PiRunner
-from fix_die_repeat.runner_introspection import IntrospectionManager
+from fix_die_repeat.runner_introspection import (
+    IntrospectionManager,
+    IntrospectionYamlParams,
+)
 
 
 class TestGetIntrospectionFilePath:
@@ -471,3 +474,78 @@ class TestYamlAppendLogic:
         assert second in content
         assert "\n---\n" in content
         assert content.count("\n---\n") == 1
+
+
+class TestIntrospectOnlyMode:
+    """Tests for introspect-only mode (not-attempted outcome)."""
+
+    def _make_manager(self, tmp_path: Path) -> IntrospectionManager:
+        settings = Settings()  # type: ignore[call-arg]
+        paths = Paths(project_root=tmp_path)
+        paths.ensure_fdr_dir()
+        return IntrospectionManager(settings, paths, tmp_path, MagicMock())
+
+    def test_yaml_uses_not_attempted_outcome(self, tmp_path: Path) -> None:
+        """With introspect_only=True, every in-scope thread gets not-attempted."""
+        manager = self._make_manager(tmp_path)
+        params = IntrospectionYamlParams(
+            pr_number=42,
+            pr_url="https://github.com/owner/repo/pull/42",
+            in_scope_ids=["thread_a", "thread_b"],
+            resolved_set={"thread_a"},  # would normally be "fixed" in non-introspect mode
+            pr_threads_content="body",
+            diff_content="",
+            introspect_only=True,
+        )
+        content = manager._build_introspection_yaml(params)  # noqa: SLF001
+        assert "outcome: not-attempted" in content
+        assert "outcome: fixed" not in content
+        assert "outcome: wont-fix" not in content
+
+    def test_yaml_respects_resolved_set_when_not_introspect_only(self, tmp_path: Path) -> None:
+        """Without introspect_only, outcome reflects resolved_set (existing behavior)."""
+        manager = self._make_manager(tmp_path)
+        params = IntrospectionYamlParams(
+            pr_number=42,
+            pr_url="https://github.com/owner/repo/pull/42",
+            in_scope_ids=["thread_a", "thread_b"],
+            resolved_set={"thread_a"},
+            pr_threads_content="body",
+            diff_content="",
+        )
+        content = manager._build_introspection_yaml(params)  # noqa: SLF001
+        assert "outcome: fixed" in content
+        assert "outcome: wont-fix" in content
+        assert "outcome: not-attempted" not in content
+
+    def test_validate_thread_outcome_accepts_not_attempted_without_reason(
+        self, tmp_path: Path
+    ) -> None:
+        """not-attempted outcome does not require a 'reason' field."""
+        manager = self._make_manager(tmp_path)
+        thread: dict[str, object] = {
+            "id": "t1",
+            "title": "X",
+            "category": "code-quality",
+            "outcome": "not-attempted",
+            "summary": "s",
+            "relevance": "r",
+            "lang_check_gap": "n/a",
+        }
+        assert manager._validate_thread_outcome(thread, 1) is True  # noqa: SLF001
+
+    def test_validate_thread_outcome_still_requires_reason_for_wont_fix(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression: wont-fix still needs reason even after adding not-attempted."""
+        manager = self._make_manager(tmp_path)
+        thread: dict[str, object] = {
+            "id": "t1",
+            "title": "X",
+            "category": "code-quality",
+            "outcome": "wont-fix",
+            "summary": "s",
+            "relevance": "r",
+            "lang_check_gap": "n/a",
+        }
+        assert manager._validate_thread_outcome(thread, 1) is False  # noqa: SLF001

@@ -3,7 +3,9 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from fix_die_repeat.config import Paths, Settings
 from fix_die_repeat.runner import PiRunner
+from fix_die_repeat.runner_review import ReviewManager
 
 # Constants for test assertions
 EXPECTED_THREAD_COUNT = 2
@@ -489,3 +491,48 @@ class TestResolvePrThreads:
                 if "Failed to resolve thread" in str(call)
             ]
             assert len(warning_calls) > 0
+
+
+class TestRunFullCodebaseReview:
+    """Tests for ReviewManager.run_full_codebase_review."""
+
+    def _make_manager(self, tmp_path: Path) -> ReviewManager:
+        settings = Settings()  # type: ignore[call-arg]
+        paths = Paths(project_root=tmp_path)
+        paths.ensure_fdr_dir()
+        return ReviewManager(settings, paths, tmp_path, MagicMock())
+
+    def test_invokes_pi_without_diff_and_with_full_codebase_template(self, tmp_path: Path) -> None:
+        """Full-codebase review must not attach changes.diff and must use the new template."""
+        manager = self._make_manager(tmp_path)
+        run_pi = MagicMock(return_value=(0, "", ""))
+
+        with patch(
+            "fix_die_repeat.runner_review.get_all_tracked_files",
+            return_value=["fix_die_repeat/runner.py"],
+        ):
+            manager.run_full_codebase_review(iteration=1, run_pi_callback=run_pi)
+
+        assert run_pi.called
+        pi_args = run_pi.call_args.args
+        assert "--tools" in pi_args
+        assert "read,write,grep,find,ls" in pi_args
+        # No diff attached in full-codebase mode
+        assert not any(isinstance(a, str) and a.endswith("changes.diff") for a in pi_args)
+        # Prompt text should reference full-codebase audit framing
+        prompt = pi_args[-1]
+        assert isinstance(prompt, str)
+        assert "full-codebase audit" in prompt
+
+    def test_pi_failure_writes_no_issues(self, tmp_path: Path) -> None:
+        """When pi fails we should still produce a NO_ISSUES marker."""
+        manager = self._make_manager(tmp_path)
+        run_pi = MagicMock(return_value=(1, "", "boom"))
+
+        with patch(
+            "fix_die_repeat.runner_review.get_all_tracked_files",
+            return_value=[],
+        ):
+            manager.run_full_codebase_review(iteration=2, run_pi_callback=run_pi)
+
+        assert manager.paths.review_current_file.read_text() == "NO_ISSUES"

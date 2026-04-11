@@ -107,7 +107,8 @@ ALLOWED_STATUSES = {STATUS_PENDING, STATUS_REVIEWED}
 
 OUTCOME_FIXED = "fixed"
 OUTCOME_WONT_FIX = "wont-fix"
-ALLOWED_OUTCOMES = {OUTCOME_FIXED, OUTCOME_WONT_FIX}
+OUTCOME_NOT_ATTEMPTED = "not-attempted"
+ALLOWED_OUTCOMES = {OUTCOME_FIXED, OUTCOME_WONT_FIX, OUTCOME_NOT_ATTEMPTED}
 
 THREAD_REQUIRED_FIELDS = (
     "id",
@@ -142,6 +143,7 @@ class IntrospectionYamlParams:
     resolved_set: set[str]
     pr_threads_content: str
     diff_content: str
+    introspect_only: bool = False
 
 
 @dataclass
@@ -187,6 +189,8 @@ class IntrospectionManager:
         iteration: int,
         start_sha: str,
         run_pi_callback: Callable[..., tuple[int, str, str]],
+        *,
+        introspect_only: bool = False,
     ) -> None:
         """Run prompt introspection analysis after PR review completion.
 
@@ -202,6 +206,8 @@ class IntrospectionManager:
             iteration: Current iteration number
             start_sha: Starting git commit SHA
             run_pi_callback: Function to run pi (from PiRunner)
+            introspect_only: If True, skip fix-loop assumptions and mark every
+                in-scope thread with outcome "not-attempted"
 
         """
         self.logger.info("[Introspection] Running PR review introspection...")
@@ -213,7 +219,9 @@ class IntrospectionManager:
 
         try:
             # Collect input data
-            self.collect_introspection_data(iteration, start_sha, pr_info)
+            self.collect_introspection_data(
+                iteration, start_sha, pr_info, introspect_only=introspect_only
+            )
             if not self.paths.introspection_data_file.exists():
                 self.logger.warning(
                     "[Introspection] Failed to collect introspection data, skipping",
@@ -610,6 +618,8 @@ class IntrospectionManager:
         _iteration: int,
         start_sha: str,
         pr_info: IntrospectionPrInfo,
+        *,
+        introspect_only: bool = False,
     ) -> None:
         """Collect input data for introspection analysis.
 
@@ -623,6 +633,8 @@ class IntrospectionManager:
             iteration: Current iteration number (unused, kept for compatibility)
             start_sha: Starting git commit SHA
             pr_info: PR information
+            introspect_only: If True, every thread is recorded with outcome
+                "not-attempted" instead of fixed/wont-fix
 
         """
         self.logger.info("Collecting introspection data...")
@@ -644,6 +656,7 @@ class IntrospectionManager:
             resolved_set=resolved_set,
             pr_threads_content=pr_threads_content,
             diff_content=diff_content,
+            introspect_only=introspect_only,
         )
         yaml_content = self._build_introspection_yaml(yaml_params)
         self.paths.introspection_data_file.write_text(yaml_content)
@@ -716,6 +729,13 @@ class IntrospectionManager:
         )
         return stdout if returncode == 0 else ""
 
+    @staticmethod
+    def _outcome_for_thread(thread_id: str, params: IntrospectionYamlParams) -> str:
+        """Resolve the outcome label for a single in-scope thread."""
+        if params.introspect_only:
+            return OUTCOME_NOT_ATTEMPTED
+        return OUTCOME_FIXED if thread_id in params.resolved_set else OUTCOME_WONT_FIX
+
     def _build_introspection_yaml(self, params: IntrospectionYamlParams) -> str:
         """Build YAML structure for introspection data.
 
@@ -737,7 +757,7 @@ class IntrospectionManager:
             "in_scope_thread_ids": [
                 {
                     "id": thread_id,
-                    "outcome": ("fixed" if thread_id in params.resolved_set else "wont-fix"),
+                    "outcome": self._outcome_for_thread(thread_id, params),
                 }
                 for thread_id in params.in_scope_ids
             ],

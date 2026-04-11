@@ -18,6 +18,7 @@ from fix_die_repeat.utils import (
     PROHIBITED_RUFF_RULES,
     RuffConfigParseError,
     find_prohibited_ruff_ignores,
+    get_all_tracked_files,
     get_changed_files,
     get_file_size,
     is_excluded_file,
@@ -322,6 +323,48 @@ class ReviewManager:
         self.run_pi_review(diff_size, run_pi_callback, changed_files)
 
         # Append review entry
+        self.append_review_entry(iteration)
+
+    def run_full_codebase_review(
+        self,
+        iteration: int,
+        run_pi_callback: Callable[..., tuple[int, str, str]],
+    ) -> None:
+        """Run a report-only review over the entire tracked codebase.
+
+        Args:
+            iteration: Current iteration number
+            run_pi_callback: Function to run pi (from PiRunner)
+
+        """
+        self.logger.info("[Step 4] Full-codebase review — collecting tracked files...")
+
+        tracked_files = get_all_tracked_files(self.project_root)
+        self.logger.info("[Step 4] Found %s tracked file(s)", len(tracked_files))
+
+        # Clear any stale diff so other code paths don't accidentally use it.
+        self.paths.diff_file.write_text("")
+
+        languages = resolve_languages(tracked_files, self.settings.languages)
+        languages = filter_supported_languages(languages)
+
+        pi_args = ["-p", "--tools", "read,write,grep,find,ls"]
+        if self.paths.review_file.exists():
+            pi_args.append(f"@{self.paths.review_file}")
+
+        review_prompt = render_prompt(
+            "full_codebase_review.j2",
+            has_agents_file=(self.paths.project_root / "AGENTS.md").exists(),
+            languages=sorted(languages),
+        )
+
+        self.logger.info("[Step 5] Running pi to audit full codebase...")
+        returncode, _, _ = run_pi_callback(*pi_args, review_prompt)
+
+        if returncode != 0:
+            self.logger.info("pi review failed. Treating as no issues found.")
+            self.paths.review_current_file.write_text("NO_ISSUES")
+
         self.append_review_entry(iteration)
 
     def check_prohibited_ruff_ignores(self) -> None:

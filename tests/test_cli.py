@@ -83,6 +83,20 @@ class TestCliMain:
         assert "--pr-review-introspect" in result.output
         assert "Enable PR review mode with prompt introspection" in result.output
 
+    def test_cli_with_full_codebase_review(self) -> None:
+        """Test CLI help exposes --full-codebase-review."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--help"])
+        assert "--full-codebase-review" in result.output
+        assert "Audit the entire codebase" in result.output
+
+    def test_cli_with_pr_threads_introspect_only(self) -> None:
+        """Test CLI help exposes --pr-threads-introspect-only."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--help"])
+        assert "--pr-threads-introspect-only" in result.output
+        assert "unresolved review threads" in result.output
+
     def test_cli_with_archive_artifacts(self) -> None:
         """Test CLI with archive-artifacts flag."""
         runner = CliRunner()
@@ -264,8 +278,26 @@ class TestBuildCliOptions:
         assert options.no_compact is False
         assert options.pr_review is False
         assert options.pr_review_introspect is False
+        assert options.full_codebase_review is False
+        assert options.pr_threads_introspect_only is False
         assert options.test_model is None
         assert options.debug is False
+
+    def test_full_codebase_review_propagates_to_settings(self) -> None:
+        """--full-codebase-review propagates into Settings."""
+        kwargs: CliKwargs = {"full_codebase_review": True}
+        options = _build_cli_options(kwargs)
+        settings = config.get_settings(options)
+        assert options.full_codebase_review is True
+        assert settings.full_codebase_review is True
+
+    def test_pr_threads_introspect_only_propagates_to_settings(self) -> None:
+        """--pr-threads-introspect-only propagates into Settings."""
+        kwargs: CliKwargs = {"pr_threads_introspect_only": True}
+        options = _build_cli_options(kwargs)
+        settings = config.get_settings(options)
+        assert options.pr_threads_introspect_only is True
+        assert settings.pr_threads_introspect_only is True
 
     def test_pr_review_introspect_implies_pr_review(self) -> None:
         """Test that --pr-review-introspect flag implies --pr-review."""

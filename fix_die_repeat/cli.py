@@ -67,6 +67,24 @@ console = Console()
     envvar="FDR_PR_REVIEW_INTROSPECT",
 )
 @click.option(
+    "--full-codebase-review",
+    is_flag=True,
+    help=(
+        "Audit the entire codebase instead of a diff. Report-only: "
+        "never attempts fixes. Ignores --pr-review if also set."
+    ),
+    envvar="FDR_FULL_CODEBASE_REVIEW",
+)
+@click.option(
+    "--pr-threads-introspect-only",
+    is_flag=True,
+    help=(
+        "Fetch the PR's unresolved review threads, run introspection on them, "
+        "then exit. Does not run checks, local review, or attempt fixes."
+    ),
+    envvar="FDR_PR_THREADS_INTROSPECT_ONLY",
+)
+@click.option(
     "--test-model",
     help="Test model compatibility before running (exits after test)",
     envvar="FDR_TEST_MODEL",
@@ -147,6 +165,8 @@ def _build_cli_options(kwargs: dict[str, str | int | bool | None]) -> CliOptions
         no_compact=bool(kwargs.get("no_compact", False)),
         pr_review=bool(kwargs.get("pr_review", False)),
         pr_review_introspect=bool(kwargs.get("pr_review_introspect", False)),
+        full_codebase_review=bool(kwargs.get("full_codebase_review", False)),
+        pr_threads_introspect_only=bool(kwargs.get("pr_threads_introspect_only", False)),
         test_model=str(test_model) if test_model is not None else None,
         debug=bool(kwargs.get("debug", False)),
     )

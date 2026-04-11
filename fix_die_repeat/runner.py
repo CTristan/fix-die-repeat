@@ -617,6 +617,12 @@ class PiRunner:
         """
         self.setup_run()
 
+        # Standalone modes short-circuit the fix-die-repeat loop.
+        if self.settings.pr_threads_introspect_only:
+            return self.run_pr_threads_introspect_only()
+        if self.settings.full_codebase_review:
+            return self.run_full_codebase_review_loop()
+
         while True:
             self.iteration += 1
             self.logger.info(
@@ -642,6 +648,141 @@ class PiRunner:
                 return self.complete_success()
 
         return 0
+
+    def run_full_codebase_review_loop(self) -> int:
+        """Run a report-only full-codebase review loop.
+
+        Skips the fix loop entirely. Each iteration runs pi over the whole
+        tracked codebase and records findings to review.md. Exits when a
+        pass reports no issues or max_iters is reached.
+
+        Returns:
+            Exit code (0 when a pass reports no issues, 1 on max iters)
+
+        """
+        self.logger.info("Full-codebase review mode: fix loop is disabled.")
+        while True:
+            self.iteration += 1
+            self.logger.info(
+                "===== Full-codebase review iteration %s of %s =====",
+                self.iteration,
+                self.settings.max_iters,
+            )
+            self.artifact_manager.check_and_compact_artifacts()
+
+            if self.iteration > self.settings.max_iters:
+                return self._handle_max_iterations_exceeded()
+
+            self.paths.review_current_file.unlink(missing_ok=True)
+            self.review_manager.run_full_codebase_review(self.iteration, self.run_pi_safe)
+
+            if not self.paths.review_current_file.exists():
+                self.logger.error(
+                    ".fix-die-repeat/review_current.md was not created by pi. "
+                    "Treating as no issues and exiting.",
+                )
+                self.paths.review_current_file.write_text("NO_ISSUES")
+
+            review_content = self.paths.review_current_file.read_text()
+            if self.review_manager.has_no_review_issues(review_content):
+                self.logger.info(
+                    "[Step 6B] No critical issues found. Full-codebase review complete.",
+                )
+                self._success_complete = True
+                return self.complete_success()
+
+            self.logger.info(
+                "[Report-only] Findings recorded in review.md. "
+                "Not attempting fixes; running another pass.",
+            )
+
+    def run_pr_threads_introspect_only(self) -> int:
+        """Fetch unresolved PR threads and run introspection without attempting fixes.
+
+        Returns:
+            Exit code (0 on success, non-zero on failure)
+
+        """
+        self.logger.info("PR threads introspect-only mode: no fix loop, no review.")
+        pr_manager = self._get_pr_manager()
+        introspection_manager = self._get_introspection_manager()
+        if pr_manager is None or introspection_manager is None:
+            self.logger.error("Required managers not initialized; cannot run introspect-only mode.")
+            return 1
+
+        fetched = self._fetch_unresolved_pr_threads(pr_manager)
+        if fetched is None:
+            return 1
+
+        pr_info, unresolved = fetched
+        if not unresolved:
+            self.logger.info("No unresolved PR threads found. Nothing to introspect.")
+            return 0
+
+        self.logger.info(
+            "Found %s unresolved thread(s). Writing introspection inputs...",
+            len(unresolved),
+        )
+        self._write_introspect_only_inputs(pr_manager, pr_info, unresolved)
+
+        try:
+            introspection_manager.run_introspection(
+                self.iteration, self.start_sha, self.run_pi_safe, introspect_only=True
+            )
+        except Exception:
+            self.logger.exception("Introspection failed")
+            return 1
+
+        return 0
+
+    def _fetch_unresolved_pr_threads(
+        self, pr_manager: "PrReviewManager"
+    ) -> "tuple[ReviewPrInfo, list[dict]] | None":
+        """Fetch unresolved PR threads for the current branch.
+
+        Returns:
+            Tuple of (pr_info, unresolved_threads) on success, None on failure.
+
+        """
+        branch = pr_manager.get_branch_name()
+        if not branch:
+            self.logger.error("Not on a git branch. Cannot fetch PR threads.")
+            return None
+
+        returncode, _, _ = run_command("gh auth status", cwd=self.paths.project_root)
+        if returncode != 0:
+            self.logger.error("GitHub CLI not authenticated. Cannot fetch PR threads.")
+            return None
+
+        pr_info = pr_manager.get_pr_info(branch)
+        if not pr_info:
+            self.logger.error("No open PR found for branch %s.", branch)
+            return None
+
+        threads = pr_manager.fetch_pr_threads_gql(
+            pr_info.repo_owner, pr_info.repo_name, pr_info.number
+        )
+        if threads is None:
+            self.logger.error("Failed to fetch PR threads.")
+            return None
+
+        unresolved = [t for t in threads if not t.get("isResolved")]
+        return pr_info, unresolved
+
+    def _write_introspect_only_inputs(
+        self,
+        pr_manager: "PrReviewManager",
+        pr_info: "ReviewPrInfo",
+        unresolved: list[dict],
+    ) -> None:
+        """Persist the cumulative files that IntrospectionManager reads."""
+        formatted = pr_manager.format_pr_threads(unresolved, pr_info.number, pr_info.url)
+        self.paths.cumulative_pr_threads_content_file.write_text(formatted)
+
+        thread_ids = [str(t.get("id") or "") for t in unresolved if t.get("id")]
+        self.paths.cumulative_in_scope_threads_file.write_text("\n".join(thread_ids) + "\n")
+        # Ensure resolved file is empty so all threads register as not-attempted.
+        self.paths.cumulative_resolved_threads_file.write_text("")
 
     # Delegation methods for backward compatibility with tests
     # These methods forward to the appropriate manager classes

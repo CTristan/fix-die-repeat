@@ -75,6 +75,20 @@ class Settings(BaseSettings):
         description="Enable PR review mode with prompt introspection",
     )
 
+    # Full-codebase review mode (report-only, no fixes)
+    full_codebase_review: bool = pyd.Field(
+        default=False,
+        alias="FDR_FULL_CODEBASE_REVIEW",
+        description="Audit the entire codebase instead of a diff; never applies fixes",
+    )
+
+    # PR threads introspect-only mode
+    pr_threads_introspect_only: bool = pyd.Field(
+        default=False,
+        alias="FDR_PR_THREADS_INTROSPECT_ONLY",
+        description="Fetch unresolved PR threads and run introspection without attempting fixes",
+    )
+
     # Debug mode
     debug: bool = pyd.Field(
         default=False,
@@ -162,6 +176,8 @@ class CliOptions:
     no_compact: bool = False
     pr_review: bool = False
     pr_review_introspect: bool = False
+    full_codebase_review: bool = False
+    pr_threads_introspect_only: bool = False
     test_model: str | None = None
     debug: bool = False
 
@@ -243,6 +259,10 @@ def _apply_boolean_flags(settings: Settings, options: CliOptions) -> None:
     if options.pr_review_introspect:
         settings.pr_review_introspect = options.pr_review_introspect
         settings.pr_review = True
+    if options.full_codebase_review:
+        settings.full_codebase_review = options.full_codebase_review
+    if options.pr_threads_introspect_only:
+        settings.pr_threads_introspect_only = options.pr_threads_introspect_only
     if options.debug:
         settings.debug = options.debug
 
