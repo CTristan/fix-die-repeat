@@ -14,13 +14,7 @@ CRITICAL REVIEW CHECKLIST (LANGUAGE-AGNOSTIC):
 - [ ] Code quality: no unjustified suppression of errors or warnings; avoid terminating the process from library/orchestration code (return status instead); ensure CLI/entrypoint layers propagate internal failure codes to process exit status; return helper results instead of discarding them or duplicating return logic; prefer explicit guards/failures
 - [ ] Accuracy: docs/prompts/config instructions and examples match actual behavior and required fields (no false claims); user-facing logs/errors clearly explain limits, skips, or partial results (especially for fallback paths and edge cases); non-obvious platform-specific behavior, concurrency patterns, or API quirks have inline documentation; platform-specific commands (e.g., in CI scripts) check for availability or provide fallbacks
 - [ ] Testing: new utility classes, functions with platform-specific code paths, or complex logic have corresponding unit tests; tests assert observable behavior (no empty tests that only exercise code paths); test logic actually exercises intended paths (not unreachable due to environment constraints); tests that mutate global state (e.g., process.env) properly restore it in finally/cleanup blocks
-{% if has_agents_file %}- [ ] Project policy: no violations of AGENTS.md
-{% endif -%}
 - [ ] No test configuration changes without explicit approval
-{% if has_agents_file %}
-
-If you find any policy violations from AGENTS.md, classify them as [CRITICAL].
-{% endif %}
 {% if languages %}
 
 LANGUAGE-SPECIFIC CHECKS:

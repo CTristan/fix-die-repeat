@@ -65,7 +65,7 @@ Reads the global introspection file and updates FDR's prompt templates to addres
    - Write archived entries to `introspection-archive.yaml` (prepend with `---` separator)
    - If archive is empty, delete `introspection-archive.yaml`
 
-**Note**: The file size policy (AGENTS.md) requires all code and documentation files be kept under 2000 lines. The introspection file follows this policy to remain maintainable.
+**Note**: The project file size policy requires all code and documentation files be kept under 2000 lines. The introspection file follows this policy to remain maintainable.
 
 ## Invocation
 

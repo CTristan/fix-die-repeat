@@ -189,7 +189,6 @@ class ReviewManager:
         review_prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix=review_prompt_prefix,
-            has_agents_file=(self.paths.project_root / "AGENTS.md").exists(),
             languages=sorted(languages),
             **self.paths.template_context(),
         )
@@ -355,7 +354,6 @@ class ReviewManager:
 
         review_prompt = render_prompt(
             "full_codebase_review.j2",
-            has_agents_file=(self.paths.project_root / "AGENTS.md").exists(),
             languages=sorted(languages),
             **self.paths.template_context(),
         )
@@ -383,7 +381,7 @@ class ReviewManager:
         if not pyproject_path.exists():
             return
 
-        # Prohibited rules (see AGENTS.md)
+        # Prohibited rules
         try:
             violations = find_prohibited_ruff_ignores(pyproject_path, PROHIBITED_RUFF_RULES)
         except RuffConfigParseError as exc:
@@ -396,7 +394,7 @@ class ReviewManager:
             self.logger.error(separator)
             self.logger.error("CRITICAL: Prohibited ruff rules found in per-file-ignores!")
             self.logger.error(separator)
-            self.logger.error("The following rules MUST NEVER be ignored (see AGENTS.md):")
+            self.logger.error("The following rules MUST NEVER be ignored:")
             for rule in sorted(PROHIBITED_RUFF_RULES):
                 self.logger.error("  - %s: NEVER IGNORE", rule)
             self.logger.error("")

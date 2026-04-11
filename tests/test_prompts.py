@@ -76,37 +76,28 @@ class TestRenderPrompt:
         with pytest.raises(UndefinedError):
             render_prompt("local_review.j2")
 
-    def test_local_review_with_agents_file(self) -> None:
-        """Render local_review prompt when AGENTS.md exists."""
+    def test_local_review_with_languages(self) -> None:
+        """Render local_review prompt with language-specific checks."""
         prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix="",
-            has_agents_file=True,
             languages=["python", "rust"],
             **FAKE_PATHS,
         )
 
-        assert "Project policy: no violations of AGENTS.md" in prompt
-        assert (
-            "If you find any policy violations from AGENTS.md, classify them as [CRITICAL]."
-            in prompt
-        )
         assert "LANGUAGE-SPECIFIC CHECKS:" in prompt
         assert "Python:" in prompt
         assert "Rust:" in prompt
 
-    def test_local_review_without_agents_file(self) -> None:
-        """Render local_review prompt when AGENTS.md does not exist."""
+    def test_local_review_without_languages(self) -> None:
+        """Render local_review prompt with no language-specific checks."""
         prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix="",
-            has_agents_file=False,
             languages=[],
             **FAKE_PATHS,
         )
 
-        assert "Project policy: no violations of AGENTS.md" not in prompt
-        assert "If you find any policy violations from AGENTS.md" not in prompt
         assert "No test configuration changes without explicit approval" in prompt
         assert "external tool output or parsed JSON/YAML" in prompt
         assert (
@@ -153,7 +144,6 @@ class TestLanguageSpecificRendering:
         prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix="",
-            has_agents_file=False,
             languages=["python"],
             **FAKE_PATHS,
         )
@@ -172,7 +162,6 @@ class TestLanguageSpecificRendering:
         prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix="",
-            has_agents_file=False,
             languages=["python", "rust", "elixir"],
             **FAKE_PATHS,
         )
@@ -193,7 +182,6 @@ class TestLanguageSpecificRendering:
         prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix="",
-            has_agents_file=False,
             languages=[],
             **FAKE_PATHS,
         )
@@ -273,7 +261,6 @@ class TestLanguageSpecificRendering:
         prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix="",
-            has_agents_file=False,
             languages=[language],
             **FAKE_PATHS,
         )
@@ -306,7 +293,6 @@ class TestNoLegacyPathsInTemplates:
         prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix="",
-            has_agents_file=True,
             languages=[],
             **FAKE_PATHS,
         )
@@ -316,7 +302,6 @@ class TestNoLegacyPathsInTemplates:
         """full_codebase_review.j2 must not render the legacy literal."""
         prompt = render_prompt(
             "full_codebase_review.j2",
-            has_agents_file=True,
             languages=[],
             **FAKE_PATHS,
         )

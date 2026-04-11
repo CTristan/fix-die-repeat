@@ -22,7 +22,7 @@ LOG_FORMAT = "[%(asctime)s] [fdr] [%(levelname)s] %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 LOGGER_NAME = "fix_die_repeat"
 
-# Prohibited ruff rules that must NEVER be ignored (see AGENTS.md)
+# Prohibited ruff rules that must NEVER be ignored
 PROHIBITED_RUFF_RULES = {"C901", "PLR0913", "PLR2004", "PLC0415"}
 
 

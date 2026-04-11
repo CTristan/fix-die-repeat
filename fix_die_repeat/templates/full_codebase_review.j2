@@ -16,13 +16,7 @@ CRITICAL REVIEW CHECKLIST (LANGUAGE-AGNOSTIC):
 - [ ] Code quality: no unjustified suppression of errors/warnings; library/orchestration code returns status instead of terminating; CLI layers propagate failure codes
 - [ ] Accuracy: docs/prompts/config match actual behavior; user-facing logs/errors explain limits and skips; non-obvious platform behavior is documented
 - [ ] Testing: complex logic has unit tests asserting observable behavior; tests don't leak global state
-{% if has_agents_file %}- [ ] Project policy: no violations of AGENTS.md
-{% endif -%}
 - [ ] No test configuration changes without explicit approval
-{% if has_agents_file %}
-
-If you find any policy violations from AGENTS.md, classify them as [CRITICAL].
-{% endif %}
 {% if languages %}
 
 LANGUAGE-SPECIFIC CHECKS:

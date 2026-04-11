@@ -1894,7 +1894,6 @@ class PiRunner:
         review_prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix=review_prompt_prefix,
-            has_agents_file=(self.paths.project_root / "AGENTS.md").exists(),
             languages=sorted(languages),
             **self.paths.template_context(),
         )

@@ -200,8 +200,3 @@ Nothing is written inside the repo and `.gitignore` is never modified.
 | `.pr_thread_ids_in_scope` | Thread IDs from the original PR fetch |
 | `.resolved_threads` | Thread IDs pi claimed to have fixed |
 
----
-
-## Coding Guidelines
-
-For detailed coding guidelines, architecture decisions, and policies (ruff rules, test configuration, file size limits), see [AGENTS.md](AGENTS.md).

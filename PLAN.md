@@ -328,13 +328,6 @@ Test cases organized by function:
 - Update the environment variables table (`FDR_CHECK_CMD` default changes from `./scripts/ci.sh` to `(auto-detected)`)
 - Add examples of `.fix-die-repeat/config` and `~/.config/fix-die-repeat/config`
 
-**Modify: `AGENTS.md`**
-- Update `Settings` documentation (`check_cmd` default changes to `None`)
-- Add `detection.py` to project structure
-- Add `config` to the Paths file reference table
-- Document the resolution chain in Key Design Decisions
-- Update the "Adding a New Configuration Option" pattern if needed
-
 ---
 
 ## File Changes Summary
@@ -349,13 +342,12 @@ Test cases organized by function:
 | `tests/test_config.py` | **Modify** | Update tests for `check_cmd` default change (`None` instead of `./scripts/ci.sh`) |
 | `tests/test_cli.py` | **Modify** | Add tests for resolution integration |
 | `README.md` | **Modify** | Update Quick Start, config docs, env var table |
-| `AGENTS.md` | **Modify** | Update architecture docs, add detection.py, update Settings docs |
 
 ---
 
 ## Constraints & Guidelines
 
-### From AGENTS.md (must follow)
+### Project conventions (must follow)
 
 - **All Python commands via `uv run`** — never call `pytest`, `ruff`, etc. directly
 - **Never modify test configuration** (coverage thresholds, pytest addopts) without explicit human approval
