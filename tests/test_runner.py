@@ -22,6 +22,18 @@ FILTERED_CHECKS_LOG_MAX_LINES = 300
 TEST_PR_NUMBER = 123
 MIN_SEEK_CALLS = 2
 
+_FAKE_TEMPLATE_CONTEXT: dict[str, str] = {
+    "fdr_dir_path": "/fake/fdr/repos/proj-deadbeef",
+    "review_history_path": "/fake/fdr/repos/proj-deadbeef/review.md",
+    "review_current_path": "/fake/fdr/repos/proj-deadbeef/review_current.md",
+    "build_history_path": "/fake/fdr/repos/proj-deadbeef/build_history.md",
+    "checks_log_path": "/fake/fdr/repos/proj-deadbeef/checks.log",
+    "checks_filtered_log_path": "/fake/fdr/repos/proj-deadbeef/checks_filtered.log",
+    "diff_file_path": "/fake/fdr/repos/proj-deadbeef/changes.diff",
+    "resolved_threads_path": "/fake/fdr/repos/proj-deadbeef/.resolved_threads",
+    "config_file_path": "/fake/fdr/repos/proj-deadbeef/config",
+}
+
 
 class TestBeforePiCall:
     """Tests for before_pi_call method."""
@@ -30,6 +42,7 @@ class TestBeforePiCall:
         """Test that first call doesn't add delay."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -48,6 +61,7 @@ class TestBeforePiCall:
         settings = MagicMock()
         settings.pi_sequential_delay_seconds = TEST_PI_DELAY_SECONDS
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -69,6 +83,7 @@ class TestGenerateDiff:
         """Test generating diff with start SHA."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -89,6 +104,7 @@ class TestGenerateDiff:
         """Test generating diff without start SHA."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -113,6 +129,7 @@ class TestCreatePseudoDiff:
         """Test creating pseudo-diff for text file."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -136,6 +153,7 @@ class TestCreatePseudoDiff:
         """Test creating pseudo-diff for binary file."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -163,6 +181,7 @@ class TestAppendReviewEntry:
         """Test appending review entry with content."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.review_file = tmp_path / "review.md"
         paths.review_current_file = tmp_path / "review_current.md"
@@ -188,6 +207,7 @@ class TestAppendReviewEntry:
         """Test appending review entry when no content."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.review_file = tmp_path / "review.md"
         paths.review_current_file = tmp_path / "review_current.md"
@@ -218,6 +238,7 @@ class TestRunFixAttempt:
         settings = MagicMock()
         settings.max_iters = 10
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.checks_filtered_log = tmp_path / "checks_filtered.log"
@@ -256,6 +277,7 @@ class TestRunFixAttempt:
         settings = MagicMock()
         settings.max_iters = 10
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.checks_filtered_log = tmp_path / "checks_filtered.log"
@@ -297,6 +319,7 @@ class TestRunFixAttempt:
         settings = MagicMock()
         settings.max_iters = 10
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.checks_filtered_log = tmp_path / "checks_filtered.log"
@@ -336,6 +359,7 @@ class TestRunFixAttempt:
         settings = MagicMock()
         settings.max_iters = 10
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.checks_filtered_log = tmp_path / "checks_filtered.log"
@@ -375,6 +399,7 @@ class TestRunFixAttempt:
         settings = MagicMock()
         settings.max_iters = 10
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.checks_filtered_log = tmp_path / "checks_filtered.log"
@@ -419,6 +444,7 @@ class TestRunFixAttempt:
         settings = MagicMock()
         settings.max_iters = 10
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.checks_filtered_log = tmp_path / "checks_filtered.log"
@@ -464,6 +490,7 @@ class TestPrepareFixContext:
         settings.auto_attach_threshold = 1000000
         settings.large_file_lines = 2000
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -494,6 +521,7 @@ class TestPrepareFixContext:
         settings.auto_attach_threshold = 1000000
         settings.large_file_lines = 2000
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -526,6 +554,7 @@ class TestPrepareFixContext:
         settings.auto_attach_threshold = 50000  # 50KB threshold
         settings.large_file_lines = 2000
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -561,6 +590,7 @@ class TestFormatPrThreads:
         """Test formatting a single PR thread."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -595,6 +625,7 @@ class TestFormatPrThreads:
         """Test formatting a thread without line number."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -623,6 +654,7 @@ class TestFormatPrThreads:
         """Test formatting a thread without author."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -652,6 +684,7 @@ class TestFormatPrThreads:
         """Test formatting a thread without file path."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -680,6 +713,7 @@ class TestFormatPrThreads:
         """Test formatting multiple threads."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -718,6 +752,7 @@ class TestBuildReviewPrompt:
         settings = MagicMock()
         settings.auto_attach_threshold = 100000
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -738,6 +773,7 @@ class TestBuildReviewPrompt:
         settings = MagicMock()
         settings.auto_attach_threshold = 200000
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -766,6 +802,7 @@ class TestRunPiReview:
         settings = MagicMock()
         settings.auto_attach_threshold = 200000
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pi_log = tmp_path / "pi.log"
         paths.review_file = tmp_path / "review.md"
@@ -791,6 +828,7 @@ class TestRunPiReview:
         settings = MagicMock()
         settings.auto_attach_threshold = 100000
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pi_log = tmp_path / "pi.log"
         paths.review_file = tmp_path / "review.md"
@@ -813,6 +851,7 @@ class TestRunPiReview:
         settings = MagicMock()
         settings.auto_attach_threshold = 200000
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pi_log = tmp_path / "pi.log"
         paths.review_file = tmp_path / "review.md"
@@ -841,6 +880,7 @@ class TestGetBranchName:
         """Test getting branch name successfully."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -859,6 +899,7 @@ class TestGetBranchName:
         """Test getting branch name on failure."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -877,6 +918,7 @@ class TestGetBranchName:
         """Test getting branch name with empty response."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -899,6 +941,7 @@ class TestGetPrInfo:
         """Test getting PR info successfully."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -928,6 +971,7 @@ class TestGetPrInfo:
         """Test getting PR info on failure."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -950,6 +994,7 @@ class TestCheckPrThreadsCache:
         """Test cache hit scenario."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_threads_cache = tmp_path / "pr_threads_cache"
         paths.pr_threads_hash_file = tmp_path / "pr_threads_hash"
@@ -977,6 +1022,7 @@ class TestCheckPrThreadsCache:
         """Test cache miss due to hash mismatch."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_threads_cache = tmp_path / "pr_threads_cache"
         paths.pr_threads_hash_file = tmp_path / "pr_threads_hash"
@@ -1000,6 +1046,7 @@ class TestCheckPrThreadsCache:
         """Test cache miss when cache files don't exist."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_threads_cache = tmp_path / "pr_threads_cache"
         paths.pr_threads_hash_file = tmp_path / "pr_threads_hash"
@@ -1022,6 +1069,7 @@ class TestFetchPrThreadsGql:
         """Test successful PR thread fetch."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -1068,6 +1116,7 @@ class TestFetchPrThreadsGql:
         """Test PR thread fetch on command failure."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -1086,6 +1135,7 @@ class TestFetchPrThreadsGql:
         """Test PR thread fetch with invalid JSON."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pi_log = tmp_path / "pi.log"
 
@@ -1111,6 +1161,7 @@ class TestHasNoReviewIssues:
         # Create a minimal PiRunner instance
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         runner = PiRunner.__new__(PiRunner)
         runner.settings = settings
         runner.paths = paths
@@ -1124,6 +1175,7 @@ class TestHasNoReviewIssues:
         """Test that empty file returns True but logs warning."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         runner = PiRunner.__new__(PiRunner)
         runner.settings = settings
         runner.paths = paths
@@ -1138,6 +1190,7 @@ class TestHasNoReviewIssues:
         """Test that whitespace-only content returns True but logs warning."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         runner = PiRunner.__new__(PiRunner)
         runner.settings = settings
         runner.paths = paths
@@ -1152,6 +1205,7 @@ class TestHasNoReviewIssues:
         """Test legacy 'no critical issues found' text is handled."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         runner = PiRunner.__new__(PiRunner)
         runner.settings = settings
         runner.paths = paths
@@ -1167,6 +1221,7 @@ class TestHasNoReviewIssues:
         """Test that legacy format with actual issues returns False."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         runner = PiRunner.__new__(PiRunner)
         runner.settings = settings
         runner.paths = paths
@@ -1180,6 +1235,7 @@ class TestHasNoReviewIssues:
         """Test that issues content returns False."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         runner = PiRunner.__new__(PiRunner)
         runner.settings = settings
         runner.paths = paths
@@ -1199,6 +1255,7 @@ class TestRunChecks:
         settings = MagicMock()
         settings.check_cmd = "echo 'checks passed'"
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
         paths.checks_log = tmp_path / "checks.log"
         paths.pi_log = tmp_path / "pi.log"
@@ -1219,6 +1276,7 @@ class TestRunChecks:
         settings = MagicMock()
         settings.check_cmd = f'{sys.executable} -c "import sys; sys.exit(1)"'
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
         paths.checks_log = tmp_path / "checks.log"
         paths.pi_log = tmp_path / "pi.log"
@@ -1243,6 +1301,7 @@ class TestFetchPrThreads:
         settings.pr_review = True
         settings.max_pr_threads = 5
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.review_current_file = tmp_path / "review_current.md"
@@ -1267,6 +1326,7 @@ class TestFetchPrThreads:
         settings.pr_review = True
         settings.max_pr_threads = 5
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.review_current_file = tmp_path / "review_current.md"
@@ -1297,6 +1357,7 @@ class TestFetchPrThreads:
         settings.pr_review = True
         settings.max_pr_threads = 5
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.review_current_file = tmp_path / "review_current.md"
@@ -1328,6 +1389,7 @@ class TestFetchPrThreads:
         settings.pr_review = True
         settings.max_pr_threads = 5
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.review_current_file = tmp_path / "review_current.md"
@@ -1374,6 +1436,7 @@ class TestFetchPrThreads:
         settings.pr_review = True
         settings.max_pr_threads = 5
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.review_current_file = tmp_path / "review_current.md"
@@ -1431,6 +1494,7 @@ class TestFetchPrThreads:
         settings.pr_review = True
         settings.max_pr_threads = 5
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.review_current_file = tmp_path / "review_current.md"
@@ -1472,6 +1536,7 @@ class TestCompleteSuccess:
         settings = MagicMock()
         settings.ntfy_enabled = False
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.review_file = tmp_path / "review.md"
         paths.review_current_file = tmp_path / "review_current.md"
@@ -1510,6 +1575,7 @@ class TestCompleteSuccess:
         settings.ntfy_enabled = True
         settings.ntfy_url = "http://localhost:2586"
         paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.review_file = tmp_path / "review.md"

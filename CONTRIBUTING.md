@@ -177,7 +177,9 @@ fix_die_repeat/
 
 ## State Files
 
-All runtime state is stored in `.fix-die-repeat/` (automatically gitignored):
+All runtime state is stored outside the target repo, under
+`~/.fix-die-repeat/repos/<basename>-<8charhash>/` (override via `FDR_HOME`).
+Nothing is written inside the repo and `.gitignore` is never modified.
 
 | File | Purpose |
 |------|----------|

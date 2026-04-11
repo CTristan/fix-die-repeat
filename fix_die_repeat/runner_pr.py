@@ -454,6 +454,7 @@ class PrReviewManager:
             unresolved_count=len(threads),
             pr_number=pr_number,
             pr_url=pr_url,
+            **self.paths.template_context(),
         )
 
         return f"{header}\n\n" + "\n".join(threads_output)

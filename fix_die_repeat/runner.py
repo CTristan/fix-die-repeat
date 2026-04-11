@@ -70,7 +70,7 @@ class PiRunner:
         self.consecutive_toolless_attempts = 0
         self._success_complete = False
 
-        # Ensure .fix-die-repeat directory exists before creating logger
+        # Ensure central state dir exists before creating logger
         self.paths.ensure_fdr_dir()
 
         # Determine session log path
@@ -431,6 +431,7 @@ class PiRunner:
             large_context_list=large_context_list,
             large_file_warning=large_file_warning,
             languages=sorted(languages),
+            **self.paths.template_context(),
         )
 
         self.logger.info("Running pi to fix errors (attempt %s)...", fix_attempt)
@@ -678,8 +679,8 @@ class PiRunner:
 
             if not self.paths.review_current_file.exists():
                 self.logger.error(
-                    ".fix-die-repeat/review_current.md was not created by pi. "
-                    "Treating as no issues and exiting.",
+                    "%s was not created by pi. Treating as no issues and exiting.",
+                    self.paths.review_current_file,
                 )
                 self.paths.review_current_file.write_text("NO_ISSUES")
 
@@ -950,7 +951,7 @@ class PiRunner:
 
             lines = self.paths.checks_log.read_text().splitlines()
             filtered_lines = [
-                "=== FILTERED CHECK OUTPUT (full log: .fix-die-repeat/checks.log, "
+                f"=== FILTERED CHECK OUTPUT (full log: {self.paths.checks_log}, "
                 f"{total_lines} lines) ===",
                 "",
                 "--- Error/failure lines with context ---",
@@ -1511,7 +1512,8 @@ class PiRunner:
         duration = int(end_time - self.script_start_time)
         self.logger.info(
             "[Step 7] Done! All checks passed and no review issues found. "
-            ".fix-die-repeat/review.md retained. Session log: %s",
+            "%s retained. Session log: %s",
+            self.paths.review_file,
             self.session_log,
         )
 
@@ -1560,7 +1562,10 @@ class PiRunner:
             pi_args.append(f"@{self.paths.review_recent_file}")
 
         # Build fix prompt
-        fix_prompt = render_prompt("resolve_review_issues.j2")
+        fix_prompt = render_prompt(
+            "resolve_review_issues.j2",
+            **self.paths.template_context(),
+        )
 
         returncode, _, _ = self.run_pi_safe(*pi_args, fix_prompt)
 
@@ -1572,7 +1577,7 @@ class PiRunner:
         with self.paths.review_file.open("a") as f:
             f.write(
                 f"### Iteration {self.iteration} - Resolution ({timestamp})\n"
-                f"- Fixes applied for .fix-die-repeat/review_current.md "
+                f"- Fixes applied for {self.paths.review_current_file} "
                 f"(attempt {fix_attempt}); verification pending.\n\n",
             )
 
@@ -1622,7 +1627,8 @@ class PiRunner:
 
         if not self.paths.review_current_file.exists():
             self.logger.error(
-                ".fix-die-repeat/review_current.md was not created by pi. This is unexpected.",
+                "%s was not created by pi. This is unexpected.",
+                self.paths.review_current_file,
             )
             sys.exit(1)
 
@@ -1630,15 +1636,18 @@ class PiRunner:
         review_content = self.paths.review_current_file.read_text()
 
         if self.review_manager.has_no_review_issues(review_content):
-            self.logger.info("[Step 6B] No issues found in .fix-die-repeat/review_current.md.")
+            self.logger.info(
+                "[Step 6B] No issues found in %s.",
+                self.paths.review_current_file,
+            )
             # Set a flag to call complete_success after the loop
             self._success_complete = True
             return
 
         # Issues found - fix them
         self.logger.info(
-            "[Step 6A] Issues found in .fix-die-repeat/review_current.md. "
-            "Running pi to fix them...",
+            "[Step 6A] Issues found in %s. Running pi to fix them...",
+            self.paths.review_current_file,
         )
 
         fix_attempt = 1
@@ -1843,11 +1852,11 @@ class PiRunner:
         if diff_size > self.settings.auto_attach_threshold:
             return (
                 f"The changes are too large to attach automatically ({diff_size} bytes). "
-                "You MUST use the 'read' tool to inspect '.fix-die-repeat/changes.diff'.\n"
+                f"You MUST use the 'read' tool to inspect '{self.paths.diff_file}'.\n"
             )
         pi_args.append(f"@{self.paths.diff_file}")
         return (
-            "I have attached '.fix-die-repeat/changes.diff' which contains the changes "
+            f"I have attached '{self.paths.diff_file}' which contains the changes "
             "made in this session.\n"
         )
 
@@ -1887,6 +1896,7 @@ class PiRunner:
             review_prompt_prefix=review_prompt_prefix,
             has_agents_file=(self.paths.project_root / "AGENTS.md").exists(),
             languages=sorted(languages),
+            **self.paths.template_context(),
         )
 
         returncode, _, _ = run_pi_callback(*pi_args, review_prompt)

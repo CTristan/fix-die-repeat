@@ -194,20 +194,29 @@ def no_detection_prompt_message() -> str:
     )
 
 
-def no_tty_error_message() -> str:
+def no_tty_error_message(
+    project_config_path: str | None = None,
+    system_config_path: str | None = None,
+) -> str:
     """Return error message when no TTY is available.
+
+    Args:
+        project_config_path: Absolute path to this project's config file.
+        system_config_path: Absolute path to the global config file.
 
     Returns:
         Error message with setup instructions
 
     """
+    project_line = project_config_path or "<FDR_HOME>/repos/<slug>/config"
+    global_line = system_config_path or "~/.fix-die-repeat/config"
     return (
         "Error: No check command configured.\n\n"
         "fix-die-repeat needs a check command to run. Provide one via:\n"
         '  • CLI flag:          fix-die-repeat -c "pytest"\n'
         '  • Environment var:   FDR_CHECK_CMD="pytest" fix-die-repeat\n'
-        "  • Project config:    echo 'check_cmd = \"pytest\"' > .fix-die-repeat/config\n"
-        "  • Global config:     echo 'check_cmd = \"pytest\"' > ~/.config/fix-die-repeat/config"
+        f"  • Project config:    echo 'check_cmd = \"pytest\"' > {project_line}\n"
+        f"  • Global config:     echo 'check_cmd = \"pytest\"' > {global_line}"
     )
 
 

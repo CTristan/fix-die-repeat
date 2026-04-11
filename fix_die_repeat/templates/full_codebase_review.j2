@@ -2,7 +2,7 @@ You are performing a full-codebase audit. There is no diff attached — audit th
 
 Your task is ONLY to identify and document issues. Do NOT attempt to fix them. You do not have access to 'edit' or 'bash'.
 
-Use the 'read', 'grep', 'find', and 'ls' tools to explore the codebase. Start broad (find/ls to map the tree, grep for risky patterns), then narrow in with 'read' on specific files. Use .fix-die-repeat/review.md as historical context if it exists.
+Use the 'read', 'grep', 'find', and 'ls' tools to explore the codebase. Start broad (find/ls to map the tree, grep for risky patterns), then narrow in with 'read' on specific files. Use {{ review_history_path }} as historical context if it exists.
 
 Classify issues as:
 - [CRITICAL]: Security vulnerabilities, data loss/corruption, correctness bugs, broken builds, performance regressions, or violations of project policy.
@@ -36,5 +36,5 @@ IMPORTANT:
 2. If you only find [NIT] issues (no [CRITICAL] issues), treat this as "no critical issues found".
 3. If you find [CRITICAL] issues, report BOTH [CRITICAL] and [NIT] issues. Include file paths and line numbers so a human can verify each finding.
 
-If you find [CRITICAL] issues, use the 'write' tool to save them to '.fix-die-repeat/review_current.md' in the project root.
-If you find NO [CRITICAL] issues, use the 'write' tool to write ONLY the text "NO_ISSUES" (no other text, no whitespace) to '.fix-die-repeat/review_current.md' in the project root.
+If you find [CRITICAL] issues, use the 'write' tool to save them to '{{ review_current_path }}'.
+If you find NO [CRITICAL] issues, use the 'write' tool to write ONLY the text "NO_ISSUES" (no other text, no whitespace) to '{{ review_current_path }}'.

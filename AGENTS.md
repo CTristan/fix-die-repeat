@@ -208,10 +208,15 @@ Configuration with environment variable support via Pydantic.
 
 ### `Paths` (config.py)
 
-Centralized path management for `.fix-die-repeat/` directory.
+Centralized path management. All per-repo state lives in a central dir:
+`~/.fix-die-repeat/repos/<basename>-<8charhash>/` (override via `FDR_HOME`).
+Nothing is written inside the target repo and no `.gitignore` mutation occurs.
+The slug hash is `sha1(origin_remote_url or abs_path)[:8]`, so clones of the
+same remote share a slug while unrelated repos with the same basename don't
+collide.
 
 **Key Paths**:
-- `fdr_dir` - `.fix-die-repeat/` root directory
+- `fdr_dir` - central per-repo state directory (see above)
 - `review_file` - Historical review entries (preserved across runs)
 - `review_current_file` - Current issues to fix (deleted after each iteration)
 - `review_recent_file` - Last 50 lines of review.md (used in PR review mode)
@@ -240,12 +245,12 @@ Check command resolution and auto-detection module. Handles the smart resolution
 - `validate_command_exists()` - Pre-flight check that command is executable before entering main loop
 - `read_config_file()` / `write_config_file()` - Simple TOML-like config file I/O for persisting check_cmd
 - `is_interactive()` - Checks if stdin is a TTY (for deciding between auto-detect vs prompt)
-- `get_system_config_path()` - Returns `~/.config/fix-die-repeat/config` (respects XDG_CONFIG_HOME)
+- `get_system_config_path()` - Returns `<FDR_HOME>/config` (default `~/.fix-die-repeat/config`)
 
 **Resolution Priority**:
 1. CLI flag/env var (`-c` / `FDR_CHECK_CMD`)
-2. Project config (`.fix-die-repeat/config`)
-3. System config (`~/.config/fix-die-repeat/config`) - validated, falls through if command not found
+2. Project config (`<FDR_HOME>/repos/<slug>/config`)
+3. System config (`<FDR_HOME>/config`) - validated, falls through if command not found
 4. Auto-detect from project files
 5. Interactive prompt
 6. Hard error (non-interactive with no config)
@@ -356,8 +361,9 @@ To avoid exceeding pi's context limit:
 
 ### 3. State Persistence
 
-All state stored in `.fix-die-repeat/`:
-- Gitignored automatically on first run (added to `.gitignore`)
+All state stored in a central dir outside the target repo:
+`~/.fix-die-repeat/repos/<slug>/` (override via `FDR_HOME`).
+- Nothing is written inside the repo; `.gitignore` is never modified
 - Survives crashes and interruptions
 - Enables rollback via `git checkout $START_SHA`
 
@@ -413,8 +419,8 @@ Replaces the hardcoded `./scripts/ci.sh` default with a smart resolution chain t
 
 **Resolution Chain** (priority order):
 1. CLI flag/env var (`-c` / `FDR_CHECK_CMD`) - highest priority, no validation beyond pre-flight
-2. Project config (`.fix-die-repeat/config`) - per-project settings, no validation
-3. System config (`~/.config/fix-die-repeat/config`) - global settings, validated (falls through if command not found)
+2. Project config (`<FDR_HOME>/repos/<slug>/config`) - per-project settings, no validation
+3. System config (`<FDR_HOME>/config`) - global settings, validated (falls through if command not found)
 4. Auto-detect - scans for common project files (`Makefile`, `package.json`, `Cargo.toml`, etc.)
 5. Interactive prompt - asks user to type a command
 6. Hard error - non-interactive mode with no configured command exits with helpful message
@@ -426,7 +432,7 @@ After resolution completes, verify the command is executable before entering the
 - If not found → hard error with clear message
 
 **Config Persistence**:
-- Auto-detected or prompted commands are saved to `.fix-die-repeat/config`
+- Auto-detected or prompted commands are saved to `<FDR_HOME>/repos/<slug>/config`
 - Project config is automatically gitignored
 - Next run uses persisted command silently (skips detection/prompt)
 

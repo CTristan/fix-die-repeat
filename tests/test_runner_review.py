@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 from fix_die_repeat.config import Paths, Settings
 from fix_die_repeat.runner import PiRunner
 from fix_die_repeat.runner_review import ReviewManager
+from tests.conftest import FAKE_TEMPLATE_CONTEXT
 
 # Constants for test assertions
 EXPECTED_THREAD_COUNT = 2
@@ -19,6 +20,7 @@ class TestRunReviewFixAttempt:
         settings = MagicMock()
         settings.model = "test-model"
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.review_current_file = tmp_path / "review_current.md"
@@ -61,6 +63,7 @@ class TestRunReviewFixAttempt:
         settings = MagicMock()
         settings.model = "test-model"
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.review_current_file = tmp_path / "review_current.md"
@@ -94,6 +97,7 @@ class TestRunReviewFixAttempt:
         settings = MagicMock()
         settings.model = "test-model"
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.review_current_file = tmp_path / "review_current.md"
@@ -133,6 +137,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -154,6 +159,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -178,6 +184,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -203,6 +210,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -232,6 +240,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -261,6 +270,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -321,6 +331,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -370,6 +381,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -411,6 +423,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -458,6 +471,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"

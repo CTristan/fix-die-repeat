@@ -48,8 +48,8 @@ All options can be set via `FDR_`-prefixed environment variables:
 fix-die-repeat automatically finds your project's check command using this priority chain:
 
 1. **CLI flag / env var** (`-c` / `FDR_CHECK_CMD`)
-2. **Project config** (`.fix-die-repeat/config`)
-3. **System config** (`~/.config/fix-die-repeat/config`)
+2. **Project config** (`~/.fix-die-repeat/repos/<slug>/config`)
+3. **System config** (`~/.fix-die-repeat/config`)
 4. **Auto-detect** from project files
 5. **Interactive prompt**
 6. **Error** (non-interactive with no config)
@@ -73,12 +73,16 @@ fix-die-repeat automatically finds your project's check command using this prior
 
 ### Config Files
 
-**Project config** (`.fix-die-repeat/config`) — per-project, automatically gitignored:
+**Project config** (`~/.fix-die-repeat/repos/<slug>/config`) — per-project, stored
+in a central directory so no files are written inside the repo. The slug is
+`<basename>-<8charhash>` derived from the git `origin` remote URL (or absolute
+path if none). Override the base directory with `FDR_HOME` if you want state
+somewhere other than `~/.fix-die-repeat/`.
 ```toml
 check_cmd = "uv run pytest"
 ```
 
-**System config** (`~/.config/fix-die-repeat/config`) — shared across projects:
+**System config** (`~/.fix-die-repeat/config`) — shared across projects:
 ```toml
 check_cmd = "pytest"
 ```
@@ -148,7 +152,7 @@ fix-die-repeat --pr-review --max-pr-threads 3
 fix-die-repeat --debug
 ```
 
-Creates timestamped session logs in `.fix-die-repeat/` and enables verbose console output for troubleshooting.
+Creates timestamped session logs in `~/.fix-die-repeat/repos/<slug>/` and enables verbose console output for troubleshooting.
 
 ---
 

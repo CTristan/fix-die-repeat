@@ -191,6 +191,7 @@ class ReviewManager:
             review_prompt_prefix=review_prompt_prefix,
             has_agents_file=(self.paths.project_root / "AGENTS.md").exists(),
             languages=sorted(languages),
+            **self.paths.template_context(),
         )
 
         returncode, _, _ = run_pi_callback(*pi_args, review_prompt)
@@ -214,7 +215,7 @@ class ReviewManager:
             self.logger.info("Review diff size exceeds threshold. Switching to PULL mode.")
             return (
                 f"The changes are too large to attach automatically ({diff_size} bytes). "
-                "You MUST use the 'read' tool to inspect '.fix-die-repeat/changes.diff'.\n"
+                f"You MUST use the 'read' tool to inspect '{self.paths.diff_file}'.\n"
             )
 
         self.logger.info(
@@ -223,7 +224,7 @@ class ReviewManager:
         )
         pi_args.append(f"@{self.paths.diff_file}")
         return (
-            "I have attached '.fix-die-repeat/changes.diff' which contains the changes "
+            f"I have attached '{self.paths.diff_file}' which contains the changes "
             "made in this session.\n"
         )
 
@@ -356,6 +357,7 @@ class ReviewManager:
             "full_codebase_review.j2",
             has_agents_file=(self.paths.project_root / "AGENTS.md").exists(),
             languages=sorted(languages),
+            **self.paths.template_context(),
         )
 
         self.logger.info("[Step 5] Running pi to audit full codebase...")

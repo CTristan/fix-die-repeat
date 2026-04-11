@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from fix_die_repeat.runner import PiRunner
+from tests.conftest import FAKE_TEMPLATE_CONTEXT
 
 TEST_ITERATION = 1
 TEST_MAX_ITERS = 10
@@ -20,6 +21,7 @@ class TestRunFixAttemptThreadFixes:
         settings = MagicMock()
         settings.max_iters = TEST_MAX_ITERS
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
         paths.checks_filtered_log = tmp_path / "checks_filtered.log"
         paths.review_file = tmp_path / "review.md"
@@ -63,6 +65,7 @@ class TestUntrackedDiffThreadFixes:
         """Untracked file listing should always run from the repository root."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
 
         runner = PiRunner.__new__(PiRunner)
@@ -85,6 +88,7 @@ class TestUntrackedDiffThreadFixes:
         """Pseudo-diff generation should call `file` via argv and read text safely."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
 
         runner = PiRunner.__new__(PiRunner)
@@ -114,6 +118,7 @@ class TestFetchPrThreadsGraphqlThreadFixes:
         """GraphQL fetch should pass query as one argv argument and use repo-root cwd."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
 
         runner = PiRunner.__new__(PiRunner)
@@ -152,6 +157,7 @@ class TestPrThreadScopePersistenceFixes:
         """Cache hits should use persisted in-scope IDs instead of parsing markdown."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.pr_threads_cache = tmp_path / "pr_threads_cache"
         paths.pr_threads_hash_file = tmp_path / "pr_threads_hash"
         paths.review_current_file = tmp_path / "review_current.md"
@@ -181,6 +187,7 @@ class TestPrThreadScopePersistenceFixes:
         """Cache hits without persisted in-scope IDs should trigger a refetch."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.pr_threads_cache = tmp_path / "pr_threads_cache"
         paths.pr_threads_hash_file = tmp_path / "pr_threads_hash"
         paths.review_current_file = tmp_path / "review_current.md"
@@ -210,6 +217,7 @@ class TestPrThreadContentParsingFixes:
         """Multiline comment lines should be indented so they can't look like headers."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
 
         runner = PiRunner.__new__(PiRunner)
@@ -255,6 +263,7 @@ class TestFetchPrThreadsLimitFixes:
         settings = MagicMock()
         settings.max_pr_threads = 2
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
         paths.review_current_file = tmp_path / "review_current.md"
         paths.pr_threads_cache = tmp_path / "pr_threads_cache"
@@ -342,6 +351,7 @@ class TestFetchPrThreadsLimitFixes:
         settings = MagicMock()
         settings.max_pr_threads = 2
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
         paths.review_current_file = tmp_path / "review_current.md"
         paths.pr_threads_cache = tmp_path / "pr_threads_cache"
@@ -400,6 +410,7 @@ class TestFetchPrThreadsLimitFixes:
         settings = MagicMock()
         settings.max_pr_threads = 5
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
         paths.review_current_file = tmp_path / "review_current.md"
         paths.pr_threads_cache = tmp_path / "pr_threads_cache"
@@ -446,6 +457,7 @@ class TestRepoContextCwdThreadFixes:
         """get_branch_name should run git branch from the configured repo root."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
 
         runner = PiRunner.__new__(PiRunner)
@@ -467,6 +479,7 @@ class TestRepoContextCwdThreadFixes:
         """get_pr_info should scope gh pr view to the configured repo root."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
 
         runner = PiRunner.__new__(PiRunner)
@@ -499,6 +512,7 @@ class TestRepoContextCwdThreadFixes:
         settings = MagicMock()
         settings.max_pr_threads = 5
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
 
         runner = PiRunner.__new__(PiRunner)
@@ -523,6 +537,7 @@ class TestRepoContextCwdThreadFixes:
         """generate_diff should scope git diff commands to the configured repo root."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
 
         runner = PiRunner.__new__(PiRunner)
@@ -548,6 +563,7 @@ class TestRepoContextCwdThreadFixes:
         """generate_diff should also scope fallback HEAD diff to project root."""
         settings = MagicMock()
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.project_root = tmp_path
 
         runner = PiRunner.__new__(PiRunner)

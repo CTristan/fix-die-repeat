@@ -69,7 +69,7 @@ class ArtifactManager:
 
         lines = self.paths.checks_log.read_text().splitlines()
         filtered_lines = [
-            "=== FILTERED CHECK OUTPUT (full log: .fix-die-repeat/checks.log, "
+            f"=== FILTERED CHECK OUTPUT (full log: {self.paths.checks_log}, "
             f"{total_lines} lines) ===",
             "",
             "--- Error/failure lines with context ---",
