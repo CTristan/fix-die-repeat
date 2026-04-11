@@ -516,10 +516,17 @@ class TestRunFullCodebaseReview:
         paths.ensure_fdr_dir()
         return ReviewManager(settings, paths, tmp_path, MagicMock())
 
-    def test_invokes_pi_without_diff_and_with_full_codebase_template(self, tmp_path: Path) -> None:
-        """Full-codebase review must not attach changes.diff and must use the new template."""
+    def test_invokes_pi_without_diff_or_history(self, tmp_path: Path) -> None:
+        """Full-codebase review must not attach diff or historical review.md."""
         manager = self._make_manager(tmp_path)
-        run_pi = MagicMock(return_value=(0, "", ""))
+        # Pre-populate review.md with prior findings — these must NOT be passed to pi.
+        manager.paths.review_file.write_text("[CRITICAL] stale finding from earlier run\n")
+
+        def fake_run_pi(*_args: str, **_kwargs: object) -> tuple[int, str, str]:
+            manager.paths.review_current_file.write_text("[CRITICAL] fresh finding\n")
+            return (0, "", "")
+
+        run_pi = MagicMock(side_effect=fake_run_pi)
 
         with patch(
             "fix_die_repeat.runner_review.get_all_tracked_files",
@@ -533,10 +540,40 @@ class TestRunFullCodebaseReview:
         assert "read,write,grep,find,ls" in pi_args
         # No diff attached in full-codebase mode
         assert not any(isinstance(a, str) and a.endswith("changes.diff") for a in pi_args)
+        # No historical review.md attached — single-pass mode does not pass history.
+        assert not any(
+            isinstance(a, str) and a.startswith("@") and a.endswith("review.md") for a in pi_args
+        )
         # Prompt text should reference full-codebase audit framing
         prompt = pi_args[-1]
         assert isinstance(prompt, str)
         assert "full-codebase audit" in prompt
+        # review.md is overwritten with the fresh findings, not appended.
+        assert manager.paths.review_file.read_text() == "[CRITICAL] fresh finding\n"
+        assert "stale finding" not in manager.paths.review_file.read_text()
+
+    def test_second_run_overwrites_review_file(self, tmp_path: Path) -> None:
+        """Running the full-codebase review twice must leave only the second run's output."""
+        manager = self._make_manager(tmp_path)
+
+        findings = iter(["[CRITICAL] first run\n", "[CRITICAL] second run\n"])
+
+        def fake_run_pi(*_args: str, **_kwargs: object) -> tuple[int, str, str]:
+            manager.paths.review_current_file.write_text(next(findings))
+            return (0, "", "")
+
+        run_pi = MagicMock(side_effect=fake_run_pi)
+
+        with patch(
+            "fix_die_repeat.runner_review.get_all_tracked_files",
+            return_value=["fix_die_repeat/runner.py"],
+        ):
+            manager.run_full_codebase_review(iteration=1, run_pi_callback=run_pi)
+            manager.run_full_codebase_review(iteration=1, run_pi_callback=run_pi)
+
+        content = manager.paths.review_file.read_text()
+        assert content == "[CRITICAL] second run\n"
+        assert "first run" not in content
 
     def test_pi_failure_writes_no_issues(self, tmp_path: Path) -> None:
         """When pi fails we should still produce a NO_ISSUES marker."""
@@ -547,6 +584,7 @@ class TestRunFullCodebaseReview:
             "fix_die_repeat.runner_review.get_all_tracked_files",
             return_value=[],
         ):
-            manager.run_full_codebase_review(iteration=2, run_pi_callback=run_pi)
+            manager.run_full_codebase_review(iteration=1, run_pi_callback=run_pi)
 
         assert manager.paths.review_current_file.read_text() == "NO_ISSUES"
+        assert manager.paths.review_file.read_text().strip() == "NO_ISSUES"

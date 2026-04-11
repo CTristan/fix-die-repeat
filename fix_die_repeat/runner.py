@@ -622,7 +622,7 @@ class PiRunner:
         if self.settings.pr_threads_introspect_only:
             return self.run_pr_threads_introspect_only()
         if self.settings.full_codebase_review:
-            return self.run_full_codebase_review_loop()
+            return self.run_full_codebase_review_once()
 
         while True:
             self.iteration += 1
@@ -650,52 +650,68 @@ class PiRunner:
 
         return 0
 
-    def run_full_codebase_review_loop(self) -> int:
-        """Run a report-only full-codebase review loop.
+    def run_full_codebase_review_once(self) -> int:
+        """Run a single report-only full-codebase review pass.
 
-        Skips the fix loop entirely. Each iteration runs pi over the whole
-        tracked codebase and records findings to review.md. Exits when a
-        pass reports no issues or max_iters is reached.
+        This mode never attempts fixes, so looping is pointless — any second
+        pass would re-discover the same issues. Runs pi exactly once over the
+        whole tracked codebase, overwrites review.md with the findings, and
+        prints them to the terminal so the user can see them directly.
 
         Returns:
-            Exit code (0 when a pass reports no issues, 1 on max iters)
+            Exit code 0 on completion (success regardless of findings).
 
         """
-        self.logger.info("Full-codebase review mode: fix loop is disabled.")
-        while True:
-            self.iteration += 1
-            self.logger.info(
-                "===== Full-codebase review iteration %s of %s =====",
-                self.iteration,
-                self.settings.max_iters,
+        self.iteration = 1
+        self.logger.info("Full-codebase review (single pass, report-only).")
+        self.artifact_manager.check_and_compact_artifacts()
+
+        self.paths.review_current_file.unlink(missing_ok=True)
+        self.review_manager.run_full_codebase_review(self.iteration, self.run_pi_safe)
+
+        if not self.paths.review_current_file.exists():
+            self.logger.error(
+                "%s was not created by pi. Treating as no issues.",
+                self.paths.review_current_file,
             )
-            self.artifact_manager.check_and_compact_artifacts()
+            self.paths.review_current_file.write_text("NO_ISSUES")
+            self.paths.review_file.write_text("NO_ISSUES\n")
 
-            if self.iteration > self.settings.max_iters:
-                return self._handle_max_iterations_exceeded()
+        review_content = (
+            self.paths.review_file.read_text() if self.paths.review_file.exists() else ""
+        )
 
-            self.paths.review_current_file.unlink(missing_ok=True)
-            self.review_manager.run_full_codebase_review(self.iteration, self.run_pi_safe)
-
-            if not self.paths.review_current_file.exists():
-                self.logger.error(
-                    "%s was not created by pi. Treating as no issues and exiting.",
-                    self.paths.review_current_file,
-                )
-                self.paths.review_current_file.write_text("NO_ISSUES")
-
-            review_content = self.paths.review_current_file.read_text()
-            if self.review_manager.has_no_review_issues(review_content):
-                self.logger.info(
-                    "[Step 6B] No critical issues found. Full-codebase review complete.",
-                )
-                self._success_complete = True
-                return self.complete_success()
-
+        if self.review_manager.has_no_review_issues(review_content):
+            self.logger.info("[Step 6B] No critical issues found.")
+        else:
+            critical_count = review_content.count("[CRITICAL]")
+            nit_count = review_content.count("[NIT]")
             self.logger.info(
-                "[Report-only] Findings recorded in review.md. "
-                "Not attempting fixes; running another pass.",
+                "[Step 6B] Full-codebase review complete: %s [CRITICAL], %s [NIT] finding(s).",
+                critical_count,
+                nit_count,
             )
+            self.logger.info("===== Full-codebase review findings =====")
+            for line in review_content.splitlines():
+                self.logger.info("%s", line)
+            self.logger.info("==========================================")
+            self.logger.info("Findings saved to %s", self.paths.review_file)
+
+        self._success_complete = True
+        self.paths.review_current_file.unlink(missing_ok=True)
+        self.paths.start_sha_file.unlink(missing_ok=True)
+
+        duration = int(time.time() - self.script_start_time)
+        play_completion_sound()
+        if self.settings.ntfy_enabled:
+            send_ntfy_notification(
+                exit_code=0,
+                duration_str=format_duration(duration),
+                repo_name=self.paths.project_root.name,
+                ntfy_url=self.settings.ntfy_url,
+                logger=self.logger,
+            )
+        return 0
 
     def run_pr_threads_introspect_only(self) -> int:
         """Fetch unresolved PR threads and run introspection without attempting fixes.

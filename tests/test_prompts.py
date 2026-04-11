@@ -307,6 +307,20 @@ class TestNoLegacyPathsInTemplates:
         )
         assert ".fix-die-repeat" not in prompt
 
+    def test_full_codebase_review_omits_history_reference(self) -> None:
+        """full_codebase_review.j2 must not reference prior review.md as history.
+
+        The single-pass mode no longer attaches review.md, so the template must
+        not instruct pi to consult it — otherwise pi sees a dangling path.
+        """
+        prompt = render_prompt(
+            "full_codebase_review.j2",
+            languages=[],
+            **FAKE_PATHS,
+        )
+        assert FAKE_PATHS["review_history_path"] not in prompt
+        assert "historical context" not in prompt
+
     def test_resolve_review_issues_has_no_legacy_literal(self) -> None:
         """resolve_review_issues.j2 must not render the legacy literal."""
         prompt = render_prompt(

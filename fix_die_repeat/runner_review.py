@@ -330,13 +330,19 @@ class ReviewManager:
         iteration: int,
         run_pi_callback: Callable[..., tuple[int, str, str]],
     ) -> None:
-        """Run a report-only review over the entire tracked codebase.
+        """Run a single report-only review pass over the entire tracked codebase.
+
+        This is a single-pass operation: ``review.md`` is overwritten with the
+        current run's findings (no ``## Iteration N`` stacking, no historical
+        context passed to pi).
 
         Args:
-            iteration: Current iteration number
+            iteration: Current iteration number (unused in single-pass mode,
+                kept for interface parity with ``run_local_review``).
             run_pi_callback: Function to run pi (from PiRunner)
 
         """
+        del iteration
         self.logger.info("[Step 4] Full-codebase review — collecting tracked files...")
 
         tracked_files = get_all_tracked_files(self.project_root)
@@ -345,12 +351,14 @@ class ReviewManager:
         # Clear any stale diff so other code paths don't accidentally use it.
         self.paths.diff_file.write_text("")
 
+        # Truncate review.md: single-pass mode always overwrites, never appends.
+        self.paths.review_file.write_text("")
+        self.paths.review_current_file.unlink(missing_ok=True)
+
         languages = resolve_languages(tracked_files, self.settings.languages)
         languages = filter_supported_languages(languages)
 
         pi_args = ["-p", "--tools", "read,write,grep,find,ls"]
-        if self.paths.review_file.exists():
-            pi_args.append(f"@{self.paths.review_file}")
 
         review_prompt = render_prompt(
             "full_codebase_review.j2",
@@ -365,7 +373,15 @@ class ReviewManager:
             self.logger.info("pi review failed. Treating as no issues found.")
             self.paths.review_current_file.write_text("NO_ISSUES")
 
-        self.append_review_entry(iteration)
+        # Copy the pi output verbatim into review.md (no iteration headers).
+        if self.paths.review_current_file.exists():
+            content = self.paths.review_current_file.read_text()
+            if content.strip() and content.strip() != "NO_ISSUES":
+                self.paths.review_file.write_text(content)
+            else:
+                self.paths.review_file.write_text("NO_ISSUES\n")
+        else:
+            self.paths.review_file.write_text("NO_ISSUES\n")
 
     def check_prohibited_ruff_ignores(self) -> None:
         """Check for prohibited ruff rules in per-file-ignores.

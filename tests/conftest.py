@@ -1,6 +1,8 @@
 """Shared pytest fixtures for fix-die-repeat tests."""
 
+from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -24,3 +26,19 @@ def _isolated_fdr_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("FDR_HOME", str(fdr_home))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     return fdr_home
+
+
+@pytest.fixture(autouse=True)
+def _silence_runner_side_effects() -> Iterator[None]:
+    """Stub out audible and network side effects triggered by runner completion.
+
+    Patches the names as imported by ``fix_die_repeat.runner`` so tests that
+    go all the way through a completion path don't play sounds or hit ntfy.
+    Tests in ``test_utils.py`` exercising the real functions import from
+    ``fix_die_repeat.utils`` directly and are unaffected.
+    """
+    with (
+        patch("fix_die_repeat.runner.play_completion_sound"),
+        patch("fix_die_repeat.runner.send_ntfy_notification"),
+    ):
+        yield
