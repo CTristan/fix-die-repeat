@@ -17,7 +17,44 @@ from fix_die_repeat.utils import is_running_in_dev_mode
 console = Console()
 
 
-@click.command()
+_MAIN_HELP = (
+    "Automated check, review, and fix loop using pi.\n"
+    "\n"
+    "\b\n"
+    "Environment variables:\n"
+    "  FDR_CHECK_CMD, FDR_MAX_ITERS, FDR_MODEL, FDR_MAX_PR_THREADS,\n"
+    "  FDR_ARCHIVE_ARTIFACTS, FDR_PR_REVIEW, FDR_PR_REVIEW_INTROSPECT,\n"
+    "  FDR_FULL_CODEBASE_REVIEW, FDR_PR_THREADS_INTROSPECT_ONLY,\n"
+    "  FDR_TEST_MODEL, FDR_DEBUG,\n"
+    "  FDR_NTFY_ENABLED (default: 1),\n"
+    "  FDR_NTFY_URL (default: http://localhost:2586)\n"
+    "\n"
+    "\b\n"
+    "Examples:\n"
+    "  # Run with default settings\n"
+    "  fix-die-repeat\n"
+    "\b\n"
+    "  # Use a custom check command\n"
+    '  fix-die-repeat -c "make test"\n'
+    "\b\n"
+    "  # Test a model before running\n"
+    "  fix-die-repeat --test-model anthropic/claude-sonnet-4-5\n"
+    "\b\n"
+    "  # Enable PR review mode\n"
+    "  fix-die-repeat --pr-review\n"
+    "\b\n"
+    "  # PR review mode with prompt introspection\n"
+    "  fix-die-repeat --pr-review-introspect\n"
+    "\b\n"
+    "  # Audit the entire codebase (report-only, no fixes attempted)\n"
+    "  fix-die-repeat --full-codebase-review\n"
+    "\b\n"
+    "  # Fetch and introspect unresolved PR review threads, then exit\n"
+    "  fix-die-repeat --pr-threads-introspect-only\n"
+)
+
+
+@click.command(help=_MAIN_HELP)
 @click.option(
     "-c",
     "--check-cmd",
@@ -98,34 +135,14 @@ console = Console()
 )
 @click.version_option()
 def main(**kwargs: str | int | bool | None) -> None:
-    r"""Automated check, review, and fix loop using pi.
+    """Run the automated check, review, and fix loop.
 
-    \f
     fix-die-repeat is an automated tool that:
     1. Runs your check command (CI/tests)
     2. If checks fail, uses pi to fix the errors
     3. If checks pass, reviews the changes using pi
     4. If review finds issues, fixes them
     5. Repeats until all checks pass and no issues are found
-
-    Environment variables:
-      FDR_CHECK_CMD, FDR_MAX_ITERS, FDR_MODEL, FDR_MAX_PR_THREADS,
-      FDR_ARCHIVE_ARTIFACTS, FDR_COMPACT_ARTIFACTS, FDR_PR_REVIEW, FDR_DEBUG,
-      FDR_NTFY_ENABLED (default: 1), FDR_NTFY_URL (default: http://localhost:2586)
-
-    Examples:
-      # Run with default settings
-      fix-die-repeat
-
-      # Use a custom check command
-      fix-die-repeat -c "make test"
-
-      # Test a model before running
-      fix-die-repeat --test-model anthropic/claude-sonnet-4-5
-
-      # Enable PR review mode
-      fix-die-repeat --pr-review
-
     """
     debug = bool(kwargs.get("debug", False))
     exit_code = _run_main_with_error_handling(kwargs, debug=debug)
