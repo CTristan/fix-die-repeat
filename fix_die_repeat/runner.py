@@ -691,10 +691,13 @@ class PiRunner:
                 critical_count,
                 nit_count,
             )
-            self.logger.info("===== Full-codebase review findings =====")
-            for line in review_content.splitlines():
-                self.logger.info("%s", line)
-            self.logger.info("==========================================")
+            # Write raw findings to stdout (no log timestamp) for easy copy/paste.
+            sys.stdout.write("===== Full-codebase review findings =====\n")
+            sys.stdout.write(review_content)
+            if not review_content.endswith("\n"):
+                sys.stdout.write("\n")
+            sys.stdout.write("==========================================\n")
+            sys.stdout.flush()
             self.logger.info("Findings saved to %s", self.paths.review_file)
 
         self._success_complete = True

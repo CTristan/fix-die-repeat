@@ -1745,9 +1745,13 @@ class TestRunFullCodebaseReviewOnce:
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
         return runner, review_manager, logger
 
-    def test_runs_exactly_one_pass_and_prints_findings(self, tmp_path: Path) -> None:
-        """Single pass runs review manager once, prints findings, returns success."""
-        runner, review_manager, logger = self._build_runner(tmp_path)
+    def test_runs_exactly_one_pass_and_prints_findings(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Single pass runs review manager once, prints findings to stdout, returns success."""
+        runner, review_manager, _logger = self._build_runner(tmp_path)
 
         def fake_review(_iteration: int, _callback: object) -> None:
             runner.paths.review_current_file.write_text(
@@ -1764,10 +1768,13 @@ class TestRunFullCodebaseReviewOnce:
 
         assert result == 0
         assert review_manager.run_full_codebase_review.call_count == 1
-        # Findings should have been logged at info level
-        logged = " ".join(str(call) for call in logger.info.call_args_list)
-        assert "[CRITICAL]" in logged
-        assert "boom at file.py:1" in logged
+        # Findings should have been printed to stdout (no log timestamp prefix)
+        captured = capsys.readouterr()
+        assert "===== Full-codebase review findings =====" in captured.out
+        assert "[CRITICAL] boom at file.py:1" in captured.out
+        assert "[NIT] style issue" in captured.out
+        # And must NOT go through the logger (which would prefix timestamps)
+        assert "[fdr]" not in captured.out
 
     def test_no_issues_path_still_returns_success(self, tmp_path: Path) -> None:
         """When pi reports NO_ISSUES, single pass still completes successfully."""
