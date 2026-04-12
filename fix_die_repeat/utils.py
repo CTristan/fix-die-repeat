@@ -1,5 +1,6 @@
 """Utility functions for fix-die-repeat."""
 
+import enum
 import fnmatch
 import hashlib
 import importlib.metadata
@@ -358,6 +359,161 @@ def get_all_tracked_files(
             result.append(f)
 
     return result
+
+
+class ReviewScope(enum.Enum):
+    """Scope tiers for contextual review."""
+
+    UNCOMMITTED = "uncommitted"
+    BRANCH = "branch"
+    FULL = "full"
+
+
+def get_default_branch(project_root: Path) -> str | None:
+    """Detect the repository's default branch.
+
+    Tries ``git symbolic-ref refs/remotes/origin/HEAD`` first, then falls
+    back to checking if ``main`` or ``master`` exists locally.
+
+    Args:
+        project_root: Project root directory
+
+    Returns:
+        Branch name or None if not determinable
+
+    """
+    # Try remote HEAD symbolic ref
+    returncode, stdout, _ = run_command(
+        "git symbolic-ref refs/remotes/origin/HEAD",
+        cwd=project_root,
+        check=False,
+    )
+    if returncode == 0 and stdout.strip():
+        # Strip refs/remotes/origin/ prefix
+        ref = stdout.strip()
+        prefix = "refs/remotes/origin/"
+        if ref.startswith(prefix):
+            return ref[len(prefix) :]
+
+    # Fall back to checking local branches
+    for branch in ("main", "master"):
+        returncode, _, _ = run_command(
+            f"git rev-parse --verify {branch}",
+            cwd=project_root,
+            check=False,
+        )
+        if returncode == 0:
+            return branch
+
+    return None
+
+
+def get_branch_changed_files(
+    project_root: Path,
+    default_branch: str,
+    exclude_patterns: list[str] | None = None,
+) -> list[str]:
+    """Get files changed on the current branch relative to the default branch.
+
+    Args:
+        project_root: Project root directory
+        default_branch: Name of the default branch (e.g. "main")
+        exclude_patterns: Patterns to exclude
+
+    Returns:
+        Sorted list of changed file paths relative to project root
+
+    """
+    exclude_patterns = exclude_patterns or [
+        "*.lock",
+        "*-lock.json",
+        "*-lock.yaml",
+        "go.sum",
+        "*.min.*",
+    ]
+
+    # Find the merge base
+    returncode, stdout, _ = run_command(
+        f"git merge-base HEAD {default_branch}",
+        cwd=project_root,
+        check=False,
+    )
+    if returncode != 0:
+        return []
+
+    merge_base = stdout.strip()
+
+    # Get changed files
+    returncode, stdout, _ = run_command(
+        f"git diff --name-only {merge_base} HEAD",
+        cwd=project_root,
+        check=False,
+    )
+    if returncode != 0:
+        return []
+
+    result = []
+    for f in sorted(stdout.strip().split("\n")):
+        if not f or f.startswith(".fix-die-repeat"):
+            continue
+        file_path = project_root / f
+        if not file_path.is_file():
+            continue
+        if not _should_exclude_file(file_path.name, exclude_patterns):
+            result.append(f)
+
+    return result
+
+
+def determine_review_scope(project_root: Path) -> tuple[ReviewScope, list[str]]:
+    """Determine the appropriate review scope based on git state.
+
+    Priority:
+    1. Uncommitted changes (staged/unstaged/untracked) → UNCOMMITTED
+    2. On a feature branch with commits vs default branch → BRANCH
+    3. Otherwise → FULL
+
+    Args:
+        project_root: Project root directory
+
+    Returns:
+        Tuple of (scope, list of files in scope). FULL returns empty list.
+
+    """
+    logger = logging.getLogger(LOGGER_NAME)
+
+    # Tier 1: uncommitted changes
+    changed = get_changed_files(project_root)
+    if changed:
+        logger.info(
+            "Contextual review scope: UNCOMMITTED (%d file(s) with local changes)",
+            len(changed),
+        )
+        return ReviewScope.UNCOMMITTED, changed
+
+    # Tier 2: branch changes vs default
+    returncode, stdout, _ = run_command(
+        "git branch --show-current",
+        cwd=project_root,
+        check=False,
+    )
+    current_branch = stdout.strip() if returncode == 0 else ""
+
+    if current_branch:
+        default_branch = get_default_branch(project_root)
+        if default_branch and current_branch != default_branch:
+            branch_files = get_branch_changed_files(project_root, default_branch)
+            if branch_files:
+                logger.info(
+                    "Contextual review scope: BRANCH (%d file(s) changed vs %s)",
+                    len(branch_files),
+                    default_branch,
+                )
+                return ReviewScope.BRANCH, branch_files
+
+    # Tier 3: full codebase
+    logger.info("Contextual review scope: FULL (no scoped changes detected)")
+    return ReviewScope.FULL, []
 
 
 def get_file_size(path: Path) -> int:

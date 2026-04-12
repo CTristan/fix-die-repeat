@@ -83,6 +83,13 @@ class Settings(BaseSettings):
         description="Audit the entire codebase instead of a diff; never applies fixes",
     )
 
+    # Contextual review mode (report-only, auto-scoped)
+    contextual_review: bool = pyd.Field(
+        default=False,
+        alias="FDR_CONTEXTUAL_REVIEW",
+        description="Smart contextual review: uncommitted changes, branch diff, or full codebase",
+    )
+
     # PR threads introspect-only mode
     pr_threads_introspect_only: bool = pyd.Field(
         default=False,
@@ -178,6 +185,7 @@ class CliOptions:
     pr_review: bool = False
     pr_review_introspect: bool = False
     full_codebase_review: bool = False
+    contextual_review: bool = False
     pr_threads_introspect_only: bool = False
     test_model: str | None = None
     debug: bool = False
@@ -262,6 +270,8 @@ def _apply_boolean_flags(settings: Settings, options: CliOptions) -> None:
         settings.pr_review = True
     if options.full_codebase_review:
         settings.full_codebase_review = options.full_codebase_review
+    if options.contextual_review:
+        settings.contextual_review = options.contextual_review
     if options.pr_threads_introspect_only:
         settings.pr_threads_introspect_only = options.pr_threads_introspect_only
     if options.debug:

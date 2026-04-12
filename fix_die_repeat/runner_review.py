@@ -16,10 +16,13 @@ from fix_die_repeat.lang import filter_supported_languages, resolve_languages
 from fix_die_repeat.prompts import render_prompt
 from fix_die_repeat.utils import (
     PROHIBITED_RUFF_RULES,
+    ReviewScope,
     RuffConfigParseError,
+    determine_review_scope,
     find_prohibited_ruff_ignores,
     get_all_tracked_files,
     get_changed_files,
+    get_default_branch,
     get_file_size,
     is_excluded_file,
     run_command,
@@ -367,6 +370,102 @@ class ReviewManager:
         )
 
         self.logger.info("[Step 5] Running pi to audit full codebase...")
+        returncode, _, _ = run_pi_callback(*pi_args, review_prompt)
+
+        if returncode != 0:
+            self.logger.info("pi review failed. Treating as no issues found.")
+            self.paths.review_current_file.write_text("NO_ISSUES")
+
+        # Copy the pi output verbatim into review.md (no iteration headers).
+        if self.paths.review_current_file.exists():
+            content = self.paths.review_current_file.read_text()
+            if content.strip() and content.strip() != "NO_ISSUES":
+                self.paths.review_file.write_text(content)
+            else:
+                self.paths.review_file.write_text("NO_ISSUES\n")
+        else:
+            self.paths.review_file.write_text("NO_ISSUES\n")
+
+    def run_contextual_review(
+        self,
+        iteration: int,
+        run_pi_callback: Callable[..., tuple[int, str, str]],
+    ) -> None:
+        """Run a contextual review scoped to changed files.
+
+        Determines scope automatically:
+        - UNCOMMITTED: reviews staged/unstaged/untracked changes
+        - BRANCH: reviews files changed from the default branch
+        - FULL: delegates to ``run_full_codebase_review``
+
+        Args:
+            iteration: Current iteration number
+            run_pi_callback: Function to run pi (from PiRunner)
+
+        """
+        scope, files = determine_review_scope(self.project_root)
+
+        if scope == ReviewScope.FULL:
+            self.run_full_codebase_review(iteration, run_pi_callback)
+            return
+
+        self.logger.info(
+            "[Step 4] Contextual review (%s) — %d file(s) in scope",
+            scope.value,
+            len(files),
+        )
+
+        # Truncate review.md: single-pass mode always overwrites, never appends.
+        self.paths.review_file.write_text("")
+        self.paths.review_current_file.unlink(missing_ok=True)
+
+        # Generate diff
+        if scope == ReviewScope.UNCOMMITTED:
+            diff_content = self.generate_diff("")
+            diff_content = self.add_untracked_files_diff(diff_content)
+        else:
+            # BRANCH scope: diff from merge-base
+            default_branch = get_default_branch(self.project_root)
+            returncode, stdout, _ = run_command(
+                f"git merge-base HEAD {default_branch}",
+                cwd=self.project_root,
+                check=False,
+            )
+            merge_base = stdout.strip() if returncode == 0 else ""
+            if merge_base:
+                diff_content = self.generate_diff(merge_base)
+                diff_content = self.add_untracked_files_diff(diff_content)
+            else:
+                diff_content = ""
+
+        self.paths.diff_file.write_text(diff_content)
+        diff_size = get_file_size(self.paths.diff_file)
+
+        # Resolve languages from changed files
+        languages = resolve_languages(files, self.settings.languages)
+        languages = filter_supported_languages(languages)
+
+        # Build pi args and diff context
+        pi_args = ["-p", "--tools", "read,write,grep,find,ls"]
+        diff_context = self.build_review_prompt(diff_size, pi_args)
+
+        # Determine scope description and default branch for template
+        if scope == ReviewScope.UNCOMMITTED:
+            default_branch_name = ""
+        else:
+            default_branch_name = get_default_branch(self.project_root) or "main"
+
+        review_prompt = render_prompt(
+            "contextual_review.j2",
+            scope=scope.value,
+            file_list=files,
+            diff_context=diff_context,
+            default_branch=default_branch_name,
+            languages=sorted(languages),
+            **self.paths.template_context(),
+        )
+
+        self.logger.info("[Step 5] Running pi to review scoped changes...")
         returncode, _, _ = run_pi_callback(*pi_args, review_prompt)
 
         if returncode != 0:

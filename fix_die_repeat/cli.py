@@ -24,7 +24,8 @@ _MAIN_HELP = (
     "Environment variables:\n"
     "  FDR_CHECK_CMD, FDR_MAX_ITERS, FDR_MODEL, FDR_MAX_PR_THREADS,\n"
     "  FDR_ARCHIVE_ARTIFACTS, FDR_PR_REVIEW, FDR_PR_REVIEW_INTROSPECT,\n"
-    "  FDR_FULL_CODEBASE_REVIEW, FDR_PR_THREADS_INTROSPECT_ONLY,\n"
+    "  FDR_CONTEXTUAL_REVIEW, FDR_FULL_CODEBASE_REVIEW,\n"
+    "  FDR_PR_THREADS_INTROSPECT_ONLY,\n"
     "  FDR_TEST_MODEL, FDR_DEBUG,\n"
     "  FDR_NTFY_ENABLED (default: 1),\n"
     "  FDR_NTFY_URL (default: http://localhost:2586)\n"
@@ -45,6 +46,9 @@ _MAIN_HELP = (
     "\b\n"
     "  # PR review mode with prompt introspection\n"
     "  fix-die-repeat --pr-review-introspect\n"
+    "\b\n"
+    "  # Smart contextual review (uncommitted > branch > full codebase)\n"
+    "  fix-die-repeat --contextual-review\n"
     "\b\n"
     "  # Audit the entire codebase (report-only, no fixes attempted)\n"
     "  fix-die-repeat --full-codebase-review\n"
@@ -102,6 +106,15 @@ _MAIN_HELP = (
     is_flag=True,
     help="Enable PR review mode with prompt introspection (implies --pr-review)",
     envvar="FDR_PR_REVIEW_INTROSPECT",
+)
+@click.option(
+    "--contextual-review",
+    is_flag=True,
+    help=(
+        "Smart contextual review (report-only). Reviews uncommitted changes, "
+        "branch diff vs default branch, or full codebase if neither applies."
+    ),
+    envvar="FDR_CONTEXTUAL_REVIEW",
 )
 @click.option(
     "--full-codebase-review",
@@ -183,6 +196,7 @@ def _build_cli_options(kwargs: dict[str, str | int | bool | None]) -> CliOptions
         pr_review=bool(kwargs.get("pr_review", False)),
         pr_review_introspect=bool(kwargs.get("pr_review_introspect", False)),
         full_codebase_review=bool(kwargs.get("full_codebase_review", False)),
+        contextual_review=bool(kwargs.get("contextual_review", False)),
         pr_threads_introspect_only=bool(kwargs.get("pr_threads_introspect_only", False)),
         test_model=str(test_model) if test_model is not None else None,
         debug=bool(kwargs.get("debug", False)),

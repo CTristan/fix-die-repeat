@@ -329,6 +329,63 @@ class TestNoLegacyPathsInTemplates:
         )
         assert ".fix-die-repeat" not in prompt
 
+    def test_contextual_review_uncommitted_scope(self) -> None:
+        """contextual_review.j2 renders correctly for uncommitted scope."""
+        prompt = render_prompt(
+            "contextual_review.j2",
+            scope="uncommitted",
+            file_list=["dirty.py", "also_dirty.py"],
+            diff_context="Diff attached.",
+            default_branch="",
+            languages=["python"],
+            **FAKE_PATHS,
+        )
+        assert "uncommitted" in prompt.lower()
+        assert "dirty.py" in prompt
+        assert "also_dirty.py" in prompt
+        assert ".fix-die-repeat" not in prompt
+
+    def test_contextual_review_branch_scope(self) -> None:
+        """contextual_review.j2 renders correctly for branch scope."""
+        prompt = render_prompt(
+            "contextual_review.j2",
+            scope="branch",
+            file_list=["feature.py"],
+            diff_context="Diff attached.",
+            default_branch="main",
+            languages=[],
+            **FAKE_PATHS,
+        )
+        assert "branch" in prompt.lower()
+        assert "main" in prompt
+        assert "feature.py" in prompt
+
+    def test_contextual_review_includes_language_checks(self) -> None:
+        """contextual_review.j2 includes language-specific checks."""
+        prompt = render_prompt(
+            "contextual_review.j2",
+            scope="uncommitted",
+            file_list=["app.py"],
+            diff_context="Diff attached.",
+            default_branch="",
+            languages=["python"],
+            **FAKE_PATHS,
+        )
+        assert "LANGUAGE-SPECIFIC CHECKS" in prompt
+
+    def test_contextual_review_has_no_legacy_literal(self) -> None:
+        """contextual_review.j2 must not render the legacy literal."""
+        prompt = render_prompt(
+            "contextual_review.j2",
+            scope="uncommitted",
+            file_list=["f.py"],
+            diff_context="",
+            default_branch="",
+            languages=[],
+            **FAKE_PATHS,
+        )
+        assert ".fix-die-repeat" not in prompt
+
     def test_pr_threads_header_has_no_legacy_literal(self) -> None:
         """pr_threads_header.j2 must not render the legacy literal."""
         prompt = render_prompt(

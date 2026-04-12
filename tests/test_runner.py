@@ -1809,3 +1809,104 @@ class TestRunFullCodebaseReviewOnce:
 
         assert result == 0
         assert review_manager.run_full_codebase_review.call_count == 1
+
+
+class TestRunContextualReviewOnce:
+    """Tests for the single-pass contextual review entrypoint on PiRunner."""
+
+    def _build_runner(
+        self,
+        tmp_path: Path,
+    ) -> tuple[PiRunner, MagicMock, MagicMock]:
+        settings = MagicMock()
+        settings.max_iters = 5
+        settings.ntfy_enabled = False
+        settings.contextual_review = True
+        paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
+        paths.fdr_dir = tmp_path
+        paths.project_root = tmp_path
+        paths.review_file = tmp_path / "review.md"
+        paths.review_current_file = tmp_path / "review_current.md"
+        paths.start_sha_file = tmp_path / ".start_sha"
+        paths.pi_log = tmp_path / "pi.log"
+
+        review_manager = MagicMock()
+        logger = MagicMock()
+        runner = PiRunner.__new__(PiRunner)
+        runner.settings = settings
+        runner.paths = paths
+        runner.iteration = 0
+        runner.logger = logger
+        runner.script_start_time = 0
+        runner.session_log = tmp_path / "session.log"
+        runner.artifact_manager = MagicMock()
+        runner.review_manager = review_manager
+        runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
+        return runner, review_manager, logger
+
+    def test_runs_exactly_one_pass_and_prints_findings(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Single pass runs review manager once, prints findings to stdout."""
+        runner, review_manager, _logger = self._build_runner(tmp_path)
+
+        def fake_review(_iteration: int, _callback: object) -> None:
+            runner.paths.review_current_file.write_text(
+                "[CRITICAL] boom at file.py:1\n[NIT] style issue\n",
+            )
+            runner.paths.review_file.write_text(
+                "[CRITICAL] boom at file.py:1\n[NIT] style issue\n",
+            )
+
+        review_manager.run_contextual_review.side_effect = fake_review
+        review_manager.has_no_review_issues.return_value = False
+
+        result = runner.run_contextual_review_once()
+
+        assert result == 0
+        assert review_manager.run_contextual_review.call_count == 1
+        captured = capsys.readouterr()
+        assert "===== Contextual review findings =====" in captured.out
+        assert "[CRITICAL] boom at file.py:1" in captured.out
+        assert "[NIT] style issue" in captured.out
+
+    def test_no_issues_path_returns_success(self, tmp_path: Path) -> None:
+        """When pi reports NO_ISSUES, single pass completes successfully."""
+        runner, review_manager, logger = self._build_runner(tmp_path)
+
+        def fake_review(_iteration: int, _callback: object) -> None:
+            runner.paths.review_current_file.write_text("NO_ISSUES")
+            runner.paths.review_file.write_text("NO_ISSUES\n")
+
+        review_manager.run_contextual_review.side_effect = fake_review
+        review_manager.has_no_review_issues.return_value = True
+
+        result = runner.run_contextual_review_once()
+
+        assert result == 0
+        assert review_manager.run_contextual_review.call_count == 1
+        logged = " ".join(str(call) for call in logger.info.call_args_list)
+        assert "No critical issues found" in logged
+
+    def test_dispatch_priority_over_full_codebase(self, tmp_path: Path) -> None:
+        """contextual_review dispatch takes priority over full_codebase_review."""
+        runner, review_manager, _logger = self._build_runner(tmp_path)
+        runner.settings.pr_threads_introspect_only = False
+        runner.settings.full_codebase_review = True
+
+        def fake_review(_iteration: int, _callback: object) -> None:
+            runner.paths.review_current_file.write_text("NO_ISSUES")
+            runner.paths.review_file.write_text("NO_ISSUES\n")
+
+        review_manager.run_contextual_review.side_effect = fake_review
+        review_manager.has_no_review_issues.return_value = True
+
+        with patch.object(runner, "setup_run"):
+            result = runner.run()
+
+        assert result == 0
+        review_manager.run_contextual_review.assert_called_once()
+        review_manager.run_full_codebase_review.assert_not_called()

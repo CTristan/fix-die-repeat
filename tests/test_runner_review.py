@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 from fix_die_repeat.config import Paths, Settings
 from fix_die_repeat.runner import PiRunner
 from fix_die_repeat.runner_review import ReviewManager
+from fix_die_repeat.utils import ReviewScope
 from tests.conftest import FAKE_TEMPLATE_CONTEXT
 
 # Constants for test assertions
@@ -585,6 +586,117 @@ class TestRunFullCodebaseReview:
             return_value=[],
         ):
             manager.run_full_codebase_review(iteration=1, run_pi_callback=run_pi)
+
+        assert manager.paths.review_current_file.read_text() == "NO_ISSUES"
+        assert manager.paths.review_file.read_text().strip() == "NO_ISSUES"
+
+
+class TestRunContextualReview:
+    """Tests for ReviewManager.run_contextual_review."""
+
+    def _make_manager(self, tmp_path: Path) -> ReviewManager:
+        settings = Settings()  # type: ignore[call-arg]
+        paths = Paths(project_root=tmp_path)
+        paths.ensure_fdr_dir()
+        return ReviewManager(settings, paths, tmp_path, MagicMock())
+
+    def test_uncommitted_scope_generates_diff_and_calls_pi(self, tmp_path: Path) -> None:
+        """UNCOMMITTED scope generates a diff and passes correct template."""
+        manager = self._make_manager(tmp_path)
+
+        def fake_run_pi(*_args: str, **_kwargs: object) -> tuple[int, str, str]:
+            manager.paths.review_current_file.write_text("[CRITICAL] issue\n")
+            return (0, "", "")
+
+        run_pi = MagicMock(side_effect=fake_run_pi)
+
+        with (
+            patch(
+                "fix_die_repeat.runner_review.determine_review_scope",
+                return_value=("uncommitted_enum", ["dirty.py"]),
+            ) as mock_scope,
+            patch(
+                "fix_die_repeat.runner_review.run_command",
+                return_value=(0, "fake diff\n", ""),
+            ),
+        ):
+            # Patch the enum comparison to work
+
+            mock_scope.return_value = (ReviewScope.UNCOMMITTED, ["dirty.py"])
+            manager.run_contextual_review(iteration=1, run_pi_callback=run_pi)
+
+        assert run_pi.called
+        prompt = run_pi.call_args.args[-1]
+        assert "uncommitted" in prompt.lower()
+        assert "dirty.py" in prompt
+        assert manager.paths.review_file.read_text() == "[CRITICAL] issue\n"
+
+    def test_branch_scope_calls_pi_with_branch_template(self, tmp_path: Path) -> None:
+        """BRANCH scope renders correct template with default branch info."""
+        manager = self._make_manager(tmp_path)
+
+        def fake_run_pi(*_args: str, **_kwargs: object) -> tuple[int, str, str]:
+            manager.paths.review_current_file.write_text("NO_ISSUES")
+            return (0, "", "")
+
+        run_pi = MagicMock(side_effect=fake_run_pi)
+
+        with (
+            patch(
+                "fix_die_repeat.runner_review.determine_review_scope",
+                return_value=(ReviewScope.BRANCH, ["feature.py"]),
+            ),
+            patch(
+                "fix_die_repeat.runner_review.get_default_branch",
+                return_value="main",
+            ),
+            patch(
+                "fix_die_repeat.runner_review.run_command",
+                return_value=(0, "abc123\n", ""),
+            ),
+        ):
+            manager.run_contextual_review(iteration=1, run_pi_callback=run_pi)
+
+        assert run_pi.called
+        prompt = run_pi.call_args.args[-1]
+        assert "branch" in prompt.lower()
+        assert "main" in prompt
+        assert "feature.py" in prompt
+
+    def test_full_scope_delegates_to_full_codebase_review(self, tmp_path: Path) -> None:
+        """FULL scope delegates to run_full_codebase_review."""
+        manager = self._make_manager(tmp_path)
+        run_pi = MagicMock(return_value=(0, "", ""))
+
+        with (
+            patch(
+                "fix_die_repeat.runner_review.determine_review_scope",
+                return_value=(ReviewScope.FULL, []),
+            ),
+            patch.object(manager, "run_full_codebase_review") as mock_full,
+        ):
+            manager.run_contextual_review(iteration=1, run_pi_callback=run_pi)
+
+        mock_full.assert_called_once_with(1, run_pi)
+        # run_pi should NOT be called directly — full review handles that
+        assert not run_pi.called
+
+    def test_pi_failure_writes_no_issues(self, tmp_path: Path) -> None:
+        """When pi fails, NO_ISSUES is written."""
+        manager = self._make_manager(tmp_path)
+        run_pi = MagicMock(return_value=(1, "", "boom"))
+
+        with (
+            patch(
+                "fix_die_repeat.runner_review.determine_review_scope",
+                return_value=(ReviewScope.UNCOMMITTED, ["file.py"]),
+            ),
+            patch(
+                "fix_die_repeat.runner_review.run_command",
+                return_value=(0, "fake diff\n", ""),
+            ),
+        ):
+            manager.run_contextual_review(iteration=1, run_pi_callback=run_pi)
 
         assert manager.paths.review_current_file.read_text() == "NO_ISSUES"
         assert manager.paths.review_file.read_text().strip() == "NO_ISSUES"

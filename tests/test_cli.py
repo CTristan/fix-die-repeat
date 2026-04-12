@@ -83,6 +83,13 @@ class TestCliMain:
         assert "--pr-review-introspect" in result.output
         assert "Enable PR review mode with prompt introspection" in result.output
 
+    def test_cli_with_contextual_review(self) -> None:
+        """Test CLI help exposes --contextual-review."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--help"])
+        assert "--contextual-review" in result.output
+        assert "Smart contextual review" in result.output
+
     def test_cli_with_full_codebase_review(self) -> None:
         """Test CLI help exposes --full-codebase-review."""
         runner = CliRunner()
@@ -282,6 +289,14 @@ class TestBuildCliOptions:
         assert options.pr_threads_introspect_only is False
         assert options.test_model is None
         assert options.debug is False
+
+    def test_contextual_review_propagates_to_settings(self) -> None:
+        """--contextual-review propagates into Settings."""
+        kwargs: CliKwargs = {"contextual_review": True}
+        options = _build_cli_options(kwargs)
+        settings = config.get_settings(options)
+        assert options.contextual_review is True
+        assert settings.contextual_review is True
 
     def test_full_codebase_review_propagates_to_settings(self) -> None:
         """--full-codebase-review propagates into Settings."""

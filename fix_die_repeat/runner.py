@@ -609,6 +609,21 @@ class PiRunner:
         # Step 6: Process review results
         self.process_review_results()
 
+    def _run_standalone_mode(self) -> int | None:
+        """Check for standalone modes that short-circuit the main loop.
+
+        Returns:
+            Exit code if a standalone mode was run, None to continue to the main loop.
+
+        """
+        if self.settings.pr_threads_introspect_only:
+            return self.run_pr_threads_introspect_only()
+        if self.settings.contextual_review:
+            return self.run_contextual_review_once()
+        if self.settings.full_codebase_review:
+            return self.run_full_codebase_review_once()
+        return None
+
     def run(self) -> int:
         """Run the main fix-die-repeat loop.
 
@@ -619,10 +634,9 @@ class PiRunner:
         self.setup_run()
 
         # Standalone modes short-circuit the fix-die-repeat loop.
-        if self.settings.pr_threads_introspect_only:
-            return self.run_pr_threads_introspect_only()
-        if self.settings.full_codebase_review:
-            return self.run_full_codebase_review_once()
+        standalone_result = self._run_standalone_mode()
+        if standalone_result is not None:
+            return standalone_result
 
         while True:
             self.iteration += 1
@@ -697,6 +711,72 @@ class PiRunner:
             if not review_content.endswith("\n"):
                 sys.stdout.write("\n")
             sys.stdout.write("==========================================\n")
+            sys.stdout.flush()
+            self.logger.info("Findings saved to %s", self.paths.review_file)
+
+        self._success_complete = True
+        self.paths.review_current_file.unlink(missing_ok=True)
+        self.paths.start_sha_file.unlink(missing_ok=True)
+
+        duration = int(time.time() - self.script_start_time)
+        play_completion_sound()
+        if self.settings.ntfy_enabled:
+            send_ntfy_notification(
+                exit_code=0,
+                duration_str=format_duration(duration),
+                repo_name=self.paths.project_root.name,
+                ntfy_url=self.settings.ntfy_url,
+                logger=self.logger,
+            )
+        return 0
+
+    def run_contextual_review_once(self) -> int:
+        """Run a single report-only contextual review pass.
+
+        Auto-scopes to uncommitted changes, branch diff, or full codebase.
+        Never attempts fixes — runs pi exactly once over the scoped files,
+        overwrites review.md with the findings, and prints them to the
+        terminal.
+
+        Returns:
+            Exit code 0 on completion (success regardless of findings).
+
+        """
+        self.iteration = 1
+        self.logger.info("Contextual review (single pass, report-only).")
+        self.artifact_manager.check_and_compact_artifacts()
+
+        self.paths.review_current_file.unlink(missing_ok=True)
+        self.review_manager.run_contextual_review(self.iteration, self.run_pi_safe)
+
+        if not self.paths.review_current_file.exists():
+            self.logger.error(
+                "%s was not created by pi. Treating as no issues.",
+                self.paths.review_current_file,
+            )
+            self.paths.review_current_file.write_text("NO_ISSUES")
+            self.paths.review_file.write_text("NO_ISSUES\n")
+
+        review_content = (
+            self.paths.review_file.read_text() if self.paths.review_file.exists() else ""
+        )
+
+        if self.review_manager.has_no_review_issues(review_content):
+            self.logger.info("[Step 6B] No critical issues found.")
+        else:
+            critical_count = review_content.count("[CRITICAL]")
+            nit_count = review_content.count("[NIT]")
+            self.logger.info(
+                "[Step 6B] Contextual review complete: %s [CRITICAL], %s [NIT] finding(s).",
+                critical_count,
+                nit_count,
+            )
+            # Write raw findings to stdout (no log timestamp) for easy copy/paste.
+            sys.stdout.write("===== Contextual review findings =====\n")
+            sys.stdout.write(review_content)
+            if not review_content.endswith("\n"):
+                sys.stdout.write("\n")
+            sys.stdout.write("=======================================\n")
             sys.stdout.flush()
             self.logger.info("Findings saved to %s", self.paths.review_file)
 

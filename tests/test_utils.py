@@ -11,12 +11,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fix_die_repeat.utils import (
+    ReviewScope,
     _collect_git_files,
     _should_exclude_file,
     configure_logger,
     detect_large_files,
+    determine_review_scope,
     format_duration,
+    get_branch_changed_files,
     get_changed_files,
+    get_default_branch,
     get_file_line_count,
     get_file_size,
     get_git_revision_hash,
@@ -637,6 +641,194 @@ class TestGetChangedFilesFiltering:
             result = get_changed_files(tmp_path, exclude_patterns=["skip.log"])
 
         assert result == ["keep.txt"]
+
+
+class TestGetDefaultBranch:
+    """Tests for get_default_branch."""
+
+    def test_symbolic_ref_success(self, tmp_path: Path) -> None:
+        """Extracts default branch from symbolic-ref."""
+        with patch("fix_die_repeat.utils.run_command") as mock_run:
+            mock_run.return_value = (0, "refs/remotes/origin/main\n", "")
+            result = get_default_branch(tmp_path)
+        assert result == "main"
+
+    def test_symbolic_ref_master(self, tmp_path: Path) -> None:
+        """Handles master as default branch."""
+        with patch("fix_die_repeat.utils.run_command") as mock_run:
+            mock_run.return_value = (0, "refs/remotes/origin/master\n", "")
+            result = get_default_branch(tmp_path)
+        assert result == "master"
+
+    def test_symbolic_ref_fails_fallback_main(self, tmp_path: Path) -> None:
+        """Falls back to local main when symbolic-ref fails."""
+        with patch("fix_die_repeat.utils.run_command") as mock_run:
+            mock_run.side_effect = [
+                (1, "", "fatal: ref not found"),  # symbolic-ref fails
+                (0, "abc123\n", ""),  # rev-parse --verify main succeeds
+            ]
+            result = get_default_branch(tmp_path)
+        assert result == "main"
+
+    def test_symbolic_ref_fails_fallback_master(self, tmp_path: Path) -> None:
+        """Falls back to local master when symbolic-ref and main fail."""
+        with patch("fix_die_repeat.utils.run_command") as mock_run:
+            mock_run.side_effect = [
+                (1, "", "fatal: ref not found"),  # symbolic-ref fails
+                (1, "", "fatal: not a valid ref"),  # main doesn't exist
+                (0, "abc123\n", ""),  # rev-parse --verify master succeeds
+            ]
+            result = get_default_branch(tmp_path)
+        assert result == "master"
+
+    def test_no_default_branch_found(self, tmp_path: Path) -> None:
+        """Returns None when no default branch can be determined."""
+        with patch("fix_die_repeat.utils.run_command") as mock_run:
+            mock_run.side_effect = [
+                (1, "", "fatal: ref not found"),
+                (1, "", "fatal: not a valid ref"),
+                (1, "", "fatal: not a valid ref"),
+            ]
+            result = get_default_branch(tmp_path)
+        assert result is None
+
+
+class TestGetBranchChangedFiles:
+    """Tests for get_branch_changed_files."""
+
+    def test_normal_case(self, tmp_path: Path) -> None:
+        """Returns files changed between merge-base and HEAD."""
+        (tmp_path / "changed.py").write_text("code")
+        (tmp_path / "also_changed.py").write_text("code")
+
+        with patch("fix_die_repeat.utils.run_command") as mock_run:
+            mock_run.side_effect = [
+                (0, "abc123\n", ""),  # merge-base
+                (0, "changed.py\nalso_changed.py\n", ""),  # diff --name-only
+            ]
+            result = get_branch_changed_files(tmp_path, "main")
+
+        assert result == ["also_changed.py", "changed.py"]
+
+    def test_merge_base_failure(self, tmp_path: Path) -> None:
+        """Returns empty list when merge-base fails."""
+        with patch("fix_die_repeat.utils.run_command") as mock_run:
+            mock_run.return_value = (1, "", "fatal: not a valid commit")
+            result = get_branch_changed_files(tmp_path, "main")
+        assert result == []
+
+    def test_excludes_lock_files(self, tmp_path: Path) -> None:
+        """Applies standard exclude patterns."""
+        (tmp_path / "changed.py").write_text("code")
+
+        with patch("fix_die_repeat.utils.run_command") as mock_run:
+            mock_run.side_effect = [
+                (0, "abc123\n", ""),
+                (0, "changed.py\npackage.lock\n", ""),
+            ]
+            result = get_branch_changed_files(tmp_path, "main")
+
+        assert result == ["changed.py"]
+
+    def test_excludes_missing_files(self, tmp_path: Path) -> None:
+        """Filters out files that no longer exist on disk."""
+        (tmp_path / "exists.py").write_text("code")
+
+        with patch("fix_die_repeat.utils.run_command") as mock_run:
+            mock_run.side_effect = [
+                (0, "abc123\n", ""),
+                (0, "exists.py\ndeleted.py\n", ""),
+            ]
+            result = get_branch_changed_files(tmp_path, "main")
+
+        assert result == ["exists.py"]
+
+
+class TestDetermineReviewScope:
+    """Tests for determine_review_scope."""
+
+    def test_uncommitted_changes(self, tmp_path: Path) -> None:
+        """Returns UNCOMMITTED when there are dirty files."""
+        with patch(
+            "fix_die_repeat.utils.get_changed_files",
+            return_value=["dirty.py"],
+        ):
+            scope, files = determine_review_scope(tmp_path)
+
+        assert scope == ReviewScope.UNCOMMITTED
+        assert files == ["dirty.py"]
+
+    def test_branch_changes(self, tmp_path: Path) -> None:
+        """Returns BRANCH when on a non-default branch with no uncommitted changes."""
+        with (
+            patch("fix_die_repeat.utils.get_changed_files", return_value=[]),
+            patch("fix_die_repeat.utils.run_command") as mock_run,
+            patch(
+                "fix_die_repeat.utils.get_default_branch",
+                return_value="main",
+            ),
+            patch(
+                "fix_die_repeat.utils.get_branch_changed_files",
+                return_value=["feature.py"],
+            ),
+        ):
+            mock_run.return_value = (0, "feat/my-branch\n", "")  # branch --show-current
+            scope, files = determine_review_scope(tmp_path)
+
+        assert scope == ReviewScope.BRANCH
+        assert files == ["feature.py"]
+
+    def test_full_fallback(self, tmp_path: Path) -> None:
+        """Returns FULL when no uncommitted or branch changes."""
+        with (
+            patch("fix_die_repeat.utils.get_changed_files", return_value=[]),
+            patch("fix_die_repeat.utils.run_command") as mock_run,
+            patch("fix_die_repeat.utils.get_default_branch", return_value="main"),
+            patch("fix_die_repeat.utils.get_branch_changed_files", return_value=[]),
+        ):
+            mock_run.return_value = (0, "main\n", "")  # on default branch
+            scope, files = determine_review_scope(tmp_path)
+
+        assert scope == ReviewScope.FULL
+        assert files == []
+
+    def test_detached_head(self, tmp_path: Path) -> None:
+        """Falls through to FULL when in detached HEAD state."""
+        with (
+            patch("fix_die_repeat.utils.get_changed_files", return_value=[]),
+            patch("fix_die_repeat.utils.run_command") as mock_run,
+        ):
+            mock_run.return_value = (0, "\n", "")  # empty branch name
+            scope, files = determine_review_scope(tmp_path)
+
+        assert scope == ReviewScope.FULL
+        assert files == []
+
+    def test_on_default_branch_no_changes(self, tmp_path: Path) -> None:
+        """Returns FULL when on the default branch with no uncommitted changes."""
+        with (
+            patch("fix_die_repeat.utils.get_changed_files", return_value=[]),
+            patch("fix_die_repeat.utils.run_command") as mock_run,
+            patch("fix_die_repeat.utils.get_default_branch", return_value="main"),
+        ):
+            mock_run.return_value = (0, "main\n", "")  # on default branch
+            scope, files = determine_review_scope(tmp_path)
+
+        assert scope == ReviewScope.FULL
+        assert files == []
+
+    def test_no_default_branch_found(self, tmp_path: Path) -> None:
+        """Falls through to FULL when default branch can't be determined."""
+        with (
+            patch("fix_die_repeat.utils.get_changed_files", return_value=[]),
+            patch("fix_die_repeat.utils.run_command") as mock_run,
+            patch("fix_die_repeat.utils.get_default_branch", return_value=None),
+        ):
+            mock_run.return_value = (0, "feat/branch\n", "")
+            scope, files = determine_review_scope(tmp_path)
+
+        assert scope == ReviewScope.FULL
+        assert files == []
 
 
 class TestPlayCompletionSoundFallback:
