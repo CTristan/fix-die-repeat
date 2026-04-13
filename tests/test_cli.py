@@ -104,6 +104,47 @@ class TestCliMain:
         assert "--pr-threads-introspect-only" in result.output
         assert "unresolved review threads" in result.output
 
+    @pytest.mark.parametrize(
+        "flag",
+        ["--full-codebase-review", "--pr-threads-introspect-only", "--contextual-review"],
+    )
+    def test_standalone_modes_skip_check_cmd(
+        self,
+        flag: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Standalone modes must not require or resolve a check command."""
+        original_paths = config.Paths
+
+        def mock_paths(_project_root: Path | None = None) -> config.Paths:
+            return original_paths(project_root=tmp_path)
+
+        monkeypatch.setattr(config, "Paths", mock_paths)
+
+        # Ensure no check command is available anywhere
+        monkeypatch.delenv("FDR_CHECK_CMD", raising=False)
+
+        resolve_called = False
+        original_resolve = cli_module.resolve_check_cmd
+
+        def spy_resolve(**kwargs: object) -> str | None:
+            nonlocal resolve_called
+            resolve_called = True
+            return original_resolve(**kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(cli_module, "resolve_check_cmd", spy_resolve)
+        monkeypatch.setattr(cli_module, "validate_check_cmd_or_exit", lambda _cmd: None)
+
+        # Mock PiRunner.run so we don't actually run anything
+        monkeypatch.setattr(runner.PiRunner, "run", lambda _self: 0)
+
+        cli_runner = CliRunner()
+        result = cli_runner.invoke(main, [flag], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        assert not resolve_called, f"resolve_check_cmd should not be called with {flag}"
+
     def test_cli_with_archive_artifacts(self) -> None:
         """Test CLI with archive-artifacts flag."""
         runner = CliRunner()

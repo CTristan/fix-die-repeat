@@ -11,6 +11,7 @@ from fix_die_repeat.runner import PiRunner
 from fix_die_repeat.runner_introspection import (  # Testing private class is intentional
     _FileLock,
 )
+from tests.conftest import FAKE_TEMPLATE_CONTEXT
 
 # Constants for runner test values
 TEST_PI_DELAY_SECONDS = 2
@@ -22,17 +23,7 @@ FILTERED_CHECKS_LOG_MAX_LINES = 300
 TEST_PR_NUMBER = 123
 MIN_SEEK_CALLS = 2
 
-_FAKE_TEMPLATE_CONTEXT: dict[str, str] = {
-    "fdr_dir_path": "/fake/fdr/repos/proj-deadbeef",
-    "review_history_path": "/fake/fdr/repos/proj-deadbeef/review.md",
-    "review_current_path": "/fake/fdr/repos/proj-deadbeef/review_current.md",
-    "build_history_path": "/fake/fdr/repos/proj-deadbeef/build_history.md",
-    "checks_log_path": "/fake/fdr/repos/proj-deadbeef/checks.log",
-    "checks_filtered_log_path": "/fake/fdr/repos/proj-deadbeef/checks_filtered.log",
-    "diff_file_path": "/fake/fdr/repos/proj-deadbeef/changes.diff",
-    "resolved_threads_path": "/fake/fdr/repos/proj-deadbeef/.resolved_threads",
-    "config_file_path": "/fake/fdr/repos/proj-deadbeef/config",
-}
+_FAKE_TEMPLATE_CONTEXT = FAKE_TEMPLATE_CONTEXT
 
 
 class TestBeforePiCall:

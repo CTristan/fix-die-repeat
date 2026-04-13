@@ -285,7 +285,7 @@ def _central_root() -> Path:
     """
     override = os.environ.get("FDR_HOME")
     if override:
-        return Path(override)
+        return Path(override).expanduser()
     return Path.home() / ".fix-die-repeat"
 
 

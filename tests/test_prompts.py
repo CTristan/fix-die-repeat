@@ -6,19 +6,10 @@ import pytest
 from jinja2 import UndefinedError
 
 from fix_die_repeat.prompts import render_prompt
+from tests.conftest import FAKE_TEMPLATE_CONTEXT
 
-# Fake absolute paths for template-context kwargs in these tests.
-FAKE_PATHS: dict[str, str] = {
-    "fdr_dir_path": "/fake/fdr/repos/proj-deadbeef",
-    "review_history_path": "/fake/fdr/repos/proj-deadbeef/review.md",
-    "review_current_path": "/fake/fdr/repos/proj-deadbeef/review_current.md",
-    "build_history_path": "/fake/fdr/repos/proj-deadbeef/build_history.md",
-    "checks_log_path": "/fake/fdr/repos/proj-deadbeef/checks.log",
-    "checks_filtered_log_path": "/fake/fdr/repos/proj-deadbeef/checks_filtered.log",
-    "diff_file_path": "/fake/fdr/repos/proj-deadbeef/changes.diff",
-    "resolved_threads_path": "/fake/fdr/repos/proj-deadbeef/.resolved_threads",
-    "config_file_path": "/fake/fdr/repos/proj-deadbeef/config",
-}
+# Reuse the shared constant so template-context keys stay aligned across tests.
+FAKE_PATHS = FAKE_TEMPLATE_CONTEXT
 
 
 class TestRenderPrompt:

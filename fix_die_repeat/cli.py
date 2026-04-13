@@ -257,26 +257,34 @@ def _run_main(options: CliOptions) -> int:
     # Initialize paths
     paths = Paths()
 
-    # Resolve check command if not provided via CLI/env
-    if settings.check_cmd is None:
-        settings.check_cmd = resolve_check_cmd(
-            cli_check_cmd=options.check_cmd,
-            project_config_path=paths.config_file,
-            system_config_path=get_system_config_path(),
-            project_root=str(paths.project_root),
-        )
+    # Standalone modes don't run checks — skip check-cmd resolution entirely
+    needs_check_cmd = not (
+        settings.full_codebase_review
+        or settings.pr_threads_introspect_only
+        or settings.contextual_review
+    )
 
-    # Ensure we have a concrete check command before validation
-    if settings.check_cmd is None:
-        console.print(
-            "[red]Error:[/red] Unable to determine a check command to run.\n"
-            "Please specify one via the [bold]--check-cmd[/bold] option or the "
-            "[bold]FDR_CHECK_CMD[/bold] environment variable."
-        )
-        raise SystemExit(1)
+    if needs_check_cmd:
+        # Resolve check command if not provided via CLI/env
+        if settings.check_cmd is None:
+            settings.check_cmd = resolve_check_cmd(
+                cli_check_cmd=options.check_cmd,
+                project_config_path=paths.config_file,
+                system_config_path=get_system_config_path(),
+                project_root=str(paths.project_root),
+            )
 
-    # Pre-flight validation of resolved check command
-    validate_check_cmd_or_exit(settings.check_cmd)
+        # Ensure we have a concrete check command before validation
+        if settings.check_cmd is None:
+            console.print(
+                "[red]Error:[/red] Unable to determine a check command to run.\n"
+                "Please specify one via the [bold]--check-cmd[/bold] option or the "
+                "[bold]FDR_CHECK_CMD[/bold] environment variable."
+            )
+            raise SystemExit(1)
+
+        # Pre-flight validation of resolved check command
+        validate_check_cmd_or_exit(settings.check_cmd)
 
     # Create runner
     runner = PiRunner(settings, paths)
