@@ -651,14 +651,14 @@ class TestGetDefaultBranch:
         with patch("fix_die_repeat.utils.run_command") as mock_run:
             mock_run.return_value = (0, "refs/remotes/origin/main\n", "")
             result = get_default_branch(tmp_path)
-        assert result == "main"
+        assert result == "origin/main"
 
     def test_symbolic_ref_master(self, tmp_path: Path) -> None:
         """Handles master as default branch."""
         with patch("fix_die_repeat.utils.run_command") as mock_run:
             mock_run.return_value = (0, "refs/remotes/origin/master\n", "")
             result = get_default_branch(tmp_path)
-        assert result == "master"
+        assert result == "origin/master"
 
     def test_symbolic_ref_fails_fallback_main(self, tmp_path: Path) -> None:
         """Falls back to local main when symbolic-ref fails."""

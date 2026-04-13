@@ -389,11 +389,12 @@ def get_default_branch(project_root: Path) -> str | None:
         check=False,
     )
     if returncode == 0 and stdout.strip():
-        # Strip refs/remotes/origin/ prefix
+        # Strip refs/remotes/origin/ prefix and return as origin/<branch>
+        # so downstream git commands work even without a local branch.
         ref = stdout.strip()
         prefix = "refs/remotes/origin/"
         if ref.startswith(prefix):
-            return ref[len(prefix) :]
+            return f"origin/{ref[len(prefix) :]}"
 
     # Fall back to checking local branches
     for branch in ("main", "master"):

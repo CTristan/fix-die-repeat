@@ -420,18 +420,21 @@ class ReviewManager:
         self.paths.review_current_file.unlink(missing_ok=True)
 
         # Generate diff
+        default_branch = ""
         if scope == ReviewScope.UNCOMMITTED:
             diff_content = self.generate_diff("")
             diff_content = self.add_untracked_files_diff(diff_content)
         else:
             # BRANCH scope: diff from merge-base
-            default_branch = get_default_branch(self.project_root)
-            returncode, stdout, _ = run_command(
-                f"git merge-base HEAD {default_branch}",
-                cwd=self.project_root,
-                check=False,
-            )
-            merge_base = stdout.strip() if returncode == 0 else ""
+            default_branch = get_default_branch(self.project_root) or ""
+            merge_base = ""
+            if default_branch:
+                returncode, stdout, _ = run_command(
+                    f"git merge-base HEAD {default_branch}",
+                    cwd=self.project_root,
+                    check=False,
+                )
+                merge_base = stdout.strip() if returncode == 0 else ""
             if merge_base:
                 diff_content = self.generate_diff(merge_base)
                 diff_content = self.add_untracked_files_diff(diff_content)
@@ -449,11 +452,8 @@ class ReviewManager:
         pi_args = ["-p", "--tools", "read,write,grep,find,ls"]
         diff_context = self.build_review_prompt(diff_size, pi_args)
 
-        # Determine scope description and default branch for template
-        if scope == ReviewScope.UNCOMMITTED:
-            default_branch_name = ""
-        else:
-            default_branch_name = get_default_branch(self.project_root) or "main"
+        # Use already-resolved default branch for template context
+        default_branch_name = default_branch or "main"
 
         review_prompt = render_prompt(
             "contextual_review.j2",
