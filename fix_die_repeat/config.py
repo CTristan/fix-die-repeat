@@ -285,8 +285,8 @@ def _central_root() -> Path:
     """
     override = os.environ.get("FDR_HOME")
     if override:
-        return Path(override).expanduser()
-    return Path.home() / ".fix-die-repeat"
+        return Path(override).expanduser().resolve(strict=False)
+    return (Path.home() / ".fix-die-repeat").resolve(strict=False)
 
 
 def _repo_slug(project_root: Path) -> str:
