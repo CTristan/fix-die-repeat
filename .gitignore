@@ -1,6 +1,3 @@
-# fix-die-repeat state directory
-.fix-die-repeat/
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -72,6 +69,7 @@ dmypy.json
 # IDE
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 *~
