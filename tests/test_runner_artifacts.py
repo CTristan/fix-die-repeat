@@ -21,7 +21,8 @@ FILTERED_CHECKS_LOG_MAX_LINES = 300
 def get_file_line_count(path: Path) -> int:
     """Count file lines."""
     try:
-        return sum(1 for _ in path.open(encoding="utf-8", errors="ignore"))
+        with path.open(encoding="utf-8", errors="ignore") as f:
+            return sum(1 for _ in f)
     except OSError:
         return 0
 
