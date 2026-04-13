@@ -1,7 +1,11 @@
 {% if scope == "uncommitted" %}
 You are reviewing uncommitted changes (staged, unstaged, and untracked files).
 {% elif scope == "branch" %}
+{% if default_branch %}
 You are reviewing changes on this branch compared to {{ default_branch }}.
+{% else %}
+You are reviewing all changes on this branch.
+{% endif %}
 {% endif %}
 
 Focus your review on the following {{ file_list | length }} changed file(s):

@@ -452,15 +452,12 @@ class ReviewManager:
         pi_args = ["-p", "--tools", "read,write,grep,find,ls"]
         diff_context = self.build_review_prompt(diff_size, pi_args)
 
-        # Use already-resolved default branch for template context
-        default_branch_name = default_branch or "main"
-
         review_prompt = render_prompt(
             "contextual_review.j2",
             scope=scope.value,
             file_list=files,
             diff_context=diff_context,
-            default_branch=default_branch_name,
+            default_branch=default_branch,
             languages=sorted(languages),
             **self.paths.template_context(),
         )

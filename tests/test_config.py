@@ -232,22 +232,17 @@ class TestPaths:
         assert first == second
 
     def test_slug_varies_with_remote(self, tmp_path: Path) -> None:
-        """Two repos with different origin remotes get different slugs."""
-        a = tmp_path / "same_name_a"
-        b = tmp_path / "same_name_b"
-        a.mkdir()
-        b.mkdir()
+        """Two repos with identical basenames but different remotes get different slugs."""
+        a = tmp_path / "a" / "proj"
+        b = tmp_path / "b" / "proj"
+        a.mkdir(parents=True)
+        b.mkdir(parents=True)
         _init_git_repo(a, remote="https://example.com/one/proj.git")
         _init_git_repo(b, remote="https://example.com/two/proj.git")
 
-        # Rename so basenames match, forcing the hash to do the disambiguation
-        a_same = tmp_path / "proj_a"
-        b_same = tmp_path / "proj_b"
-        a.rename(a_same)
-        b.rename(b_same)
-
-        slug_a = Paths(project_root=a_same).fdr_dir.name
-        slug_b = Paths(project_root=b_same).fdr_dir.name
+        # Basenames match, so any slug difference must come from the remote hash
+        slug_a = Paths(project_root=a).fdr_dir.name
+        slug_b = Paths(project_root=b).fdr_dir.name
         assert slug_a != slug_b
 
     def test_slug_matches_same_remote(self, tmp_path: Path) -> None:
