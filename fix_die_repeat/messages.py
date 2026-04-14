@@ -209,7 +209,7 @@ def no_tty_error_message(
 
     """
     project_line = project_config_path or "<FDR_HOME>/repos/<slug>/config"
-    global_line = system_config_path or "~/.fix-die-repeat/config"
+    global_line = system_config_path or "<FDR_HOME>/config"
     return (
         "Error: No check command configured.\n\n"
         "fix-die-repeat needs a check command to run. Provide one via:\n"

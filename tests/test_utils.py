@@ -18,6 +18,7 @@ from fix_die_repeat.utils import (
     detect_large_files,
     determine_review_scope,
     format_duration,
+    get_all_tracked_files,
     get_branch_changed_files,
     get_changed_files,
     get_default_branch,
@@ -641,6 +642,61 @@ class TestGetChangedFilesFiltering:
             result = get_changed_files(tmp_path, exclude_patterns=["skip.log"])
 
         assert result == ["keep.txt"]
+
+
+class TestGetAllTrackedFiles:
+    """Tests for get_all_tracked_files function."""
+
+    def test_git_failure_returns_empty(self, tmp_path: Path) -> None:
+        """Non-zero git ls-files returncode yields an empty list."""
+        with patch(
+            "fix_die_repeat.utils.run_command",
+            return_value=(1, "", "fatal: not a git repository"),
+        ):
+            assert get_all_tracked_files(tmp_path) == []
+
+    def test_excludes_fix_die_repeat_prefix(self, tmp_path: Path) -> None:
+        """Files under .fix-die-repeat/ are filtered out."""
+        (tmp_path / "keep.py").write_text("ok")
+        (tmp_path / ".fix-die-repeat").mkdir()
+        (tmp_path / ".fix-die-repeat" / "state.txt").write_text("state")
+
+        with patch(
+            "fix_die_repeat.utils.run_command",
+            return_value=(0, "keep.py\n.fix-die-repeat/state.txt\n", ""),
+        ):
+            assert get_all_tracked_files(tmp_path) == ["keep.py"]
+
+    def test_filters_missing_on_disk(self, tmp_path: Path) -> None:
+        """Files listed by git but missing on disk are skipped."""
+        (tmp_path / "present.py").write_text("ok")
+
+        with patch(
+            "fix_die_repeat.utils.run_command",
+            return_value=(0, "present.py\nghost.py\n", ""),
+        ):
+            assert get_all_tracked_files(tmp_path) == ["present.py"]
+
+    def test_applies_exclude_patterns(self, tmp_path: Path) -> None:
+        """Exclude patterns are applied to the tracked file list."""
+        (tmp_path / "keep.txt").write_text("ok")
+        (tmp_path / "skip.log").write_text("skip")
+
+        with patch(
+            "fix_die_repeat.utils.run_command",
+            return_value=(0, "keep.txt\nskip.log\n", ""),
+        ):
+            result = get_all_tracked_files(tmp_path, exclude_patterns=["*.log"])
+
+        assert result == ["keep.txt"]
+
+    def test_empty_output(self, tmp_path: Path) -> None:
+        """Empty git output yields an empty list without errors."""
+        with patch(
+            "fix_die_repeat.utils.run_command",
+            return_value=(0, "\n", ""),
+        ):
+            assert get_all_tracked_files(tmp_path) == []
 
 
 class TestGetDefaultBranch:
