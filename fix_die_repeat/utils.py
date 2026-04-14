@@ -492,7 +492,12 @@ def determine_review_scope(project_root: Path) -> tuple[ReviewScope, list[str]]:
 
     if current_branch:
         default_branch = get_default_branch(project_root)
-        if default_branch and current_branch != default_branch:
+        # Normalize origin/<name> to <name> for comparison so a user on the
+        # local default branch isn't misclassified when origin/HEAD is set.
+        default_branch_local = (
+            default_branch.removeprefix("origin/") if default_branch else default_branch
+        )
+        if default_branch and current_branch != default_branch_local:
             branch_files = get_branch_changed_files(project_root, default_branch)
             if branch_files:
                 logger.info(

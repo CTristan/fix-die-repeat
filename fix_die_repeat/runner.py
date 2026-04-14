@@ -825,6 +825,18 @@ class PiRunner:
         )
         self._write_introspect_only_inputs(pr_manager, pr_info, unresolved)
 
+        # Clear any stale diff from a prior run so introspect-only doesn't
+        # leak unrelated changes into the introspection YAML.
+        try:
+            if self.paths.diff_file.exists():
+                self.paths.diff_file.unlink()
+        except OSError:
+            self.logger.exception(
+                "Failed to clear stale diff file before introspection-only run: %s",
+                self.paths.diff_file,
+            )
+            return 1
+
         try:
             introspection_manager.run_introspection(
                 self.iteration, self.start_sha, self.run_pi_safe, introspect_only=True
