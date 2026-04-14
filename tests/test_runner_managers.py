@@ -123,6 +123,20 @@ class TestReviewManager:
         assert "too large" in prompt
         assert pi_args == []
 
+    def test_build_review_prompt_empty_diff(self, tmp_path: Path) -> None:
+        """Empty diff must not attach the file and must tell pi no diff is available."""
+        settings = Settings(auto_attach_threshold=5000)
+        paths = Paths(project_root=tmp_path)
+        paths.ensure_fdr_dir()
+        logger = MagicMock()
+        manager = ReviewManager(settings, paths, tmp_path, logger)
+
+        pi_args: list[str] = []
+        prompt = manager.build_review_prompt(diff_size=0, pi_args=pi_args)
+
+        assert pi_args == []
+        assert "No diff is available" in prompt
+
     def test_run_pi_review_failure_marks_no_issues(self, tmp_path: Path) -> None:
         """Review failures should mark review_current as NO_ISSUES."""
         settings = Settings(auto_attach_threshold=5000)

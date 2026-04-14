@@ -220,6 +220,17 @@ class ReviewManager:
                 f"You MUST use the 'read' tool to inspect '{self.paths.diff_file}'.\n"
             )
 
+        if diff_size == 0:
+            self.logger.info(
+                "Review diff is empty. Telling pi to rely on the file list and read/grep."
+            )
+            return (
+                "No diff is available for this review (the diff could not be computed or "
+                "is empty). Do not assume any changes are attached — rely on the provided "
+                "file list and use the 'read' and 'grep' tools to inspect the current "
+                "state of those files directly.\n"
+            )
+
         self.logger.info(
             "Review diff size (%s bytes) is within limits. Attaching changes.diff.",
             diff_size,
