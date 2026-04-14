@@ -1965,6 +1965,13 @@ class PiRunner:
                 f"The changes are too large to attach automatically ({diff_size} bytes). "
                 f"You MUST use the 'read' tool to inspect '{self.paths.diff_file}'.\n"
             )
+        if diff_size == 0:
+            return (
+                "No diff is available for this review (the diff could not be computed or "
+                "is empty). Do not assume any changes are attached — rely on the provided "
+                "file list and use the 'read' and 'grep' tools to inspect the current "
+                "state of those files directly.\n"
+            )
         pi_args.append(f"@{self.paths.diff_file}")
         return (
             f"I have attached '{self.paths.diff_file}' which contains the changes "

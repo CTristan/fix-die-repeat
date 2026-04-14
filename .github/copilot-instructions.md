@@ -45,7 +45,7 @@ The runner is split across several sibling modules under `fix_die_repeat/` that 
 - `runner_introspection.py` — `IntrospectionManager`; "analyze PR reviews to find prompt-improvement opportunities" mode, and `--pr-threads-introspect-only` (fetch/analyze, don't fix).
 - `utils.py` — git helpers, `run_command`, logging setup, ntfy notifications, completion-sound playback, and the shared ruff-rule-policy parser used by `scripts/validate_ruff_rules.py`.
 
-Operating modes (selected via CLI flags / env vars) reuse the same core loop but swap which manager drives iteration: default (fix + review), `--pr-review`, `--pr-review-introspect`, `--full-codebase-review` (report-only), `--pr-threads-introspect-only` (fetch + analyze then exit).
+Operating modes (selected via CLI flags / env vars) reuse the same core loop but swap which manager drives iteration: default (fix + review), `--contextual-review`, `--pr-review`, `--pr-review-introspect`, `--full-codebase-review` (report-only), `--pr-threads-introspect-only` (fetch + analyze then exit).
 
 ## Ruff rule NEVER-IGNORE policy
 
