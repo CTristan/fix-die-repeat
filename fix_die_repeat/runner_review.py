@@ -221,14 +221,12 @@ class ReviewManager:
             )
 
         if diff_size == 0:
-            self.logger.info(
-                "Review diff is empty. Telling pi to rely on the file list and read/grep."
-            )
+            self.logger.info("Review diff is empty. Instructing pi to write NO_ISSUES.")
             return (
                 "No diff is available for this review (the diff could not be computed or "
-                "is empty). Do not assume any changes are attached — rely on the provided "
-                "file list and use the 'read' and 'grep' tools to inspect the current "
-                "state of those files directly.\n"
+                "is empty), and no changed-file list is attached in this review mode. "
+                "Do not assume any changes are available to inspect. Write exactly "
+                "NO_ISSUES.\n"
             )
 
         self.logger.info(

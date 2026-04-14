@@ -1968,9 +1968,9 @@ class PiRunner:
         if diff_size == 0:
             return (
                 "No diff is available for this review (the diff could not be computed or "
-                "is empty). Do not assume any changes are attached — rely on the provided "
-                "file list and use the 'read' and 'grep' tools to inspect the current "
-                "state of those files directly.\n"
+                "is empty), and no changed-file list is attached in this review mode. "
+                "Do not assume any changes are available to inspect. Write exactly "
+                "NO_ISSUES.\n"
             )
         pi_args.append(f"@{self.paths.diff_file}")
         return (
