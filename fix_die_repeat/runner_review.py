@@ -202,12 +202,18 @@ class ReviewManager:
             self.logger.info("pi review failed. Treating as no issues found.")
             self.paths.review_current_file.write_text("NO_ISSUES")
 
-    def build_review_prompt(self, diff_size: int, pi_args: list[str]) -> str:
+    def build_review_prompt(
+        self, diff_size: int, pi_args: list[str], *, file_list_attached: bool = False
+    ) -> str:
         """Build review prompt based on diff size.
 
         Args:
             diff_size: Size of the diff in bytes
             pi_args: List to append diff file to if within threshold
+            file_list_attached: If True, caller is providing a scoped file list
+                separately (e.g. contextual review), so empty-diff should
+                instruct pi to review those files directly rather than force
+                NO_ISSUES.
 
         Returns:
             Review prompt prefix
@@ -221,6 +227,16 @@ class ReviewManager:
             )
 
         if diff_size == 0:
+            if file_list_attached:
+                self.logger.info(
+                    "Review diff is empty or unavailable. "
+                    "Falling back to direct file review instructions.",
+                )
+                return (
+                    "No diff is available for this review (the diff could not be computed "
+                    "or is empty). Review the scoped file list directly. If no files are "
+                    "available to inspect, write exactly NO_ISSUES.\n"
+                )
             self.logger.info("Review diff is empty. Instructing pi to write NO_ISSUES.")
             return (
                 "No diff is available for this review (the diff could not be computed or "
@@ -459,7 +475,7 @@ class ReviewManager:
 
         # Build pi args and diff context
         pi_args = ["-p", "--tools", "read,write,grep,find,ls"]
-        diff_context = self.build_review_prompt(diff_size, pi_args)
+        diff_context = self.build_review_prompt(diff_size, pi_args, file_list_attached=True)
 
         review_prompt = render_prompt(
             "contextual_review.j2",

@@ -839,7 +839,7 @@ class PiRunner:
 
         try:
             introspection_manager.run_introspection(
-                self.iteration, self.start_sha, self.run_pi_safe, introspect_only=True
+                self.iteration, "", self.run_pi_safe, introspect_only=True
             )
         except Exception:
             self.logger.exception("Introspection failed")

@@ -1901,3 +1901,50 @@ class TestRunContextualReviewOnce:
         assert result == 0
         review_manager.run_contextual_review.assert_called_once()
         review_manager.run_full_codebase_review.assert_not_called()
+
+
+class TestPrThreadsIntrospectOnly:
+    """Tests for the PR-threads introspect-only runner entrypoint."""
+
+    def test_passes_empty_start_sha_to_introspection(self, tmp_path: Path) -> None:
+        """introspect-only must pass empty start_sha.
+
+        Prevents _read_diff_content from falling back to `git diff {start_sha}`
+        and leaking uncommitted changes into the introspection YAML.
+        """
+        paths = MagicMock()
+        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
+        paths.fdr_dir = tmp_path
+        paths.project_root = tmp_path
+        paths.diff_file = tmp_path / "changes.diff"
+
+        pr_manager = MagicMock()
+        introspection_manager = MagicMock()
+        logger = MagicMock()
+
+        runner = PiRunner.__new__(PiRunner)
+        runner.settings = MagicMock()
+        runner.paths = paths
+        runner.iteration = 0
+        runner.logger = logger
+        runner.start_sha = "abc123"
+        runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
+
+        with (
+            patch.object(runner, "_get_pr_manager", return_value=pr_manager),
+            patch.object(runner, "_get_introspection_manager", return_value=introspection_manager),
+            patch.object(
+                runner,
+                "_fetch_unresolved_pr_threads",
+                return_value=(MagicMock(), [{"id": "t1"}]),
+            ),
+            patch.object(runner, "_write_introspect_only_inputs"),
+        ):
+            result = runner.run_pr_threads_introspect_only()
+
+        assert result == 0
+        introspection_manager.run_introspection.assert_called_once()
+        call_args = introspection_manager.run_introspection.call_args
+        # Signature: (iteration, start_sha, run_pi_callback, *, introspect_only=...)
+        assert call_args.args[1] == ""
+        assert call_args.kwargs.get("introspect_only") is True
