@@ -28,6 +28,7 @@ _MAIN_HELP = (
     "  FDR_CONTEXTUAL_REVIEW, FDR_FULL_CODEBASE_REVIEW,\n"
     "  FDR_PR_THREADS_INTROSPECT_ONLY,\n"
     "  FDR_TEST_MODEL, FDR_DEBUG, FDR_LANGUAGES,\n"
+    "  FDR_HOME (base directory for state; defaults to ~/.fix-die-repeat),\n"
     "  FDR_NTFY_ENABLED (default: 1),\n"
     "  FDR_NTFY_URL (default: http://localhost:2586)\n"
     "\n"
