@@ -215,8 +215,8 @@ def no_tty_error_message(
         "fix-die-repeat needs a check command to run. Provide one via:\n"
         '  • CLI flag:          fix-die-repeat -c "pytest"\n'
         '  • Environment var:   FDR_CHECK_CMD="pytest" fix-die-repeat\n'
-        f"  • Project config:    echo 'check_cmd = \"pytest\"' > {project_line}\n"
-        f"  • Global config:     echo 'check_cmd = \"pytest\"' > {global_line}"
+        f'  • Project config:    echo \'check_cmd = "pytest"\' > "{project_line}"\n'
+        f'  • Global config:     echo \'check_cmd = "pytest"\' > "{global_line}"'
     )
 
 

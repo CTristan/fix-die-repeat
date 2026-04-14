@@ -414,7 +414,9 @@ def get_branch_changed_files(
 
     Args:
         project_root: Project root directory
-        default_branch: Name of the default branch (e.g. "main")
+        default_branch: Default branch reference to compare against, such as a
+            local branch name like ``main``/``master`` or a remote-tracking ref
+            like ``origin/main``
         exclude_patterns: Patterns to exclude
 
     Returns:

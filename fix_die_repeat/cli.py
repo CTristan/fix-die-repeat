@@ -114,7 +114,9 @@ _MAIN_HELP = (
     is_flag=True,
     help=(
         "Smart contextual review (report-only). Reviews uncommitted changes, "
-        "branch diff vs default branch, or full codebase if neither applies."
+        "branch diff vs default branch, or full codebase if neither applies. "
+        "If multiple standalone-mode flags are set, precedence is: "
+        "--pr-threads-introspect-only > --contextual-review > --full-codebase-review."
     ),
     envvar="FDR_CONTEXTUAL_REVIEW",
 )
@@ -123,7 +125,9 @@ _MAIN_HELP = (
     is_flag=True,
     help=(
         "Audit the entire codebase instead of a diff. Report-only: "
-        "never attempts fixes. Ignores --pr-review if also set."
+        "never attempts fixes. Ignores --pr-review if also set. "
+        "Lowest precedence among standalone-mode flags: "
+        "--pr-threads-introspect-only and --contextual-review both win over this."
     ),
     envvar="FDR_FULL_CODEBASE_REVIEW",
 )
@@ -132,7 +136,9 @@ _MAIN_HELP = (
     is_flag=True,
     help=(
         "Fetch the PR's unresolved review threads, run introspection on them, "
-        "then exit. Does not run checks, local review, or attempt fixes."
+        "then exit. Does not run checks, local review, or attempt fixes. "
+        "Highest precedence among standalone-mode flags: wins over "
+        "--contextual-review and --full-codebase-review."
     ),
     envvar="FDR_PR_THREADS_INTROSPECT_ONLY",
 )
