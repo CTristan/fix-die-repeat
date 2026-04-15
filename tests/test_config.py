@@ -246,7 +246,7 @@ class TestPaths:
         assert slug_a != slug_b
 
     def test_slug_matches_same_remote(self, tmp_path: Path) -> None:
-        """Two clones of the same origin remote hash to the same slug."""
+        """Two clones of the same origin remote share the same hash suffix."""
         a = tmp_path / "clone_one"
         b = tmp_path / "clone_two"
         a.mkdir()
