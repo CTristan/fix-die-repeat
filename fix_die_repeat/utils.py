@@ -26,6 +26,14 @@ DEFAULT_EXCLUDE_PATTERNS: list[str] = [
     "*.min.*",
 ]
 
+
+def _resolve_exclude_patterns(exclude_patterns: list[str] | None) -> list[str]:
+    """Return defaults when None; preserve an explicit empty list as 'no exclusions'."""
+    if exclude_patterns is None:
+        return DEFAULT_EXCLUDE_PATTERNS
+    return exclude_patterns
+
+
 console = Console()
 LOG_FORMAT = "[%(asctime)s] [fdr] [%(levelname)s] %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -300,7 +308,7 @@ def get_changed_files(
         List of changed file paths (relative to project root)
 
     """
-    exclude_patterns = exclude_patterns or DEFAULT_EXCLUDE_PATTERNS
+    exclude_patterns = _resolve_exclude_patterns(exclude_patterns)
 
     files = _collect_git_files(project_root)
 
@@ -334,7 +342,7 @@ def get_all_tracked_files(
         Sorted list of tracked file paths relative to project root
 
     """
-    exclude_patterns = exclude_patterns or DEFAULT_EXCLUDE_PATTERNS
+    exclude_patterns = _resolve_exclude_patterns(exclude_patterns)
 
     returncode, stdout, _ = run_command(
         "git ls-files",
@@ -423,7 +431,7 @@ def get_branch_changed_files(
         Sorted list of changed file paths relative to project root
 
     """
-    exclude_patterns = exclude_patterns or DEFAULT_EXCLUDE_PATTERNS
+    exclude_patterns = _resolve_exclude_patterns(exclude_patterns)
 
     # Find the merge base
     returncode, stdout, _ = run_command(
@@ -593,7 +601,7 @@ def is_excluded_file(filename: str, exclude_patterns: list[str] | None = None) -
         True if file should be excluded
 
     """
-    exclude_patterns = exclude_patterns or DEFAULT_EXCLUDE_PATTERNS
+    exclude_patterns = _resolve_exclude_patterns(exclude_patterns)
 
     return any(fnmatch.fnmatch(filename.lower(), pattern.lower()) for pattern in exclude_patterns)
 

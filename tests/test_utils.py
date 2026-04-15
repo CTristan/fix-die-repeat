@@ -548,6 +548,11 @@ class TestIsExcludedFile:
         assert is_excluded_file("test.log", exclude_patterns=["*.log"]) is True
         assert is_excluded_file("test.py", exclude_patterns=["*.log"]) is False
 
+    def test_empty_list_disables_exclusion(self) -> None:
+        """Empty list must mean 'no exclusions', not 'fall back to defaults'."""
+        # package-lock.json is in DEFAULT_EXCLUDE_PATTERNS; passing [] must NOT exclude it.
+        assert is_excluded_file("package-lock.json", exclude_patterns=[]) is False
+
     def test_case_insensitive_matching(self) -> None:
         """Test that matching is case-insensitive."""
         assert is_excluded_file("PACKAGE.LOCK") is True
