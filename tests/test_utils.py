@@ -873,6 +873,49 @@ class TestDetermineReviewScope:
         assert scope == ReviewScope.FULL
         assert files == []
 
+    def test_excluded_only_uncommitted_still_scoped(self, tmp_path: Path) -> None:
+        """Excluded-only uncommitted changes (e.g., lockfiles) stay UNCOMMITTED, not FULL.
+
+        Regression: previously, if the only dirty files matched DEFAULT_EXCLUDE_PATTERNS,
+        get_changed_files() returned [] and determine_review_scope() fell through to FULL,
+        causing contextual review to run a full-codebase audit instead of reviewing the diff.
+        """
+
+        def fake_changed(_root: Path, exclude_patterns: list[str] | None = None) -> list[str]:
+            if exclude_patterns == []:
+                return ["package-lock.json"]
+            return []
+
+        with patch("fix_die_repeat.utils.get_changed_files", side_effect=fake_changed):
+            scope, files = determine_review_scope(tmp_path)
+
+        assert scope == ReviewScope.UNCOMMITTED
+        assert files == []
+
+    def test_excluded_only_branch_still_scoped(self, tmp_path: Path) -> None:
+        """Excluded-only branch changes stay BRANCH, not FULL."""
+
+        def fake_branch(
+            _root: Path,
+            _default: str,
+            exclude_patterns: list[str] | None = None,
+        ) -> list[str]:
+            if exclude_patterns == []:
+                return ["go.sum"]
+            return []
+
+        with (
+            patch("fix_die_repeat.utils.get_changed_files", return_value=[]),
+            patch("fix_die_repeat.utils.run_command") as mock_run,
+            patch("fix_die_repeat.utils.get_default_branch", return_value="main"),
+            patch("fix_die_repeat.utils.get_branch_changed_files", side_effect=fake_branch),
+        ):
+            mock_run.return_value = (0, "feat/my-branch\n", "")
+            scope, files = determine_review_scope(tmp_path)
+
+        assert scope == ReviewScope.BRANCH
+        assert files == []
+
     def test_no_default_branch_found(self, tmp_path: Path) -> None:
         """Falls through to FULL when default branch can't be determined."""
         with (

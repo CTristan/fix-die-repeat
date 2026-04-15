@@ -475,9 +475,13 @@ def determine_review_scope(project_root: Path) -> tuple[ReviewScope, list[str]]:
     """
     logger = logging.getLogger(LOGGER_NAME)
 
-    # Tier 1: uncommitted changes
-    changed = get_changed_files(project_root)
-    if changed:
+    # Tier 1: uncommitted changes.
+    # Scope detection uses the raw (unfiltered) git set so lockfile-only diffs
+    # still trigger contextual review instead of falling through to FULL and
+    # running an unexpected full-codebase audit.
+    raw_changed = get_changed_files(project_root, exclude_patterns=[])
+    if raw_changed:
+        changed = get_changed_files(project_root)
         logger.info(
             "Contextual review scope: UNCOMMITTED (%d file(s) with local changes)",
             len(changed),
@@ -500,8 +504,11 @@ def determine_review_scope(project_root: Path) -> tuple[ReviewScope, list[str]]:
             default_branch.removeprefix("origin/") if default_branch else default_branch
         )
         if default_branch and current_branch != default_branch_local:
-            branch_files = get_branch_changed_files(project_root, default_branch)
-            if branch_files:
+            raw_branch_files = get_branch_changed_files(
+                project_root, default_branch, exclude_patterns=[]
+            )
+            if raw_branch_files:
+                branch_files = get_branch_changed_files(project_root, default_branch)
                 logger.info(
                     "Contextual review scope: BRANCH (%d file(s) changed vs %s)",
                     len(branch_files),
