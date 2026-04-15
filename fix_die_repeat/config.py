@@ -1,5 +1,6 @@
 """Configuration management for fix-die-repeat."""
 
+import hashlib
 import os
 import shutil
 from dataclasses import dataclass
@@ -73,6 +74,27 @@ class Settings(BaseSettings):
         default=False,
         alias="FDR_PR_REVIEW_INTROSPECT",
         description="Enable PR review mode with prompt introspection",
+    )
+
+    # Full-codebase review mode (report-only, no fixes)
+    full_codebase_review: bool = pyd.Field(
+        default=False,
+        alias="FDR_FULL_CODEBASE_REVIEW",
+        description="Audit the entire codebase instead of a diff; never applies fixes",
+    )
+
+    # Contextual review mode (report-only, auto-scoped)
+    contextual_review: bool = pyd.Field(
+        default=False,
+        alias="FDR_CONTEXTUAL_REVIEW",
+        description="Smart contextual review: uncommitted changes, branch diff, or full codebase",
+    )
+
+    # PR threads introspect-only mode
+    pr_threads_introspect_only: bool = pyd.Field(
+        default=False,
+        alias="FDR_PR_THREADS_INTROSPECT_ONLY",
+        description="Fetch unresolved PR threads and run introspection without attempting fixes",
     )
 
     # Debug mode
@@ -162,6 +184,9 @@ class CliOptions:
     no_compact: bool = False
     pr_review: bool = False
     pr_review_introspect: bool = False
+    full_codebase_review: bool = False
+    contextual_review: bool = False
+    pr_threads_introspect_only: bool = False
     test_model: str | None = None
     debug: bool = False
 
@@ -243,8 +268,46 @@ def _apply_boolean_flags(settings: Settings, options: CliOptions) -> None:
     if options.pr_review_introspect:
         settings.pr_review_introspect = options.pr_review_introspect
         settings.pr_review = True
+    if options.full_codebase_review:
+        settings.full_codebase_review = options.full_codebase_review
+    if options.contextual_review:
+        settings.contextual_review = options.contextual_review
+    if options.pr_threads_introspect_only:
+        settings.pr_threads_introspect_only = options.pr_threads_introspect_only
     if options.debug:
         settings.debug = options.debug
+
+
+def _central_root() -> Path:
+    """Return the central fix-die-repeat state directory.
+
+    Defaults to ``~/.fix-die-repeat``; overridable via the ``FDR_HOME`` env var.
+    """
+    override = os.environ.get("FDR_HOME")
+    if override:
+        return Path(override).expanduser().resolve(strict=False)
+    return (Path.home() / ".fix-die-repeat").resolve(strict=False)
+
+
+def _repo_slug(project_root: Path) -> str:
+    """Return a stable, semi-readable per-repo slug.
+
+    Format: ``<basename>-<8charhash>``. Hash input is the git ``origin`` remote
+    URL when available, else the absolute path of the project root.
+    """
+    git_path = shutil.which("git")
+    hash_input: str | None = None
+    if git_path:
+        returncode, stdout, _ = run_command(
+            [git_path, "-C", str(project_root), "remote", "get-url", "origin"],
+            check=False,
+        )
+        if returncode == 0 and stdout.strip():
+            hash_input = stdout.strip()
+    if hash_input is None:
+        hash_input = str(project_root.resolve())
+    digest = hashlib.sha1(hash_input.encode(), usedforsecurity=False).hexdigest()[:8]
+    return f"{project_root.name}-{digest}"
 
 
 class Paths:
@@ -258,7 +321,7 @@ class Paths:
 
         """
         self.project_root = project_root or self._find_project_root()
-        self.fdr_dir = self.project_root / ".fix-die-repeat"
+        self.fdr_dir = _central_root() / "repos" / _repo_slug(self.project_root)
         self.config_file = self.fdr_dir / "config"
         self.review_file = self.fdr_dir / "review.md"
         self.review_current_file = self.fdr_dir / "review_current.md"
@@ -305,29 +368,30 @@ class Paths:
         return Path.cwd()
 
     def ensure_fdr_dir(self) -> None:
-        """Ensure .fix-die-repeat directory exists."""
+        """Ensure the central per-repo state directory exists."""
         self.fdr_dir.mkdir(parents=True, exist_ok=True)
 
-        # Add to .gitignore if not present
-        gitignore = self.project_root / ".gitignore"
-        if gitignore.exists():
-            gitignore_content = gitignore.read_text()
-            if ".fix-die-repeat/" not in gitignore_content:
-                with gitignore.open("a") as f:
-                    f.write("\n.fix-die-repeat/\n")
+    def template_context(self) -> dict[str, str]:
+        """Return absolute path strings for every path referenced in prompts.
+
+        Spread into ``render_prompt(...)`` calls so templates can use
+        ``{{ review_current_path }}`` etc. without hardcoding ``.fix-die-repeat``.
+        """
+        return {
+            "fdr_dir_path": str(self.fdr_dir),
+            "review_history_path": str(self.review_file),
+            "review_current_path": str(self.review_current_file),
+            "build_history_path": str(self.build_history_file),
+            "checks_log_path": str(self.checks_log),
+            "checks_filtered_log_path": str(self.checks_filtered_log),
+            "diff_file_path": str(self.diff_file),
+            "resolved_threads_path": str(self.pr_resolved_threads_file),
+            "config_file_path": str(self.config_file),
+        }
 
 
 def get_introspection_file_path() -> Path:
-    """Return the global introspection file path.
-
-    Returns ~/.config/fix-die-repeat/introspection.yaml,
-    respecting XDG_CONFIG_HOME if set.
-
-    Returns:
-        Path to global introspection file
-
-    """
-    config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    introspection_dir = config_home / "fix-die-repeat"
-    introspection_dir.mkdir(parents=True, exist_ok=True)
-    return introspection_dir / "introspection.yaml"
+    """Return the global introspection file path (``<FDR_HOME>/introspection.yaml``)."""
+    central = _central_root()
+    central.mkdir(parents=True, exist_ok=True)
+    return central / "introspection.yaml"

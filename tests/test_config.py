@@ -3,7 +3,6 @@
 import os
 import shutil
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -39,11 +38,13 @@ def _run_git_command(project_dir: Path, *args: str) -> None:
     assert returncode == 0, stderr
 
 
-def _init_git_repo(project_dir: Path) -> None:
+def _init_git_repo(project_dir: Path, remote: str | None = None) -> None:
     """Initialize a git repository for path-discovery tests."""
     _run_git_command(project_dir, "init")
     _run_git_command(project_dir, "config", "user.email", "test@example.com")
     _run_git_command(project_dir, "config", "user.name", "Test User")
+    if remote is not None:
+        _run_git_command(project_dir, "remote", "add", "origin", remote)
 
 
 class TestSettings:
@@ -158,104 +159,172 @@ class TestSettings:
         assert settings.max_pr_threads == TEST_MAX_PR_THREADS
 
 
+SLUG_HASH_LEN = 8
+
+EXPECTED_TEMPLATE_CONTEXT_KEYS = {
+    "fdr_dir_path",
+    "review_history_path",
+    "review_current_path",
+    "build_history_path",
+    "checks_log_path",
+    "checks_filtered_log_path",
+    "diff_file_path",
+    "resolved_threads_path",
+    "config_file_path",
+}
+
+
 class TestPaths:
     """Tests for Paths class."""
 
-    def test_default_project_root(self, tmp_path: Path) -> None:
-        """Test that project root defaults to git root or cwd."""
-        # Create a temporary directory with a git repo
-        project_dir = tmp_path / "test_project"
+    def test_fdr_dir_under_fdr_home(self, tmp_path: Path) -> None:
+        """Paths.fdr_dir lives under FDR_HOME/repos/<slug>, not inside the repo."""
+        project_dir = tmp_path / "myproj"
         project_dir.mkdir()
-
-        # Initialize git repo
         _init_git_repo(project_dir)
 
         paths = Paths(project_root=project_dir)
-        assert paths.project_root == project_dir
-        assert paths.fdr_dir == project_dir / ".fix-die-repeat"
+        fdr_home = Path(os.environ["FDR_HOME"])
+
+        assert paths.fdr_dir.parent == fdr_home / "repos"
+        assert paths.fdr_dir.name.startswith("myproj-")
+        # 8-char hash suffix
+        suffix = paths.fdr_dir.name[len("myproj-") :]
+        assert len(suffix) == SLUG_HASH_LEN
+        # Nothing written inside the repo
+        assert not (project_dir / ".fix-die-repeat").exists()
 
     def test_project_root_from_git(self, tmp_path: Path) -> None:
-        """Test that project root is found from git when not specified."""
-        # Create a temporary directory with a git repo
+        """project_root is discovered from git toplevel when unspecified."""
         project_dir = tmp_path / "git_project"
         project_dir.mkdir()
-
-        # Initialize git repo
         _init_git_repo(project_dir)
 
-        # Change to git directory and create Paths without project_root
         original_cwd = Path.cwd()
         try:
             os.chdir(project_dir)
-            paths = Paths()  # No project_root argument - should find git root
+            paths = Paths()
             assert paths.project_root == project_dir
-            assert paths.fdr_dir == project_dir / ".fix-die-repeat"
         finally:
             os.chdir(original_cwd)
 
     def test_project_root_without_git(self, tmp_path: Path) -> None:
-        """Test that project root falls back to cwd when not in a git repo."""
-        # Create a directory without git
+        """project_root falls back to cwd when not in a git repo."""
         no_git_dir = tmp_path / "no_git_project"
         no_git_dir.mkdir()
 
-        # Change to this directory and create Paths without project_root
         original_cwd = Path.cwd()
         try:
             os.chdir(no_git_dir)
-            # Paths should find the project root (which falls back to cwd)
-            paths = Paths()  # No project_root argument
+            paths = Paths()
             assert paths.project_root == no_git_dir
-            assert paths.fdr_dir == no_git_dir / ".fix-die-repeat"
         finally:
             os.chdir(original_cwd)
 
-    def test_ensure_fdr_dir(self, tmp_path: Path) -> None:
-        """Test that ensure_fdr_dir creates the directory."""
-        paths = Paths(project_root=tmp_path)
+    def test_slug_is_stable_across_calls(self, tmp_path: Path) -> None:
+        """Same project_root yields the same slug on repeated construction."""
+        project_dir = tmp_path / "stable"
+        project_dir.mkdir()
+        _init_git_repo(project_dir, remote="https://example.com/a/b.git")
+
+        first = Paths(project_root=project_dir).fdr_dir.name
+        second = Paths(project_root=project_dir).fdr_dir.name
+        assert first == second
+
+    def test_slug_varies_with_remote(self, tmp_path: Path) -> None:
+        """Two repos with identical basenames but different remotes get different slugs."""
+        a = tmp_path / "a" / "proj"
+        b = tmp_path / "b" / "proj"
+        a.mkdir(parents=True)
+        b.mkdir(parents=True)
+        _init_git_repo(a, remote="https://example.com/one/proj.git")
+        _init_git_repo(b, remote="https://example.com/two/proj.git")
+
+        # Basenames match, so any slug difference must come from the remote hash
+        slug_a = Paths(project_root=a).fdr_dir.name
+        slug_b = Paths(project_root=b).fdr_dir.name
+        assert slug_a != slug_b
+
+    def test_slug_matches_same_remote(self, tmp_path: Path) -> None:
+        """Two clones of the same origin remote share the same hash suffix."""
+        a = tmp_path / "clone_one"
+        b = tmp_path / "clone_two"
+        a.mkdir()
+        b.mkdir()
+        remote = "https://example.com/shared/proj.git"
+        _init_git_repo(a, remote=remote)
+        _init_git_repo(b, remote=remote)
+
+        # Slug has form <basename>-<hash>. Hashes should match even though
+        # basenames differ.
+        slug_a = Paths(project_root=a).fdr_dir.name
+        slug_b = Paths(project_root=b).fdr_dir.name
+        assert slug_a.split("-")[-1] == slug_b.split("-")[-1]
+
+    def test_slug_without_remote_falls_back_to_path(self, tmp_path: Path) -> None:
+        """With no git remote, the slug still resolves (path-based hash)."""
+        project_dir = tmp_path / "no_remote"
+        project_dir.mkdir()
+        _init_git_repo(project_dir)  # no remote added
+
+        paths = Paths(project_root=project_dir)
+        assert paths.fdr_dir.name.startswith("no_remote-")
+        suffix = paths.fdr_dir.name[len("no_remote-") :]
+        assert len(suffix) == SLUG_HASH_LEN
+
+    def test_ensure_fdr_dir_creates_central_dir(self, tmp_path: Path) -> None:
+        """ensure_fdr_dir creates the central state dir."""
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        _init_git_repo(project_dir)
+
+        paths = Paths(project_root=project_dir)
         paths.ensure_fdr_dir()
 
         assert paths.fdr_dir.exists()
         assert paths.fdr_dir.is_dir()
 
-        # Check .gitignore is updated
-        gitignore = tmp_path / ".gitignore"
-        if gitignore.exists():
-            content = gitignore.read_text()
-            assert ".fix-die-repeat/" in content
+    def test_ensure_fdr_dir_does_not_touch_repo(self, tmp_path: Path) -> None:
+        """ensure_fdr_dir must NOT create or modify .gitignore in the repo."""
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        _init_git_repo(project_dir)
 
-    def test_ensure_fdr_dir_updates_gitignore(self, tmp_path: Path) -> None:
-        """Test that ensure_fdr_dir adds .fix-die-repeat/ to existing gitignore."""
-        # Create a gitignore without .fix-die-repeat/
-        gitignore = tmp_path / ".gitignore"
+        # Pre-existing gitignore should remain untouched
+        gitignore = project_dir / ".gitignore"
         gitignore.write_text("*.pyc\n__pycache__/\n")
+        original = gitignore.read_text()
 
-        paths = Paths(project_root=tmp_path)
+        paths = Paths(project_root=project_dir)
         paths.ensure_fdr_dir()
 
-        # Verify .fix-die-repeat/ was added
-        content = gitignore.read_text()
-        assert "*.pyc" in content
-        assert "__pycache__/" in content
-        assert ".fix-die-repeat/" in content
+        assert gitignore.read_text() == original
+        assert ".fix-die-repeat" not in gitignore.read_text()
+        # And no .fix-die-repeat/ created in the repo
+        assert not (project_dir / ".fix-die-repeat").exists()
 
-    def test_ensure_fdr_dir_does_not_duplicate_gitignore(self, tmp_path: Path) -> None:
-        """Test that ensure_fdr_dir doesn't add .fix-die-repeat/ if already present."""
-        # Create a gitignore with .fix-die-repeat/ already present
-        gitignore = tmp_path / ".gitignore"
-        gitignore.write_text("*.pyc\n.fix-die-repeat/\n__pycache__/\n")
+    def test_ensure_fdr_dir_does_not_create_gitignore(self, tmp_path: Path) -> None:
+        """ensure_fdr_dir must not create a .gitignore if one doesn't exist."""
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        _init_git_repo(project_dir)
 
-        paths = Paths(project_root=tmp_path)
+        gitignore = project_dir / ".gitignore"
+        if gitignore.exists():
+            gitignore.unlink()
+
+        paths = Paths(project_root=project_dir)
         paths.ensure_fdr_dir()
 
-        # Verify .fix-die-repeat/ was not duplicated
-        content = gitignore.read_text()
-        count = content.count(".fix-die-repeat/")
-        assert count == 1, f".fix-die-repeat/ appears {count} times, expected 1"
+        assert not gitignore.exists()
 
-    def test_path_properties(self, tmp_path: Path) -> None:
-        """Test that all path properties are correctly set."""
-        paths = Paths(project_root=tmp_path)
+    def test_path_properties_all_under_fdr_dir(self, tmp_path: Path) -> None:
+        """Every path attribute is rooted at the central fdr_dir."""
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        _init_git_repo(project_dir)
+
+        paths = Paths(project_root=project_dir)
 
         assert paths.review_file == paths.fdr_dir / "review.md"
         assert paths.review_current_file == paths.fdr_dir / "review_current.md"
@@ -276,74 +345,42 @@ class TestPaths:
         assert paths.introspection_data_file == paths.fdr_dir / ".introspection_data.yaml"
         assert paths.introspection_result_file == paths.fdr_dir / ".introspection_result.yaml"
 
-    def test_find_project_root_git_fallback_to_cwd(self, tmp_path: Path) -> None:
-        """Test _find_project_root falls back to cwd when git lookup fails."""
-        no_git_dir = tmp_path / "no_git"
-        no_git_dir.mkdir()
+    def test_template_context_keys_are_fixed(self, tmp_path: Path) -> None:
+        """Paths.template_context() returns the expected pinned key set."""
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        _init_git_repo(project_dir)
 
-        original_cwd = Path.cwd()
-        try:
-            os.chdir(no_git_dir)
-            with patch("fix_die_repeat.config.run_command", return_value=(1, "", "git failed")):
-                # Create Paths - should fall back to cwd when git fails
-                paths = Paths()
+        paths = Paths(project_root=project_dir)
+        ctx = paths.template_context()
 
-                # Should return current working directory when git fails
-                assert paths.project_root == no_git_dir
-        finally:
-            os.chdir(original_cwd)
+        assert set(ctx.keys()) == EXPECTED_TEMPLATE_CONTEXT_KEYS
+        for key, value in ctx.items():
+            assert isinstance(value, str), f"{key} must be a string"
+            assert Path(value).is_absolute(), f"{key} must be absolute: {value}"
 
 
 class TestGetIntrospectionFilePath:
     """Tests for get_introspection_file_path function."""
 
     def test_returns_path_object(self) -> None:
-        """Test that get_introspection_file_path returns a Path object."""
+        """get_introspection_file_path returns a Path object."""
         path = get_introspection_file_path()
         assert isinstance(path, Path)
 
-    def test_default_location(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """Test default location is ~/.config/fix-die-repeat/introspection.yaml."""
-        # Set HOME to tmp_path for test isolation
-        monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    def test_lives_under_fdr_home(self) -> None:
+        """The introspection file lives at FDR_HOME/introspection.yaml."""
+        path = get_introspection_file_path()
+        fdr_home = Path(os.environ["FDR_HOME"])
+        assert path == fdr_home / "introspection.yaml"
+
+    def test_creates_parent_directories(self) -> None:
+        """Parent directory is created if missing."""
+        fdr_home = Path(os.environ["FDR_HOME"])
+        if fdr_home.exists():
+            shutil.rmtree(fdr_home)
 
         path = get_introspection_file_path()
-        expected = tmp_path / ".config" / "fix-die-repeat" / "introspection.yaml"
-        assert path == expected
 
-    def test_xdg_config_home_respected(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
-        """Test that XDG_CONFIG_HOME is respected when set."""
-        xdg_config = tmp_path / "custom_config"
-        xdg_config.mkdir()
-
-        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config))
-
-        path = get_introspection_file_path()
-        expected = xdg_config / "fix-die-repeat" / "introspection.yaml"
-        assert path == expected
-
-    def test_creates_parent_directories(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
-        """Test that parent directories are created."""
-        monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-
-        # Remove any existing config directory
-        config_dir = tmp_path / ".config" / "fix-die-repeat"
-        if config_dir.exists():
-            shutil.rmtree(config_dir.parent)
-
-        # Call the function - should create directories
-        path = get_introspection_file_path()
-
-        # Verify parent directories were created
         assert path.parent.exists()
         assert path.parent.is_dir()

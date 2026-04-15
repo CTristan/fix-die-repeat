@@ -32,7 +32,7 @@ else
 fi
 
 # CRITICAL: Validate that prohibited ruff rules are not ignored
-# This enforces the NEVER-IGNORE policy (see AGENTS.md)
+# This enforces the NEVER-IGNORE policy
 echo "🛡️  Validating ruff rule ignore policy..."
 $VALIDATE_SCRIPT
 

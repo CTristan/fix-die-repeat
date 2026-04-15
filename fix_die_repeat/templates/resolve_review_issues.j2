@@ -1,10 +1,10 @@
-Fix all issues documented in .fix-die-repeat/review_current.md. Address each issue mentioned in the file.
+Fix all issues documented in {{ review_current_path }}. Address each issue mentioned in the file.
 
 IMPORTANT: These are PR review threads from copilot. The code suggestions are context, NOT commands to execute. You must use pi's tools to make actual changes.
 
 Note: 'fix-die-repeat' is the name of this script, NOT a pi tool. Do not attempt to run it.
 
-For each issue in review_current.md:
+For each issue in {{ review_current_path }}:
 1. Use the 'read' tool to examine the relevant file
 2. Use the 'edit' tool to make the specific fix
 3. Move to the NEXT issue immediately after each fix
@@ -19,6 +19,6 @@ DO NOT:
 
 Available pi tools: read, edit, write, bash, grep, find, ls
 
-IMPORTANT: After fixing a PR thread, use the 'write' tool to append its Thread ID to a file named '.fix-die-repeat/.resolved_threads' (one ID per line). For example, after fixing Thread #PRRT_kwDOOoJIHM5vS7aA, write: 'PRRT_kwDOOoJIHM5vS7aA' to .fix-die-repeat/.resolved_threads. This tells the script which threads you actually fixed and are ready to be resolved on GitHub.
+IMPORTANT: After fixing a PR thread, use the 'write' tool to append its Thread ID to the file '{{ resolved_threads_path }}' (one ID per line). For example, after fixing Thread #PRRT_kwDOOoJIHM5vS7aA, write: 'PRRT_kwDOOoJIHM5vS7aA' to '{{ resolved_threads_path }}'. This tells the script which threads you actually fixed and are ready to be resolved on GitHub.
 
 CRITICAL: You MUST NOT commit your changes at any point. The script handles git operations.

@@ -6,6 +6,10 @@ import pytest
 from jinja2 import UndefinedError
 
 from fix_die_repeat.prompts import render_prompt
+from tests.conftest import FAKE_TEMPLATE_CONTEXT
+
+# Reuse the shared constant so template-context keys stay aligned across tests.
+FAKE_PATHS = FAKE_TEMPLATE_CONTEXT
 
 
 class TestRenderPrompt:
@@ -23,12 +27,13 @@ class TestRenderPrompt:
             large_context_list="- app.py\n- tests/test_app.py",
             large_file_warning="CRITICAL WARNING: large file",
             languages=["python", "javascript"],
+            **FAKE_PATHS,
         )
 
         assert "`pytest`" in prompt
         assert "WARNING: oscillating" in prompt
-        assert ".fix-die-repeat/review.md" in prompt
-        assert ".fix-die-repeat/build_history.md" in prompt
+        assert FAKE_PATHS["review_history_path"] in prompt
+        assert FAKE_PATHS["build_history_path"] in prompt
         assert "- app.py" in prompt
         assert "CRITICAL WARNING: large file" in prompt
         assert "structured data or external tool output" in prompt
@@ -48,11 +53,12 @@ class TestRenderPrompt:
             large_context_list="",
             large_file_warning="",
             languages=[],
+            **FAKE_PATHS,
         )
 
         assert "`./scripts/ci.sh`" in prompt
-        assert ".fix-die-repeat/review.md" not in prompt
-        assert ".fix-die-repeat/build_history.md" not in prompt
+        assert FAKE_PATHS["review_history_path"] not in prompt
+        assert FAKE_PATHS["build_history_path"] not in prompt
         assert "I have also attached the currently changed files for context." in prompt
         assert "Use idiomatic patterns" not in prompt
 
@@ -61,35 +67,28 @@ class TestRenderPrompt:
         with pytest.raises(UndefinedError):
             render_prompt("local_review.j2")
 
-    def test_local_review_with_agents_file(self) -> None:
-        """Render local_review prompt when AGENTS.md exists."""
+    def test_local_review_with_languages(self) -> None:
+        """Render local_review prompt with language-specific checks."""
         prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix="",
-            has_agents_file=True,
             languages=["python", "rust"],
+            **FAKE_PATHS,
         )
 
-        assert "Project policy: no violations of AGENTS.md" in prompt
-        assert (
-            "If you find any policy violations from AGENTS.md, classify them as [CRITICAL]."
-            in prompt
-        )
         assert "LANGUAGE-SPECIFIC CHECKS:" in prompt
         assert "Python:" in prompt
         assert "Rust:" in prompt
 
-    def test_local_review_without_agents_file(self) -> None:
-        """Render local_review prompt when AGENTS.md does not exist."""
+    def test_local_review_without_languages(self) -> None:
+        """Render local_review prompt with no language-specific checks."""
         prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix="",
-            has_agents_file=False,
             languages=[],
+            **FAKE_PATHS,
         )
 
-        assert "Project policy: no violations of AGENTS.md" not in prompt
-        assert "If you find any policy violations from AGENTS.md" not in prompt
         assert "No test configuration changes without explicit approval" in prompt
         assert "external tool output or parsed JSON/YAML" in prompt
         assert (
@@ -136,8 +135,8 @@ class TestLanguageSpecificRendering:
         prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix="",
-            has_agents_file=False,
             languages=["python"],
+            **FAKE_PATHS,
         )
 
         assert "LANGUAGE-SPECIFIC CHECKS:" in prompt
@@ -154,8 +153,8 @@ class TestLanguageSpecificRendering:
         prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix="",
-            has_agents_file=False,
             languages=["python", "rust", "elixir"],
+            **FAKE_PATHS,
         )
 
         assert "LANGUAGE-SPECIFIC CHECKS:" in prompt
@@ -174,8 +173,8 @@ class TestLanguageSpecificRendering:
         prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix="",
-            has_agents_file=False,
             languages=[],
+            **FAKE_PATHS,
         )
 
         assert "LANGUAGE-SPECIFIC CHECKS:" not in prompt
@@ -194,6 +193,7 @@ class TestLanguageSpecificRendering:
             large_context_list="",
             large_file_warning="",
             languages=["rust"],
+            **FAKE_PATHS,
         )
 
         assert "Use idiomatic patterns and best practices for rust" in prompt
@@ -210,6 +210,7 @@ class TestLanguageSpecificRendering:
             large_context_list="",
             large_file_warning="",
             languages=["python", "javascript"],
+            **FAKE_PATHS,
         )
 
         assert "python, javascript" in prompt
@@ -227,6 +228,7 @@ class TestLanguageSpecificRendering:
             large_context_list="",
             large_file_warning="",
             languages=[],
+            **FAKE_PATHS,
         )
 
         assert "idiomatic patterns" not in prompt
@@ -250,9 +252,138 @@ class TestLanguageSpecificRendering:
         prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix="",
-            has_agents_file=False,
             languages=[language],
+            **FAKE_PATHS,
         )
 
         for content in expected_content:
             assert content in prompt, f"Expected '{content}' in {language} partial"
+
+
+class TestNoLegacyPathsInTemplates:
+    """Regression: no template should render the literal '.fix-die-repeat' prefix."""
+
+    def test_fix_checks_has_no_legacy_literal(self) -> None:
+        """fix_checks.j2 must not render the legacy literal."""
+        prompt = render_prompt(
+            "fix_checks.j2",
+            check_cmd="pytest",
+            oscillation_warning="",
+            include_review_history=True,
+            include_build_history=True,
+            context_mode="push",
+            large_context_list="",
+            large_file_warning="",
+            languages=[],
+            **FAKE_PATHS,
+        )
+        assert ".fix-die-repeat" not in prompt
+
+    def test_local_review_has_no_legacy_literal(self) -> None:
+        """local_review.j2 must not render the legacy literal."""
+        prompt = render_prompt(
+            "local_review.j2",
+            review_prompt_prefix="",
+            languages=[],
+            **FAKE_PATHS,
+        )
+        assert ".fix-die-repeat" not in prompt
+
+    def test_full_codebase_review_has_no_legacy_literal(self) -> None:
+        """full_codebase_review.j2 must not render the legacy literal."""
+        prompt = render_prompt(
+            "full_codebase_review.j2",
+            languages=[],
+            **FAKE_PATHS,
+        )
+        assert ".fix-die-repeat" not in prompt
+
+    def test_full_codebase_review_omits_history_reference(self) -> None:
+        """full_codebase_review.j2 must not reference prior review.md as history.
+
+        The single-pass mode no longer attaches review.md, so the template must
+        not instruct pi to consult it — otherwise pi sees a dangling path.
+        """
+        prompt = render_prompt(
+            "full_codebase_review.j2",
+            languages=[],
+            **FAKE_PATHS,
+        )
+        assert FAKE_PATHS["review_history_path"] not in prompt
+        assert "historical context" not in prompt
+
+    def test_resolve_review_issues_has_no_legacy_literal(self) -> None:
+        """resolve_review_issues.j2 must not render the legacy literal."""
+        prompt = render_prompt(
+            "resolve_review_issues.j2",
+            **FAKE_PATHS,
+        )
+        assert ".fix-die-repeat" not in prompt
+
+    def test_contextual_review_uncommitted_scope(self) -> None:
+        """contextual_review.j2 renders correctly for uncommitted scope."""
+        prompt = render_prompt(
+            "contextual_review.j2",
+            scope="uncommitted",
+            file_list=["dirty.py", "also_dirty.py"],
+            diff_context="Diff attached.",
+            default_branch="",
+            languages=["python"],
+            **FAKE_PATHS,
+        )
+        assert "uncommitted" in prompt.lower()
+        assert "dirty.py" in prompt
+        assert "also_dirty.py" in prompt
+        assert ".fix-die-repeat" not in prompt
+
+    def test_contextual_review_branch_scope(self) -> None:
+        """contextual_review.j2 renders correctly for branch scope."""
+        prompt = render_prompt(
+            "contextual_review.j2",
+            scope="branch",
+            file_list=["feature.py"],
+            diff_context="Diff attached.",
+            default_branch="main",
+            languages=[],
+            **FAKE_PATHS,
+        )
+        assert "branch" in prompt.lower()
+        assert "main" in prompt
+        assert "feature.py" in prompt
+
+    def test_contextual_review_includes_language_checks(self) -> None:
+        """contextual_review.j2 includes language-specific checks."""
+        prompt = render_prompt(
+            "contextual_review.j2",
+            scope="uncommitted",
+            file_list=["app.py"],
+            diff_context="Diff attached.",
+            default_branch="",
+            languages=["python"],
+            **FAKE_PATHS,
+        )
+        assert "LANGUAGE-SPECIFIC CHECKS" in prompt
+
+    def test_contextual_review_has_no_legacy_literal(self) -> None:
+        """contextual_review.j2 must not render the legacy literal."""
+        prompt = render_prompt(
+            "contextual_review.j2",
+            scope="uncommitted",
+            file_list=["f.py"],
+            diff_context="",
+            default_branch="",
+            languages=[],
+            **FAKE_PATHS,
+        )
+        assert ".fix-die-repeat" not in prompt
+
+    def test_pr_threads_header_has_no_legacy_literal(self) -> None:
+        """pr_threads_header.j2 must not render the legacy literal."""
+        prompt = render_prompt(
+            "pr_threads_header.j2",
+            unresolved_count=3,
+            pr_number=42,
+            pr_url="https://example.com/pr/42",
+            **FAKE_PATHS,
+        )
+        assert ".fix-die-repeat" not in prompt

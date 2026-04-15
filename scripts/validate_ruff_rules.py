@@ -61,7 +61,7 @@ def main() -> int:
         print("ERROR: Prohibited ruff rules found in per-file-ignores!")
         print("=" * 70)
         print()
-        print("The following rules MUST NEVER be ignored (see AGENTS.md):")
+        print("The following rules MUST NEVER be ignored:")
         for rule in sorted(PROHIBITED_RUFF_RULES):
             print(f"  - {rule}: {RATIONALE[rule]}")
         print()

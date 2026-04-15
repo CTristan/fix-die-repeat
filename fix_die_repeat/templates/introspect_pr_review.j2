@@ -2,6 +2,10 @@ I have attached a file containing PR review thread data from a completed fix-die
 This includes the original reviewer comments, whether the agent fixed or declined each issue,
 and the diff of changes made.
 
+Note: each in-scope thread has an outcome set in the input data. When outcome is
+"not-attempted", the agent did not run its fix loop on this thread (introspect-only mode) —
+focus your analysis on reviewer intent and lang_check_gap rather than agent behavior.
+
 Your task is to produce a YAML document that categorizes each PR thread for future prompt improvement.
 This data will be used later to identify gaps in the review and fix prompt templates.
 
@@ -13,9 +17,9 @@ For each thread, provide:
 - id: The exact GraphQL thread ID (copy from the input data)
 - title: A concise, descriptive title (max 10 words)
 - category: One of: security, error-handling, performance, correctness, code-quality, testing, documentation, configuration (or a new category if none fit)
-- outcome: "fixed" or "wont-fix"
+- outcome: "fixed", "wont-fix", or "not-attempted" (copy from the input data)
 - summary: 1-2 sentences describing what the reviewer flagged and what the agent did
-- reason: (only for wont-fix) Why the agent declined to fix
+- reason: (required only for wont-fix) Why the agent declined to fix. Omit for fixed and not-attempted.
 - relevance: 1-2 sentences assessing whether this type of issue could be caught earlier by improved review/fix prompt templates
 - lang_check_gap: If this issue is language-specific, would an existing lang_checks partial have caught it? If not, suggest a specific checklist item to add. Write "n/a" if the issue is language-agnostic.
 
@@ -30,7 +34,7 @@ threads:
   - id: "<thread_id>"
     title: "<concise title>"
     category: "<category>"
-    outcome: "<fixed|wont-fix>"
+    outcome: "<fixed|wont-fix|not-attempted>"
     summary: >
       <summary text>
     reason: >

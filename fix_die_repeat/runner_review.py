@@ -16,9 +16,13 @@ from fix_die_repeat.lang import filter_supported_languages, resolve_languages
 from fix_die_repeat.prompts import render_prompt
 from fix_die_repeat.utils import (
     PROHIBITED_RUFF_RULES,
+    ReviewScope,
     RuffConfigParseError,
+    determine_review_scope,
     find_prohibited_ruff_ignores,
+    get_all_tracked_files,
     get_changed_files,
+    get_default_branch,
     get_file_size,
     is_excluded_file,
     run_command,
@@ -188,8 +192,8 @@ class ReviewManager:
         review_prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix=review_prompt_prefix,
-            has_agents_file=(self.paths.project_root / "AGENTS.md").exists(),
             languages=sorted(languages),
+            **self.paths.template_context(),
         )
 
         returncode, _, _ = run_pi_callback(*pi_args, review_prompt)
@@ -198,12 +202,18 @@ class ReviewManager:
             self.logger.info("pi review failed. Treating as no issues found.")
             self.paths.review_current_file.write_text("NO_ISSUES")
 
-    def build_review_prompt(self, diff_size: int, pi_args: list[str]) -> str:
+    def build_review_prompt(
+        self, diff_size: int, pi_args: list[str], *, file_list_attached: bool = False
+    ) -> str:
         """Build review prompt based on diff size.
 
         Args:
             diff_size: Size of the diff in bytes
             pi_args: List to append diff file to if within threshold
+            file_list_attached: If True, caller is providing a scoped file list
+                separately (e.g. contextual review), so empty-diff should
+                instruct pi to review those files directly rather than force
+                NO_ISSUES.
 
         Returns:
             Review prompt prefix
@@ -213,7 +223,26 @@ class ReviewManager:
             self.logger.info("Review diff size exceeds threshold. Switching to PULL mode.")
             return (
                 f"The changes are too large to attach automatically ({diff_size} bytes). "
-                "You MUST use the 'read' tool to inspect '.fix-die-repeat/changes.diff'.\n"
+                f"You MUST use the 'read' tool to inspect '{self.paths.diff_file}'.\n"
+            )
+
+        if diff_size == 0:
+            if file_list_attached:
+                self.logger.info(
+                    "Review diff is empty or unavailable. "
+                    "Falling back to direct file review instructions.",
+                )
+                return (
+                    "No diff is available for this review (the diff could not be computed "
+                    "or is empty). Review the scoped file list directly. If no files are "
+                    "available to inspect, write exactly NO_ISSUES.\n"
+                )
+            self.logger.info("Review diff is empty. Instructing pi to write NO_ISSUES.")
+            return (
+                "No diff is available for this review (the diff could not be computed or "
+                "is empty), and no changed-file list is attached in this review mode. "
+                "Do not assume any changes are available to inspect. Write exactly "
+                "NO_ISSUES.\n"
             )
 
         self.logger.info(
@@ -222,7 +251,7 @@ class ReviewManager:
         )
         pi_args.append(f"@{self.paths.diff_file}")
         return (
-            "I have attached '.fix-die-repeat/changes.diff' which contains the changes "
+            f"I have attached '{self.paths.diff_file}' which contains the changes "
             "made in this session.\n"
         )
 
@@ -324,6 +353,157 @@ class ReviewManager:
         # Append review entry
         self.append_review_entry(iteration)
 
+    def run_full_codebase_review(
+        self,
+        iteration: int,
+        run_pi_callback: Callable[..., tuple[int, str, str]],
+    ) -> None:
+        """Run a single report-only review pass over the entire tracked codebase.
+
+        This is a single-pass operation: ``review.md`` is overwritten with the
+        current run's findings (no ``## Iteration N`` stacking, no historical
+        context passed to pi).
+
+        Args:
+            iteration: Current iteration number (unused in single-pass mode,
+                kept for interface parity with ``run_local_review``).
+            run_pi_callback: Function to run pi (from PiRunner)
+
+        """
+        del iteration
+        self.logger.info("[Step 4] Full-codebase review — collecting tracked files...")
+
+        tracked_files = get_all_tracked_files(self.project_root)
+        self.logger.info("[Step 4] Found %s tracked file(s)", len(tracked_files))
+
+        # Clear any stale diff so other code paths don't accidentally use it.
+        self.paths.diff_file.write_text("")
+
+        # Truncate review.md: single-pass mode always overwrites, never appends.
+        self.paths.review_file.write_text("")
+        self.paths.review_current_file.unlink(missing_ok=True)
+
+        languages = resolve_languages(tracked_files, self.settings.languages)
+        languages = filter_supported_languages(languages)
+
+        pi_args = ["-p", "--tools", "read,write,grep,find,ls"]
+
+        review_prompt = render_prompt(
+            "full_codebase_review.j2",
+            languages=sorted(languages),
+            **self.paths.template_context(),
+        )
+
+        self.logger.info("[Step 5] Running pi to audit full codebase...")
+        returncode, _, _ = run_pi_callback(*pi_args, review_prompt)
+
+        if returncode != 0:
+            self.logger.info("pi review failed. Treating as no issues found.")
+            self.paths.review_current_file.write_text("NO_ISSUES")
+
+        # Copy the pi output verbatim into review.md (no iteration headers).
+        if self.paths.review_current_file.exists():
+            content = self.paths.review_current_file.read_text()
+            if content.strip() and content.strip() != "NO_ISSUES":
+                self.paths.review_file.write_text(content)
+            else:
+                self.paths.review_file.write_text("NO_ISSUES\n")
+        else:
+            self.paths.review_file.write_text("NO_ISSUES\n")
+
+    def run_contextual_review(
+        self,
+        iteration: int,
+        run_pi_callback: Callable[..., tuple[int, str, str]],
+    ) -> None:
+        """Run a contextual review scoped to changed files.
+
+        Determines scope automatically:
+        - UNCOMMITTED: reviews staged/unstaged/untracked changes
+        - BRANCH: reviews files changed from the default branch
+        - FULL: delegates to ``run_full_codebase_review``
+
+        Args:
+            iteration: Current iteration number
+            run_pi_callback: Function to run pi (from PiRunner)
+
+        """
+        scope, files = determine_review_scope(self.project_root)
+
+        if scope == ReviewScope.FULL:
+            self.run_full_codebase_review(iteration, run_pi_callback)
+            return
+
+        self.logger.info(
+            "[Step 4] Contextual review (%s) — %d file(s) in scope",
+            scope.value,
+            len(files),
+        )
+
+        # Truncate review.md: single-pass mode always overwrites, never appends.
+        self.paths.review_file.write_text("")
+        self.paths.review_current_file.unlink(missing_ok=True)
+
+        # Generate diff
+        default_branch = ""
+        if scope == ReviewScope.UNCOMMITTED:
+            diff_content = self.generate_diff("")
+            diff_content = self.add_untracked_files_diff(diff_content)
+        else:
+            # BRANCH scope: diff from merge-base
+            default_branch = get_default_branch(self.project_root) or ""
+            merge_base = ""
+            if default_branch:
+                returncode, stdout, _ = run_command(
+                    f"git merge-base HEAD {default_branch}",
+                    cwd=self.project_root,
+                    check=False,
+                )
+                merge_base = stdout.strip() if returncode == 0 else ""
+            if merge_base:
+                diff_content = self.generate_diff(merge_base)
+                diff_content = self.add_untracked_files_diff(diff_content)
+            else:
+                diff_content = ""
+
+        self.paths.diff_file.write_text(diff_content)
+        diff_size = get_file_size(self.paths.diff_file)
+
+        # Resolve languages from changed files
+        languages = resolve_languages(files, self.settings.languages)
+        languages = filter_supported_languages(languages)
+
+        # Build pi args and diff context
+        pi_args = ["-p", "--tools", "read,write,grep,find,ls"]
+        diff_context = self.build_review_prompt(diff_size, pi_args, file_list_attached=True)
+
+        review_prompt = render_prompt(
+            "contextual_review.j2",
+            scope=scope.value,
+            file_list=files,
+            diff_context=diff_context,
+            default_branch=default_branch,
+            languages=sorted(languages),
+            **self.paths.template_context(),
+        )
+
+        self.logger.info("[Step 5] Running pi to review scoped changes...")
+        returncode, _, _ = run_pi_callback(*pi_args, review_prompt)
+
+        if returncode != 0:
+            self.logger.info("pi review failed. Treating as no issues found.")
+            self.paths.review_current_file.write_text("NO_ISSUES")
+
+        # Copy the pi output verbatim into review.md (no iteration headers).
+        if self.paths.review_current_file.exists():
+            content = self.paths.review_current_file.read_text()
+            if content.strip() and content.strip() != "NO_ISSUES":
+                self.paths.review_file.write_text(content)
+            else:
+                self.paths.review_file.write_text("NO_ISSUES\n")
+        else:
+            self.paths.review_file.write_text("NO_ISSUES\n")
+
     def check_prohibited_ruff_ignores(self) -> None:
         """Check for prohibited ruff rules in per-file-ignores.
 
@@ -338,7 +518,7 @@ class ReviewManager:
         if not pyproject_path.exists():
             return
 
-        # Prohibited rules (see AGENTS.md)
+        # Prohibited rules
         try:
             violations = find_prohibited_ruff_ignores(pyproject_path, PROHIBITED_RUFF_RULES)
         except RuffConfigParseError as exc:
@@ -351,7 +531,7 @@ class ReviewManager:
             self.logger.error(separator)
             self.logger.error("CRITICAL: Prohibited ruff rules found in per-file-ignores!")
             self.logger.error(separator)
-            self.logger.error("The following rules MUST NEVER be ignored (see AGENTS.md):")
+            self.logger.error("The following rules MUST NEVER be ignored:")
             for rule in sorted(PROHIBITED_RUFF_RULES):
                 self.logger.error("  - %s: NEVER IGNORE", rule)
             self.logger.error("")

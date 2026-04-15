@@ -83,6 +83,68 @@ class TestCliMain:
         assert "--pr-review-introspect" in result.output
         assert "Enable PR review mode with prompt introspection" in result.output
 
+    def test_cli_with_contextual_review(self) -> None:
+        """Test CLI help exposes --contextual-review."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--help"])
+        assert "--contextual-review" in result.output
+        assert "Smart contextual review" in result.output
+
+    def test_cli_with_full_codebase_review(self) -> None:
+        """Test CLI help exposes --full-codebase-review."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--help"])
+        assert "--full-codebase-review" in result.output
+        assert "Audit the entire codebase" in result.output
+
+    def test_cli_with_pr_threads_introspect_only(self) -> None:
+        """Test CLI help exposes --pr-threads-introspect-only."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--help"])
+        assert "--pr-threads-introspect-only" in result.output
+        assert "unresolved review threads" in result.output
+
+    @pytest.mark.parametrize(
+        "flag",
+        ["--full-codebase-review", "--pr-threads-introspect-only", "--contextual-review"],
+    )
+    def test_standalone_modes_skip_check_cmd(
+        self,
+        flag: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Standalone modes must not require or resolve a check command."""
+        original_paths = config.Paths
+
+        def mock_paths(_project_root: Path | None = None) -> config.Paths:
+            return original_paths(project_root=tmp_path)
+
+        monkeypatch.setattr(config, "Paths", mock_paths)
+
+        # Ensure no check command is available anywhere
+        monkeypatch.delenv("FDR_CHECK_CMD", raising=False)
+
+        resolve_called = False
+        original_resolve = cli_module.resolve_check_cmd
+
+        def spy_resolve(**kwargs: object) -> str | None:
+            nonlocal resolve_called
+            resolve_called = True
+            return original_resolve(**kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(cli_module, "resolve_check_cmd", spy_resolve)
+        monkeypatch.setattr(cli_module, "validate_check_cmd_or_exit", lambda _cmd: None)
+
+        # Mock PiRunner.run so we don't actually run anything
+        monkeypatch.setattr(runner.PiRunner, "run", lambda _self: 0)
+
+        cli_runner = CliRunner()
+        result = cli_runner.invoke(main, [flag], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        assert not resolve_called, f"resolve_check_cmd should not be called with {flag}"
+
     def test_cli_with_archive_artifacts(self) -> None:
         """Test CLI with archive-artifacts flag."""
         runner = CliRunner()
@@ -264,8 +326,34 @@ class TestBuildCliOptions:
         assert options.no_compact is False
         assert options.pr_review is False
         assert options.pr_review_introspect is False
+        assert options.full_codebase_review is False
+        assert options.pr_threads_introspect_only is False
         assert options.test_model is None
         assert options.debug is False
+
+    def test_contextual_review_propagates_to_settings(self) -> None:
+        """--contextual-review propagates into Settings."""
+        kwargs: CliKwargs = {"contextual_review": True}
+        options = _build_cli_options(kwargs)
+        settings = config.get_settings(options)
+        assert options.contextual_review is True
+        assert settings.contextual_review is True
+
+    def test_full_codebase_review_propagates_to_settings(self) -> None:
+        """--full-codebase-review propagates into Settings."""
+        kwargs: CliKwargs = {"full_codebase_review": True}
+        options = _build_cli_options(kwargs)
+        settings = config.get_settings(options)
+        assert options.full_codebase_review is True
+        assert settings.full_codebase_review is True
+
+    def test_pr_threads_introspect_only_propagates_to_settings(self) -> None:
+        """--pr-threads-introspect-only propagates into Settings."""
+        kwargs: CliKwargs = {"pr_threads_introspect_only": True}
+        options = _build_cli_options(kwargs)
+        settings = config.get_settings(options)
+        assert options.pr_threads_introspect_only is True
+        assert settings.pr_threads_introspect_only is True
 
     def test_pr_review_introspect_implies_pr_review(self) -> None:
         """Test that --pr-review-introspect flag implies --pr-review."""

@@ -177,7 +177,9 @@ fix_die_repeat/
 
 ## State Files
 
-All runtime state is stored in `.fix-die-repeat/` (automatically gitignored):
+All runtime state is stored outside the target repo, under
+`~/.fix-die-repeat/repos/<basename>-<8charhash>/` (override via `FDR_HOME`).
+Nothing is written inside the repo and `.gitignore` is never modified.
 
 | File | Purpose |
 |------|----------|
@@ -198,8 +200,3 @@ All runtime state is stored in `.fix-die-repeat/` (automatically gitignored):
 | `.pr_thread_ids_in_scope` | Thread IDs from the original PR fetch |
 | `.resolved_threads` | Thread IDs pi claimed to have fixed |
 
----
-
-## Coding Guidelines
-
-For detailed coding guidelines, architecture decisions, and policies (ruff rules, test configuration, file size limits), see [AGENTS.md](AGENTS.md).

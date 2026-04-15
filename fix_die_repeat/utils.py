@@ -1,5 +1,6 @@
 """Utility functions for fix-die-repeat."""
 
+import enum
 import fnmatch
 import hashlib
 import importlib.metadata
@@ -17,12 +18,28 @@ from rich.logging import RichHandler
 
 from fix_die_repeat.messages import build_large_file_warning
 
+DEFAULT_EXCLUDE_PATTERNS: list[str] = [
+    "*.lock",
+    "*-lock.json",
+    "*-lock.yaml",
+    "go.sum",
+    "*.min.*",
+]
+
+
+def _resolve_exclude_patterns(exclude_patterns: list[str] | None) -> list[str]:
+    """Return defaults when None; preserve an explicit empty list as 'no exclusions'."""
+    if exclude_patterns is None:
+        return DEFAULT_EXCLUDE_PATTERNS
+    return exclude_patterns
+
+
 console = Console()
 LOG_FORMAT = "[%(asctime)s] [fdr] [%(levelname)s] %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 LOGGER_NAME = "fix_die_repeat"
 
-# Prohibited ruff rules that must NEVER be ignored (see AGENTS.md)
+# Prohibited ruff rules that must NEVER be ignored
 PROHIBITED_RUFF_RULES = {"C901", "PLR0913", "PLR2004", "PLC0415"}
 
 
@@ -291,13 +308,7 @@ def get_changed_files(
         List of changed file paths (relative to project root)
 
     """
-    exclude_patterns = exclude_patterns or [
-        "*.lock",
-        "*-lock.json",
-        "*-lock.yaml",
-        "go.sum",
-        "*.min.*",
-    ]
+    exclude_patterns = _resolve_exclude_patterns(exclude_patterns)
 
     files = _collect_git_files(project_root)
 
@@ -315,6 +326,221 @@ def get_changed_files(
             result.append(f)
 
     return result
+
+
+def get_all_tracked_files(
+    project_root: Path,
+    exclude_patterns: list[str] | None = None,
+) -> list[str]:
+    """Get all files tracked by git (for full-codebase review).
+
+    Args:
+        project_root: Project root directory
+        exclude_patterns: Patterns to exclude
+
+    Returns:
+        Sorted list of tracked file paths relative to project root
+
+    """
+    exclude_patterns = _resolve_exclude_patterns(exclude_patterns)
+
+    returncode, stdout, _ = run_command(
+        "git ls-files",
+        cwd=project_root,
+        check=False,
+    )
+    if returncode != 0:
+        return []
+
+    result = []
+    for f in sorted(stdout.strip().split("\n")):
+        if not f or f.startswith(".fix-die-repeat"):
+            continue
+        file_path = project_root / f
+        if not file_path.is_file():
+            continue
+        if not _should_exclude_file(file_path.name, exclude_patterns):
+            result.append(f)
+
+    return result
+
+
+class ReviewScope(enum.Enum):
+    """Scope tiers for contextual review."""
+
+    UNCOMMITTED = "uncommitted"
+    BRANCH = "branch"
+    FULL = "full"
+
+
+def get_default_branch(project_root: Path) -> str | None:
+    """Detect the repository's default branch.
+
+    Tries ``git symbolic-ref refs/remotes/origin/HEAD`` first, then falls
+    back to checking if ``main`` or ``master`` exists locally.
+
+    Args:
+        project_root: Project root directory
+
+    Returns:
+        Branch name or None if not determinable
+
+    """
+    # Try remote HEAD symbolic ref
+    returncode, stdout, _ = run_command(
+        "git symbolic-ref refs/remotes/origin/HEAD",
+        cwd=project_root,
+        check=False,
+    )
+    if returncode == 0 and stdout.strip():
+        # Strip refs/remotes/origin/ prefix and return as origin/<branch>
+        # so downstream git commands work even without a local branch.
+        ref = stdout.strip()
+        prefix = "refs/remotes/origin/"
+        if ref.startswith(prefix):
+            return f"origin/{ref[len(prefix) :]}"
+
+    # Fall back to checking local branches
+    for branch in ("main", "master"):
+        returncode, _, _ = run_command(
+            f"git rev-parse --verify {branch}",
+            cwd=project_root,
+            check=False,
+        )
+        if returncode == 0:
+            return branch
+
+    return None
+
+
+def get_branch_changed_files(
+    project_root: Path,
+    default_branch: str,
+    exclude_patterns: list[str] | None = None,
+) -> list[str]:
+    """Get files changed on the current branch relative to the default branch.
+
+    Args:
+        project_root: Project root directory
+        default_branch: Default branch reference to compare against, such as a
+            local branch name like ``main``/``master`` or a remote-tracking ref
+            like ``origin/main``
+        exclude_patterns: Patterns to exclude
+
+    Returns:
+        Sorted list of changed file paths relative to project root
+
+    """
+    exclude_patterns = _resolve_exclude_patterns(exclude_patterns)
+
+    # Find the merge base
+    returncode, stdout, _ = run_command(
+        f"git merge-base HEAD {default_branch}",
+        cwd=project_root,
+        check=False,
+    )
+    if returncode != 0:
+        return []
+
+    merge_base = stdout.strip()
+
+    # Get changed files
+    returncode, stdout, _ = run_command(
+        f"git diff --name-only {merge_base} HEAD",
+        cwd=project_root,
+        check=False,
+    )
+    if returncode != 0:
+        return []
+
+    result = []
+    for f in sorted(stdout.strip().split("\n")):
+        if not f or f.startswith(".fix-die-repeat"):
+            continue
+        file_path = project_root / f
+        if not file_path.is_file():
+            continue
+        if not _should_exclude_file(file_path.name, exclude_patterns):
+            result.append(f)
+
+    return result
+
+
+def determine_review_scope(project_root: Path) -> tuple[ReviewScope, list[str]]:
+    """Determine the appropriate review scope based on git state.
+
+    Priority:
+    1. Uncommitted changes (staged/unstaged/untracked) → UNCOMMITTED
+    2. On a feature branch with commits vs default branch → BRANCH
+    3. Otherwise → FULL
+
+    Args:
+        project_root: Project root directory
+
+    Returns:
+        Tuple of (scope, list of files in scope). FULL returns empty list.
+
+    """
+    logger = logging.getLogger(LOGGER_NAME)
+
+    # Tier 1: uncommitted changes.
+    # Scope detection uses the raw (unfiltered) git set so lockfile-only diffs
+    # still trigger contextual review instead of falling through to FULL and
+    # running an unexpected full-codebase audit. Fetch raw once, then filter
+    # in Python to avoid a redundant git subprocess call.
+    exclude_patterns = _resolve_exclude_patterns(None)
+    raw_changed = get_changed_files(project_root, exclude_patterns=[])
+    if raw_changed:
+        changed = [
+            f
+            for f in raw_changed
+            if not _should_exclude_file((project_root / f).name, exclude_patterns)
+        ]
+        logger.info(
+            "Contextual review scope: UNCOMMITTED "
+            "(%d file(s) with local changes, %d in scope after exclusions)",
+            len(raw_changed),
+            len(changed),
+        )
+        return ReviewScope.UNCOMMITTED, changed
+
+    # Tier 2: branch changes vs default
+    returncode, stdout, _ = run_command(
+        "git branch --show-current",
+        cwd=project_root,
+        check=False,
+    )
+    current_branch = stdout.strip() if returncode == 0 else ""
+
+    if current_branch:
+        default_branch = get_default_branch(project_root)
+        # Normalize origin/<name> to <name> for comparison so a user on the
+        # local default branch isn't misclassified when origin/HEAD is set.
+        default_branch_local = (
+            default_branch.removeprefix("origin/") if default_branch else default_branch
+        )
+        if default_branch and current_branch != default_branch_local:
+            raw_branch_files = get_branch_changed_files(
+                project_root, default_branch, exclude_patterns=[]
+            )
+            if raw_branch_files:
+                branch_files = [
+                    f
+                    for f in raw_branch_files
+                    if not _should_exclude_file((project_root / f).name, exclude_patterns)
+                ]
+                logger.info(
+                    "Contextual review scope: BRANCH "
+                    "(%d file(s) changed vs %s, %d in scope after exclusions)",
+                    len(raw_branch_files),
+                    default_branch,
+                    len(branch_files),
+                )
+                return ReviewScope.BRANCH, branch_files
+
+    # Tier 3: full codebase
+    logger.info("Contextual review scope: FULL (no scoped changes detected)")
+    return ReviewScope.FULL, []
 
 
 def get_file_size(path: Path) -> int:
@@ -344,7 +570,8 @@ def get_file_line_count(path: Path) -> int:
 
     """
     try:
-        return sum(1 for _ in path.open(encoding="utf-8", errors="ignore"))
+        with path.open(encoding="utf-8", errors="ignore") as f:
+            return sum(1 for _ in f)
     except OSError:
         return 0
 
@@ -388,13 +615,7 @@ def is_excluded_file(filename: str, exclude_patterns: list[str] | None = None) -
         True if file should be excluded
 
     """
-    exclude_patterns = exclude_patterns or [
-        "*.lock",
-        "*-lock.json",
-        "*-lock.yaml",
-        "go.sum",
-        "*.min.*",
-    ]
+    exclude_patterns = _resolve_exclude_patterns(exclude_patterns)
 
     return any(fnmatch.fnmatch(filename.lower(), pattern.lower()) for pattern in exclude_patterns)
 

@@ -10,17 +10,26 @@ Full reference for [Fix. Die. Repeat.](../README.md) — CLI options, configurat
 Usage: fix-die-repeat [OPTIONS]
 
 Options:
-  -c, --check-cmd TEXT      Command to run checks (default: auto-detected)
-  -n, --max-iters INTEGER   Maximum loop iterations (default: 10)
-  -m, --model TEXT          Override model selection (e.g., anthropic/claude-sonnet-4-5)
-  --max-pr-threads INTEGER  Maximum PR threads to process per iteration (default: 5)
-  --archive-artifacts       Archive existing artifacts to a timestamped folder
-  --no-compact              Skip automatic compaction of large artifacts
-  --pr-review               Enable PR review mode
-  --test-model TEXT         Test model compatibility before running (exits after test)
-  -d, --debug               Enable debug mode (timestamped session logs and verbose logging)
-  --version                 Show the version and exit.
-  --help                    Show this message and exit.
+  -c, --check-cmd TEXT            Command to run checks (default: auto-detected)
+  -n, --max-iters INTEGER         Maximum loop iterations (default: 10)
+  -m, --model TEXT                Override model selection (e.g., anthropic/claude-sonnet-4-5)
+  --max-pr-threads INTEGER        Maximum PR threads to process per iteration (default: 5)
+  --archive-artifacts             Archive existing artifacts to a timestamped folder
+  --no-compact                    Skip automatic compaction of large artifacts
+  --pr-review                     Enable PR review mode
+  --pr-review-introspect          Enable PR review mode with prompt introspection (implies --pr-review)
+  --contextual-review             Smart contextual review (report-only). Reviews uncommitted
+                                  changes, branch diff vs default branch, or full codebase
+                                  if neither applies.
+  --full-codebase-review          Audit the entire codebase instead of a diff. Report-only:
+                                  never attempts fixes. Ignores --pr-review if also set.
+  --pr-threads-introspect-only    Fetch the PR's unresolved review threads, run introspection
+                                  on them, then exit. Does not run checks, local review, or
+                                  attempt fixes.
+  --test-model TEXT               Test model compatibility before running (exits after test)
+  -d, --debug                     Enable debug mode (timestamped session logs and verbose logging)
+  --version                       Show the version and exit.
+  --help                          Show this message and exit.
 ```
 
 ## Environment Variables
@@ -37,6 +46,11 @@ All options can be set via `FDR_`-prefixed environment variables:
 | `FDR_ARCHIVE_ARTIFACTS` | Archive existing artifacts | `0` |
 | `FDR_COMPACT_ARTIFACTS` | Auto-compact large artifacts | `1` |
 | `FDR_PR_REVIEW` | Enable PR review mode | `0` |
+| `FDR_PR_REVIEW_INTROSPECT` | Enable PR review mode with prompt introspection | `0` |
+| `FDR_CONTEXTUAL_REVIEW` | Smart contextual review (report-only) | `0` |
+| `FDR_FULL_CODEBASE_REVIEW` | Audit the entire codebase (report-only) | `0` |
+| `FDR_PR_THREADS_INTROSPECT_ONLY` | Fetch unresolved PR threads, introspect, then exit | `0` |
+| `FDR_HOME` | Base directory for central state (`~/.fix-die-repeat/`) | (unset) |
 | `FDR_DEBUG` | Enable debug mode | `0` |
 | `FDR_NTFY_ENABLED` | Enable ntfy notifications | `1` |
 | `FDR_NTFY_URL` | ntfy server URL | `http://localhost:2586` |
@@ -48,8 +62,8 @@ All options can be set via `FDR_`-prefixed environment variables:
 fix-die-repeat automatically finds your project's check command using this priority chain:
 
 1. **CLI flag / env var** (`-c` / `FDR_CHECK_CMD`)
-2. **Project config** (`.fix-die-repeat/config`)
-3. **System config** (`~/.config/fix-die-repeat/config`)
+2. **Project config** (`~/.fix-die-repeat/repos/<slug>/config`)
+3. **System config** (`~/.fix-die-repeat/config`)
 4. **Auto-detect** from project files
 5. **Interactive prompt**
 6. **Error** (non-interactive with no config)
@@ -73,12 +87,19 @@ fix-die-repeat automatically finds your project's check command using this prior
 
 ### Config Files
 
-**Project config** (`.fix-die-repeat/config`) — per-project, automatically gitignored:
+**Project config** (`~/.fix-die-repeat/repos/<slug>/config`) — per-project, stored
+in a central directory so no files are written inside the repo. The slug is
+`<project-directory-name>-<8charhash>`: the basename comes from the local
+project directory name, while the hash is computed from the git `origin`
+remote URL (or the absolute path if there is no remote). This means two clones
+of the same remote in differently named local directories will not share the
+same state dir. Override the base directory with `FDR_HOME` if you want state
+somewhere other than `~/.fix-die-repeat/`.
 ```toml
 check_cmd = "uv run pytest"
 ```
 
-**System config** (`~/.config/fix-die-repeat/config`) — shared across projects:
+**System config** (`~/.fix-die-repeat/config`) — shared across projects:
 ```toml
 check_cmd = "pytest"
 ```
@@ -140,6 +161,53 @@ Requirements: you must be on a branch with an open PR, and `gh auth status` must
 fix-die-repeat --pr-review --max-pr-threads 3
 ```
 
+### PR Review with Introspection
+
+```bash
+fix-die-repeat --pr-review-introspect
+```
+
+Implies `--pr-review` and additionally runs prompt introspection on the
+processed threads, analyzing real-world feedback to surface prompt-improvement
+opportunities.
+
+### PR Threads Introspect-Only
+
+```bash
+fix-die-repeat --pr-threads-introspect-only
+```
+
+Fetches the PR's unresolved review threads, runs introspection on them, and
+exits. Skips checks, local review, and fixes — useful when you only want the
+analysis without touching the code.
+
+---
+
+## Review-Only Modes
+
+These report-only modes never attempt fixes; they produce a review report
+and exit.
+
+### Contextual Review
+
+```bash
+fix-die-repeat --contextual-review
+```
+
+Smart scope detection:
+- **Uncommitted:** reviews staged, unstaged, and untracked changes
+- **Branch:** reviews the diff between the current branch and the default branch
+- **Full:** falls back to full-codebase review when neither applies
+
+### Full-Codebase Review
+
+```bash
+fix-die-repeat --full-codebase-review
+```
+
+Audits the entire codebase instead of a diff. Takes precedence over
+`--pr-review` if both are set.
+
 ---
 
 ## Debug Mode
@@ -148,7 +216,7 @@ fix-die-repeat --pr-review --max-pr-threads 3
 fix-die-repeat --debug
 ```
 
-Creates timestamped session logs in `.fix-die-repeat/` and enables verbose console output for troubleshooting.
+Creates timestamped session logs in `~/.fix-die-repeat/repos/<slug>/` and enables verbose console output for troubleshooting.
 
 ---
 

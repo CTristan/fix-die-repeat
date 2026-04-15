@@ -70,7 +70,7 @@ class PiRunner:
         self.consecutive_toolless_attempts = 0
         self._success_complete = False
 
-        # Ensure .fix-die-repeat directory exists before creating logger
+        # Ensure central state dir exists before creating logger
         self.paths.ensure_fdr_dir()
 
         # Determine session log path
@@ -431,6 +431,7 @@ class PiRunner:
             large_context_list=large_context_list,
             large_file_warning=large_file_warning,
             languages=sorted(languages),
+            **self.paths.template_context(),
         )
 
         self.logger.info("Running pi to fix errors (attempt %s)...", fix_attempt)
@@ -608,6 +609,21 @@ class PiRunner:
         # Step 6: Process review results
         self.process_review_results()
 
+    def _run_standalone_mode(self) -> int | None:
+        """Check for standalone modes that short-circuit the main loop.
+
+        Returns:
+            Exit code if a standalone mode was run, None to continue to the main loop.
+
+        """
+        if self.settings.pr_threads_introspect_only:
+            return self.run_pr_threads_introspect_only()
+        if self.settings.contextual_review:
+            return self.run_contextual_review_once()
+        if self.settings.full_codebase_review:
+            return self.run_full_codebase_review_once()
+        return None
+
     def run(self) -> int:
         """Run the main fix-die-repeat loop.
 
@@ -616,6 +632,11 @@ class PiRunner:
 
         """
         self.setup_run()
+
+        # Standalone modes short-circuit the fix-die-repeat loop.
+        standalone_result = self._run_standalone_mode()
+        if standalone_result is not None:
+            return standalone_result
 
         while True:
             self.iteration += 1
@@ -642,6 +663,238 @@ class PiRunner:
                 return self.complete_success()
 
         return 0
+
+    def run_full_codebase_review_once(self) -> int:
+        """Run a single report-only full-codebase review pass.
+
+        This mode never attempts fixes, so looping is pointless — any second
+        pass would re-discover the same issues. Runs pi exactly once over the
+        whole tracked codebase, overwrites review.md with the findings, and
+        prints them to the terminal so the user can see them directly.
+
+        Returns:
+            Exit code 0 on completion (success regardless of findings).
+
+        """
+        self.iteration = 1
+        self.logger.info("Full-codebase review (single pass, report-only).")
+        self.artifact_manager.check_and_compact_artifacts()
+
+        self.paths.review_current_file.unlink(missing_ok=True)
+        self.review_manager.run_full_codebase_review(self.iteration, self.run_pi_safe)
+
+        if not self.paths.review_current_file.exists():
+            self.logger.error(
+                "%s was not created by pi. Treating as no issues.",
+                self.paths.review_current_file,
+            )
+            self.paths.review_current_file.write_text("NO_ISSUES")
+            self.paths.review_file.write_text("NO_ISSUES\n")
+
+        review_content = (
+            self.paths.review_file.read_text() if self.paths.review_file.exists() else ""
+        )
+
+        if self.review_manager.has_no_review_issues(review_content):
+            self.logger.info("[Step 6B] No critical issues found.")
+        else:
+            critical_count = review_content.count("[CRITICAL]")
+            nit_count = review_content.count("[NIT]")
+            self.logger.info(
+                "[Step 6B] Full-codebase review complete: %s [CRITICAL], %s [NIT] finding(s).",
+                critical_count,
+                nit_count,
+            )
+            # Write raw findings to stdout (no log timestamp) for easy copy/paste.
+            sys.stdout.write("===== Full-codebase review findings =====\n")
+            sys.stdout.write(review_content)
+            if not review_content.endswith("\n"):
+                sys.stdout.write("\n")
+            sys.stdout.write("==========================================\n")
+            sys.stdout.flush()
+            self.logger.info("Findings saved to %s", self.paths.review_file)
+
+        self._success_complete = True
+        self.paths.review_current_file.unlink(missing_ok=True)
+        self.paths.start_sha_file.unlink(missing_ok=True)
+
+        duration = int(time.time() - self.script_start_time)
+        play_completion_sound()
+        if self.settings.ntfy_enabled:
+            send_ntfy_notification(
+                exit_code=0,
+                duration_str=format_duration(duration),
+                repo_name=self.paths.project_root.name,
+                ntfy_url=self.settings.ntfy_url,
+                logger=self.logger,
+            )
+        return 0
+
+    def run_contextual_review_once(self) -> int:
+        """Run a single report-only contextual review pass.
+
+        Auto-scopes to uncommitted changes, branch diff, or full codebase.
+        Never attempts fixes — runs pi exactly once over the scoped files,
+        overwrites review.md with the findings, and prints them to the
+        terminal.
+
+        Returns:
+            Exit code 0 on completion (success regardless of findings).
+
+        """
+        self.iteration = 1
+        self.logger.info("Contextual review (single pass, report-only).")
+        self.artifact_manager.check_and_compact_artifacts()
+
+        self.paths.review_current_file.unlink(missing_ok=True)
+        self.review_manager.run_contextual_review(self.iteration, self.run_pi_safe)
+
+        if not self.paths.review_current_file.exists():
+            self.logger.error(
+                "%s was not created by pi. Treating as no issues.",
+                self.paths.review_current_file,
+            )
+            self.paths.review_current_file.write_text("NO_ISSUES")
+            self.paths.review_file.write_text("NO_ISSUES\n")
+
+        review_content = (
+            self.paths.review_file.read_text() if self.paths.review_file.exists() else ""
+        )
+
+        if self.review_manager.has_no_review_issues(review_content):
+            self.logger.info("[Step 6B] No critical issues found.")
+        else:
+            critical_count = review_content.count("[CRITICAL]")
+            nit_count = review_content.count("[NIT]")
+            self.logger.info(
+                "[Step 6B] Contextual review complete: %s [CRITICAL], %s [NIT] finding(s).",
+                critical_count,
+                nit_count,
+            )
+            # Write raw findings to stdout (no log timestamp) for easy copy/paste.
+            sys.stdout.write("===== Contextual review findings =====\n")
+            sys.stdout.write(review_content)
+            if not review_content.endswith("\n"):
+                sys.stdout.write("\n")
+            sys.stdout.write("=======================================\n")
+            sys.stdout.flush()
+            self.logger.info("Findings saved to %s", self.paths.review_file)
+
+        self._success_complete = True
+        self.paths.review_current_file.unlink(missing_ok=True)
+        self.paths.start_sha_file.unlink(missing_ok=True)
+
+        duration = int(time.time() - self.script_start_time)
+        play_completion_sound()
+        if self.settings.ntfy_enabled:
+            send_ntfy_notification(
+                exit_code=0,
+                duration_str=format_duration(duration),
+                repo_name=self.paths.project_root.name,
+                ntfy_url=self.settings.ntfy_url,
+                logger=self.logger,
+            )
+        return 0
+
+    def run_pr_threads_introspect_only(self) -> int:
+        """Fetch unresolved PR threads and run introspection without attempting fixes.
+
+        Returns:
+            Exit code (0 on success, non-zero on failure)
+
+        """
+        self.logger.info("PR threads introspect-only mode: no fix loop, no review.")
+        pr_manager = self._get_pr_manager()
+        introspection_manager = self._get_introspection_manager()
+        if pr_manager is None or introspection_manager is None:
+            self.logger.error("Required managers not initialized; cannot run introspect-only mode.")
+            return 1
+
+        fetched = self._fetch_unresolved_pr_threads(pr_manager)
+        if fetched is None:
+            return 1
+
+        pr_info, unresolved = fetched
+        if not unresolved:
+            self.logger.info("No unresolved PR threads found. Nothing to introspect.")
+            return 0
+
+        self.logger.info(
+            "Found %s unresolved thread(s). Writing introspection inputs...",
+            len(unresolved),
+        )
+        self._write_introspect_only_inputs(pr_manager, pr_info, unresolved)
+
+        # Clear any stale diff from a prior run so introspect-only doesn't
+        # leak unrelated changes into the introspection YAML.
+        try:
+            if self.paths.diff_file.exists():
+                self.paths.diff_file.unlink()
+        except OSError:
+            self.logger.exception(
+                "Failed to clear stale diff file before introspection-only run: %s",
+                self.paths.diff_file,
+            )
+            return 1
+
+        try:
+            introspection_manager.run_introspection(
+                self.iteration, "", self.run_pi_safe, introspect_only=True
+            )
+        except Exception:
+            self.logger.exception("Introspection failed")
+            return 1
+
+        return 0
+
+    def _fetch_unresolved_pr_threads(
+        self, pr_manager: "PrReviewManager"
+    ) -> "tuple[ReviewPrInfo, list[dict]] | None":
+        """Fetch unresolved PR threads for the current branch.
+
+        Returns:
+            Tuple of (pr_info, unresolved_threads) on success, None on failure.
+
+        """
+        branch = pr_manager.get_branch_name()
+        if not branch:
+            self.logger.error("Not on a git branch. Cannot fetch PR threads.")
+            return None
+
+        returncode, _, _ = run_command("gh auth status", cwd=self.paths.project_root)
+        if returncode != 0:
+            self.logger.error("GitHub CLI not authenticated. Cannot fetch PR threads.")
+            return None
+
+        pr_info = pr_manager.get_pr_info(branch)
+        if not pr_info:
+            self.logger.error("No open PR found for branch %s.", branch)
+            return None
+
+        threads = pr_manager.fetch_pr_threads_gql(
+            pr_info.repo_owner, pr_info.repo_name, pr_info.number
+        )
+        if threads is None:
+            self.logger.error("Failed to fetch PR threads.")
+            return None
+
+        unresolved = [t for t in threads if not t.get("isResolved")]
+        return pr_info, unresolved
+
+    def _write_introspect_only_inputs(
+        self,
+        pr_manager: "PrReviewManager",
+        pr_info: "ReviewPrInfo",
+        unresolved: list[dict],
+    ) -> None:
+        """Persist the cumulative files that IntrospectionManager reads."""
+        formatted = pr_manager.format_pr_threads(unresolved, pr_info.number, pr_info.url)
+        self.paths.cumulative_pr_threads_content_file.write_text(formatted)
+
+        thread_ids = [str(t.get("id") or "") for t in unresolved if t.get("id")]
+        self.paths.cumulative_in_scope_threads_file.write_text("\n".join(thread_ids) + "\n")
+        # Ensure resolved file is empty so all threads register as not-attempted.
+        self.paths.cumulative_resolved_threads_file.write_text("")
 
     # Delegation methods for backward compatibility with tests
     # These methods forward to the appropriate manager classes
@@ -809,7 +1062,7 @@ class PiRunner:
 
             lines = self.paths.checks_log.read_text().splitlines()
             filtered_lines = [
-                "=== FILTERED CHECK OUTPUT (full log: .fix-die-repeat/checks.log, "
+                f"=== FILTERED CHECK OUTPUT (full log: {self.paths.checks_log}, "
                 f"{total_lines} lines) ===",
                 "",
                 "--- Error/failure lines with context ---",
@@ -1370,7 +1623,8 @@ class PiRunner:
         duration = int(end_time - self.script_start_time)
         self.logger.info(
             "[Step 7] Done! All checks passed and no review issues found. "
-            ".fix-die-repeat/review.md retained. Session log: %s",
+            "%s retained. Session log: %s",
+            self.paths.review_file,
             self.session_log,
         )
 
@@ -1419,7 +1673,10 @@ class PiRunner:
             pi_args.append(f"@{self.paths.review_recent_file}")
 
         # Build fix prompt
-        fix_prompt = render_prompt("resolve_review_issues.j2")
+        fix_prompt = render_prompt(
+            "resolve_review_issues.j2",
+            **self.paths.template_context(),
+        )
 
         returncode, _, _ = self.run_pi_safe(*pi_args, fix_prompt)
 
@@ -1431,7 +1688,7 @@ class PiRunner:
         with self.paths.review_file.open("a") as f:
             f.write(
                 f"### Iteration {self.iteration} - Resolution ({timestamp})\n"
-                f"- Fixes applied for .fix-die-repeat/review_current.md "
+                f"- Fixes applied for {self.paths.review_current_file} "
                 f"(attempt {fix_attempt}); verification pending.\n\n",
             )
 
@@ -1481,7 +1738,8 @@ class PiRunner:
 
         if not self.paths.review_current_file.exists():
             self.logger.error(
-                ".fix-die-repeat/review_current.md was not created by pi. This is unexpected.",
+                "%s was not created by pi. This is unexpected.",
+                self.paths.review_current_file,
             )
             sys.exit(1)
 
@@ -1489,15 +1747,18 @@ class PiRunner:
         review_content = self.paths.review_current_file.read_text()
 
         if self.review_manager.has_no_review_issues(review_content):
-            self.logger.info("[Step 6B] No issues found in .fix-die-repeat/review_current.md.")
+            self.logger.info(
+                "[Step 6B] No issues found in %s.",
+                self.paths.review_current_file,
+            )
             # Set a flag to call complete_success after the loop
             self._success_complete = True
             return
 
         # Issues found - fix them
         self.logger.info(
-            "[Step 6A] Issues found in .fix-die-repeat/review_current.md. "
-            "Running pi to fix them...",
+            "[Step 6A] Issues found in %s. Running pi to fix them...",
+            self.paths.review_current_file,
         )
 
         fix_attempt = 1
@@ -1702,11 +1963,18 @@ class PiRunner:
         if diff_size > self.settings.auto_attach_threshold:
             return (
                 f"The changes are too large to attach automatically ({diff_size} bytes). "
-                "You MUST use the 'read' tool to inspect '.fix-die-repeat/changes.diff'.\n"
+                f"You MUST use the 'read' tool to inspect '{self.paths.diff_file}'.\n"
+            )
+        if diff_size == 0:
+            return (
+                "No diff is available for this review (the diff could not be computed or "
+                "is empty), and no changed-file list is attached in this review mode. "
+                "Do not assume any changes are available to inspect. Write exactly "
+                "NO_ISSUES.\n"
             )
         pi_args.append(f"@{self.paths.diff_file}")
         return (
-            "I have attached '.fix-die-repeat/changes.diff' which contains the changes "
+            f"I have attached '{self.paths.diff_file}' which contains the changes "
             "made in this session.\n"
         )
 
@@ -1744,8 +2012,8 @@ class PiRunner:
         review_prompt = render_prompt(
             "local_review.j2",
             review_prompt_prefix=review_prompt_prefix,
-            has_agents_file=(self.paths.project_root / "AGENTS.md").exists(),
             languages=sorted(languages),
+            **self.paths.template_context(),
         )
 
         returncode, _, _ = run_pi_callback(*pi_args, review_prompt)

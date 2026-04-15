@@ -1,5 +1,6 @@
 """Tests for detection module."""
 
+import os
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -427,19 +428,17 @@ class TestIsInteractive:
 class TestGetSystemConfigPath:
     """Tests for get_system_config_path function."""
 
-    def test_default_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test returns ~/.config/fix-die-repeat/config by default."""
-        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    def test_default_path(self) -> None:
+        """Returns <FDR_HOME>/config (FDR_HOME is set by the autouse fixture)."""
+        fdr_home = Path(os.environ["FDR_HOME"])
         path = get_system_config_path()
-        expected = str(Path("~/.config/fix-die-repeat/config").expanduser())
-        assert path == expected
+        assert path == str(fdr_home / "config")
 
-    def test_xdg_config_home(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test respects XDG_CONFIG_HOME env var."""
-        monkeypatch.setenv("XDG_CONFIG_HOME", "/custom/config")
+    def test_respects_fdr_home_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Explicit FDR_HOME override is reflected in the returned path."""
+        monkeypatch.setenv("FDR_HOME", "/custom/fdr")
         path = get_system_config_path()
-        expected = "/custom/config/fix-die-repeat/config"
-        assert path == expected
+        assert path == "/custom/fdr/config"
 
 
 class TestResolveCheckCmd:

@@ -12,6 +12,7 @@ from pathlib import Path
 import click
 from rich.console import Console
 
+from fix_die_repeat.config import _central_root
 from fix_die_repeat.messages import (
     auto_detect_confirm_prompt,
     auto_detect_found_message,
@@ -376,14 +377,14 @@ def is_interactive() -> bool:
 def get_system_config_path() -> str:
     """Get the path to the system-wide config file.
 
-    Respects XDG_CONFIG_HOME on Linux, uses ~/.config on macOS and other systems.
+    Returns ``<FDR_HOME>/config``, where ``FDR_HOME`` defaults to
+    ``~/.fix-die-repeat``.
 
     Returns:
         Path to system config file
 
     """
-    config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return str(config_home / "fix-die-repeat" / "config")
+    return str(_central_root() / "config")
 
 
 def _persist_command(project_config_path: str | os.PathLike[str], command: str) -> None:
@@ -457,8 +458,8 @@ def resolve_check_cmd(
 
     Priority order:
     1. CLI flag/env var (cli_check_cmd) - already set in Settings
-    2. Project config (.fix-die-repeat/config)
-    3. System config (~/.config/fix-die-repeat/config) - with validation
+    2. Project config (<FDR_HOME>/repos/<slug>/config)
+    3. System config (<FDR_HOME>/config) - with validation
     4. Auto-detect from project files
     5. Interactive prompt
     6. No TTY - hard error
@@ -503,5 +504,7 @@ def resolve_check_cmd(
         return _handle_prompt(project_config_path)
 
     # Priority 6: No TTY - hard error
-    console.print(f"[red]{no_tty_error_message()}[/red]")
+    console.print(
+        f"[red]{no_tty_error_message(str(project_config_path), system_config_path)}[/red]"
+    )
     sys.exit(1)

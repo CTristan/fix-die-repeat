@@ -17,7 +17,50 @@ from fix_die_repeat.utils import is_running_in_dev_mode
 console = Console()
 
 
-@click.command()
+_MAIN_HELP = (
+    "Automated check, review, and fix loop using pi.\n"
+    "\n"
+    "\b\n"
+    "Environment variables:\n"
+    "  FDR_CHECK_CMD, FDR_MAX_ITERS, FDR_MODEL, FDR_MAX_PR_THREADS,\n"
+    "  FDR_ARCHIVE_ARTIFACTS, FDR_COMPACT_ARTIFACTS,\n"
+    "  FDR_PR_REVIEW, FDR_PR_REVIEW_INTROSPECT,\n"
+    "  FDR_CONTEXTUAL_REVIEW, FDR_FULL_CODEBASE_REVIEW,\n"
+    "  FDR_PR_THREADS_INTROSPECT_ONLY,\n"
+    "  FDR_TEST_MODEL, FDR_DEBUG, FDR_LANGUAGES,\n"
+    "  FDR_HOME (base directory for state; defaults to ~/.fix-die-repeat),\n"
+    "  FDR_NTFY_ENABLED (default: 1),\n"
+    "  FDR_NTFY_URL (default: http://localhost:2586)\n"
+    "\n"
+    "\b\n"
+    "Examples:\n"
+    "  # Run with default settings\n"
+    "  fix-die-repeat\n"
+    "\b\n"
+    "  # Use a custom check command\n"
+    '  fix-die-repeat -c "make test"\n'
+    "\b\n"
+    "  # Test a model before running\n"
+    "  fix-die-repeat --test-model anthropic/claude-sonnet-4-5\n"
+    "\b\n"
+    "  # Enable PR review mode\n"
+    "  fix-die-repeat --pr-review\n"
+    "\b\n"
+    "  # PR review mode with prompt introspection\n"
+    "  fix-die-repeat --pr-review-introspect\n"
+    "\b\n"
+    "  # Smart contextual review (uncommitted > branch > full codebase)\n"
+    "  fix-die-repeat --contextual-review\n"
+    "\b\n"
+    "  # Audit the entire codebase (report-only, no fixes attempted)\n"
+    "  fix-die-repeat --full-codebase-review\n"
+    "\b\n"
+    "  # Fetch and introspect unresolved PR review threads, then exit\n"
+    "  fix-die-repeat --pr-threads-introspect-only\n"
+)
+
+
+@click.command(help=_MAIN_HELP)
 @click.option(
     "-c",
     "--check-cmd",
@@ -67,6 +110,39 @@ console = Console()
     envvar="FDR_PR_REVIEW_INTROSPECT",
 )
 @click.option(
+    "--contextual-review",
+    is_flag=True,
+    help=(
+        "Smart contextual review (report-only). Reviews uncommitted changes, "
+        "branch diff vs default branch, or full codebase if neither applies. "
+        "If multiple standalone-mode flags are set, precedence is: "
+        "--pr-threads-introspect-only > --contextual-review > --full-codebase-review."
+    ),
+    envvar="FDR_CONTEXTUAL_REVIEW",
+)
+@click.option(
+    "--full-codebase-review",
+    is_flag=True,
+    help=(
+        "Audit the entire codebase instead of a diff. Report-only: "
+        "never attempts fixes. Ignores --pr-review if also set. "
+        "Lowest precedence among standalone-mode flags: "
+        "--pr-threads-introspect-only and --contextual-review both win over this."
+    ),
+    envvar="FDR_FULL_CODEBASE_REVIEW",
+)
+@click.option(
+    "--pr-threads-introspect-only",
+    is_flag=True,
+    help=(
+        "Fetch the PR's unresolved review threads, run introspection on them, "
+        "then exit. Does not run checks, local review, or attempt fixes. "
+        "Highest precedence among standalone-mode flags: wins over "
+        "--contextual-review and --full-codebase-review."
+    ),
+    envvar="FDR_PR_THREADS_INTROSPECT_ONLY",
+)
+@click.option(
     "--test-model",
     help="Test model compatibility before running (exits after test)",
     envvar="FDR_TEST_MODEL",
@@ -80,34 +156,14 @@ console = Console()
 )
 @click.version_option()
 def main(**kwargs: str | int | bool | None) -> None:
-    r"""Automated check, review, and fix loop using pi.
+    """Run the automated check, review, and fix loop.
 
-    \f
     fix-die-repeat is an automated tool that:
     1. Runs your check command (CI/tests)
     2. If checks fail, uses pi to fix the errors
     3. If checks pass, reviews the changes using pi
     4. If review finds issues, fixes them
     5. Repeats until all checks pass and no issues are found
-
-    Environment variables:
-      FDR_CHECK_CMD, FDR_MAX_ITERS, FDR_MODEL, FDR_MAX_PR_THREADS,
-      FDR_ARCHIVE_ARTIFACTS, FDR_COMPACT_ARTIFACTS, FDR_PR_REVIEW, FDR_DEBUG,
-      FDR_NTFY_ENABLED (default: 1), FDR_NTFY_URL (default: http://localhost:2586)
-
-    Examples:
-      # Run with default settings
-      fix-die-repeat
-
-      # Use a custom check command
-      fix-die-repeat -c "make test"
-
-      # Test a model before running
-      fix-die-repeat --test-model anthropic/claude-sonnet-4-5
-
-      # Enable PR review mode
-      fix-die-repeat --pr-review
-
     """
     debug = bool(kwargs.get("debug", False))
     exit_code = _run_main_with_error_handling(kwargs, debug=debug)
@@ -147,6 +203,9 @@ def _build_cli_options(kwargs: dict[str, str | int | bool | None]) -> CliOptions
         no_compact=bool(kwargs.get("no_compact", False)),
         pr_review=bool(kwargs.get("pr_review", False)),
         pr_review_introspect=bool(kwargs.get("pr_review_introspect", False)),
+        full_codebase_review=bool(kwargs.get("full_codebase_review", False)),
+        contextual_review=bool(kwargs.get("contextual_review", False)),
+        pr_threads_introspect_only=bool(kwargs.get("pr_threads_introspect_only", False)),
         test_model=str(test_model) if test_model is not None else None,
         debug=bool(kwargs.get("debug", False)),
     )
@@ -206,26 +265,34 @@ def _run_main(options: CliOptions) -> int:
     # Initialize paths
     paths = Paths()
 
-    # Resolve check command if not provided via CLI/env
-    if settings.check_cmd is None:
-        settings.check_cmd = resolve_check_cmd(
-            cli_check_cmd=options.check_cmd,
-            project_config_path=paths.config_file,
-            system_config_path=get_system_config_path(),
-            project_root=str(paths.project_root),
-        )
+    # Standalone modes don't run checks — skip check-cmd resolution entirely
+    needs_check_cmd = not (
+        settings.full_codebase_review
+        or settings.pr_threads_introspect_only
+        or settings.contextual_review
+    )
 
-    # Ensure we have a concrete check command before validation
-    if settings.check_cmd is None:
-        console.print(
-            "[red]Error:[/red] Unable to determine a check command to run.\n"
-            "Please specify one via the [bold]--check-cmd[/bold] option or the "
-            "[bold]FDR_CHECK_CMD[/bold] environment variable."
-        )
-        raise SystemExit(1)
+    if needs_check_cmd:
+        # Resolve check command if not provided via CLI/env
+        if settings.check_cmd is None:
+            settings.check_cmd = resolve_check_cmd(
+                cli_check_cmd=options.check_cmd,
+                project_config_path=paths.config_file,
+                system_config_path=get_system_config_path(),
+                project_root=str(paths.project_root),
+            )
 
-    # Pre-flight validation of resolved check command
-    validate_check_cmd_or_exit(settings.check_cmd)
+        # Ensure we have a concrete check command before validation
+        if settings.check_cmd is None:
+            console.print(
+                "[red]Error:[/red] Unable to determine a check command to run.\n"
+                "Please specify one via the [bold]--check-cmd[/bold] option or the "
+                "[bold]FDR_CHECK_CMD[/bold] environment variable."
+            )
+            raise SystemExit(1)
+
+        # Pre-flight validation of resolved check command
+        validate_check_cmd_or_exit(settings.check_cmd)
 
     # Create runner
     runner = PiRunner(settings, paths)

@@ -3,7 +3,11 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from fix_die_repeat.config import Paths, Settings
 from fix_die_repeat.runner import PiRunner
+from fix_die_repeat.runner_review import ReviewManager
+from fix_die_repeat.utils import ReviewScope
+from tests.conftest import FAKE_TEMPLATE_CONTEXT
 
 # Constants for test assertions
 EXPECTED_THREAD_COUNT = 2
@@ -17,6 +21,7 @@ class TestRunReviewFixAttempt:
         settings = MagicMock()
         settings.model = "test-model"
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.review_current_file = tmp_path / "review_current.md"
@@ -59,6 +64,7 @@ class TestRunReviewFixAttempt:
         settings = MagicMock()
         settings.model = "test-model"
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.review_current_file = tmp_path / "review_current.md"
@@ -92,6 +98,7 @@ class TestRunReviewFixAttempt:
         settings = MagicMock()
         settings.model = "test-model"
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
         paths.review_current_file = tmp_path / "review_current.md"
@@ -131,6 +138,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -152,6 +160,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -176,6 +185,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -201,6 +211,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -230,6 +241,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -259,6 +271,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -319,6 +332,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -368,6 +382,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -409,6 +424,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -456,6 +472,7 @@ class TestResolvePrThreads:
         settings = MagicMock()
         settings.pr_review = True
         paths = MagicMock()
+        paths.template_context.return_value = FAKE_TEMPLATE_CONTEXT
         paths.fdr_dir = tmp_path
         paths.pr_resolved_threads_file = tmp_path / "pr_resolved_threads"
         paths.pr_thread_ids_file = tmp_path / "pr_thread_ids"
@@ -489,3 +506,197 @@ class TestResolvePrThreads:
                 if "Failed to resolve thread" in str(call)
             ]
             assert len(warning_calls) > 0
+
+
+class TestRunFullCodebaseReview:
+    """Tests for ReviewManager.run_full_codebase_review."""
+
+    def _make_manager(self, tmp_path: Path) -> ReviewManager:
+        settings = Settings()  # type: ignore[call-arg]
+        paths = Paths(project_root=tmp_path)
+        paths.ensure_fdr_dir()
+        return ReviewManager(settings, paths, tmp_path, MagicMock())
+
+    def test_invokes_pi_without_diff_or_history(self, tmp_path: Path) -> None:
+        """Full-codebase review must not attach diff or historical review.md."""
+        manager = self._make_manager(tmp_path)
+        # Pre-populate review.md with prior findings — these must NOT be passed to pi.
+        manager.paths.review_file.write_text("[CRITICAL] stale finding from earlier run\n")
+
+        def fake_run_pi(*_args: str, **_kwargs: object) -> tuple[int, str, str]:
+            manager.paths.review_current_file.write_text("[CRITICAL] fresh finding\n")
+            return (0, "", "")
+
+        run_pi = MagicMock(side_effect=fake_run_pi)
+
+        with patch(
+            "fix_die_repeat.runner_review.get_all_tracked_files",
+            return_value=["fix_die_repeat/runner.py"],
+        ):
+            manager.run_full_codebase_review(iteration=1, run_pi_callback=run_pi)
+
+        assert run_pi.called
+        pi_args = run_pi.call_args.args
+        assert "--tools" in pi_args
+        assert "read,write,grep,find,ls" in pi_args
+        # No diff attached in full-codebase mode
+        assert not any(isinstance(a, str) and a.endswith("changes.diff") for a in pi_args)
+        # No historical review.md attached — single-pass mode does not pass history.
+        assert not any(
+            isinstance(a, str) and a.startswith("@") and a.endswith("review.md") for a in pi_args
+        )
+        # Prompt text should reference full-codebase audit framing
+        prompt = pi_args[-1]
+        assert isinstance(prompt, str)
+        assert "full-codebase audit" in prompt
+        # review.md is overwritten with the fresh findings, not appended.
+        assert manager.paths.review_file.read_text() == "[CRITICAL] fresh finding\n"
+        assert "stale finding" not in manager.paths.review_file.read_text()
+
+    def test_second_run_overwrites_review_file(self, tmp_path: Path) -> None:
+        """Running the full-codebase review twice must leave only the second run's output."""
+        manager = self._make_manager(tmp_path)
+
+        findings = iter(["[CRITICAL] first run\n", "[CRITICAL] second run\n"])
+
+        def fake_run_pi(*_args: str, **_kwargs: object) -> tuple[int, str, str]:
+            manager.paths.review_current_file.write_text(next(findings))
+            return (0, "", "")
+
+        run_pi = MagicMock(side_effect=fake_run_pi)
+
+        with patch(
+            "fix_die_repeat.runner_review.get_all_tracked_files",
+            return_value=["fix_die_repeat/runner.py"],
+        ):
+            manager.run_full_codebase_review(iteration=1, run_pi_callback=run_pi)
+            manager.run_full_codebase_review(iteration=1, run_pi_callback=run_pi)
+
+        content = manager.paths.review_file.read_text()
+        assert content == "[CRITICAL] second run\n"
+        assert "first run" not in content
+
+    def test_pi_failure_writes_no_issues(self, tmp_path: Path) -> None:
+        """When pi fails we should still produce a NO_ISSUES marker."""
+        manager = self._make_manager(tmp_path)
+        run_pi = MagicMock(return_value=(1, "", "boom"))
+
+        with patch(
+            "fix_die_repeat.runner_review.get_all_tracked_files",
+            return_value=[],
+        ):
+            manager.run_full_codebase_review(iteration=1, run_pi_callback=run_pi)
+
+        assert manager.paths.review_current_file.read_text() == "NO_ISSUES"
+        assert manager.paths.review_file.read_text().strip() == "NO_ISSUES"
+
+
+class TestRunContextualReview:
+    """Tests for ReviewManager.run_contextual_review."""
+
+    def _make_manager(self, tmp_path: Path) -> ReviewManager:
+        settings = Settings()  # type: ignore[call-arg]
+        paths = Paths(project_root=tmp_path)
+        paths.ensure_fdr_dir()
+        return ReviewManager(settings, paths, tmp_path, MagicMock())
+
+    def test_uncommitted_scope_generates_diff_and_calls_pi(self, tmp_path: Path) -> None:
+        """UNCOMMITTED scope generates a diff and passes correct template."""
+        manager = self._make_manager(tmp_path)
+
+        def fake_run_pi(*_args: str, **_kwargs: object) -> tuple[int, str, str]:
+            manager.paths.review_current_file.write_text("[CRITICAL] issue\n")
+            return (0, "", "")
+
+        run_pi = MagicMock(side_effect=fake_run_pi)
+
+        with (
+            patch(
+                "fix_die_repeat.runner_review.determine_review_scope",
+                return_value=("uncommitted_enum", ["dirty.py"]),
+            ) as mock_scope,
+            patch(
+                "fix_die_repeat.runner_review.run_command",
+                return_value=(0, "fake diff\n", ""),
+            ),
+        ):
+            # Patch the enum comparison to work
+
+            mock_scope.return_value = (ReviewScope.UNCOMMITTED, ["dirty.py"])
+            manager.run_contextual_review(iteration=1, run_pi_callback=run_pi)
+
+        assert run_pi.called
+        prompt = run_pi.call_args.args[-1]
+        assert "uncommitted" in prompt.lower()
+        assert "dirty.py" in prompt
+        assert manager.paths.review_file.read_text() == "[CRITICAL] issue\n"
+
+    def test_branch_scope_calls_pi_with_branch_template(self, tmp_path: Path) -> None:
+        """BRANCH scope renders correct template with default branch info."""
+        manager = self._make_manager(tmp_path)
+
+        def fake_run_pi(*_args: str, **_kwargs: object) -> tuple[int, str, str]:
+            manager.paths.review_current_file.write_text("NO_ISSUES")
+            return (0, "", "")
+
+        run_pi = MagicMock(side_effect=fake_run_pi)
+
+        with (
+            patch(
+                "fix_die_repeat.runner_review.determine_review_scope",
+                return_value=(ReviewScope.BRANCH, ["feature.py"]),
+            ),
+            patch(
+                "fix_die_repeat.runner_review.get_default_branch",
+                return_value="main",
+            ),
+            patch(
+                "fix_die_repeat.runner_review.run_command",
+                return_value=(0, "abc123\n", ""),
+            ),
+        ):
+            manager.run_contextual_review(iteration=1, run_pi_callback=run_pi)
+
+        assert run_pi.called
+        prompt = run_pi.call_args.args[-1]
+        assert "branch" in prompt.lower()
+        assert "main" in prompt
+        assert "feature.py" in prompt
+
+    def test_full_scope_delegates_to_full_codebase_review(self, tmp_path: Path) -> None:
+        """FULL scope delegates to run_full_codebase_review."""
+        manager = self._make_manager(tmp_path)
+        run_pi = MagicMock(return_value=(0, "", ""))
+
+        with (
+            patch(
+                "fix_die_repeat.runner_review.determine_review_scope",
+                return_value=(ReviewScope.FULL, []),
+            ),
+            patch.object(manager, "run_full_codebase_review") as mock_full,
+        ):
+            manager.run_contextual_review(iteration=1, run_pi_callback=run_pi)
+
+        mock_full.assert_called_once_with(1, run_pi)
+        # run_pi should NOT be called directly — full review handles that
+        assert not run_pi.called
+
+    def test_pi_failure_writes_no_issues(self, tmp_path: Path) -> None:
+        """When pi fails, NO_ISSUES is written."""
+        manager = self._make_manager(tmp_path)
+        run_pi = MagicMock(return_value=(1, "", "boom"))
+
+        with (
+            patch(
+                "fix_die_repeat.runner_review.determine_review_scope",
+                return_value=(ReviewScope.UNCOMMITTED, ["file.py"]),
+            ),
+            patch(
+                "fix_die_repeat.runner_review.run_command",
+                return_value=(0, "fake diff\n", ""),
+            ),
+        ):
+            manager.run_contextual_review(iteration=1, run_pi_callback=run_pi)
+
+        assert manager.paths.review_current_file.read_text() == "NO_ISSUES"
+        assert manager.paths.review_file.read_text().strip() == "NO_ISSUES"
