@@ -781,6 +781,7 @@ class TestGetBranchChangedFiles:
     def test_excludes_lock_files(self, tmp_path: Path) -> None:
         """Applies standard exclude patterns."""
         (tmp_path / "changed.py").write_text("code")
+        (tmp_path / "package.lock").write_text("lock")
 
         with patch("fix_die_repeat.utils.run_command") as mock_run:
             mock_run.side_effect = [

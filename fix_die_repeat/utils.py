@@ -497,7 +497,9 @@ def determine_review_scope(project_root: Path) -> tuple[ReviewScope, list[str]]:
             if not _should_exclude_file((project_root / f).name, exclude_patterns)
         ]
         logger.info(
-            "Contextual review scope: UNCOMMITTED (%d file(s) with local changes)",
+            "Contextual review scope: UNCOMMITTED "
+            "(%d file(s) with local changes, %d in scope after exclusions)",
+            len(raw_changed),
             len(changed),
         )
         return ReviewScope.UNCOMMITTED, changed
@@ -528,9 +530,11 @@ def determine_review_scope(project_root: Path) -> tuple[ReviewScope, list[str]]:
                     if not _should_exclude_file((project_root / f).name, exclude_patterns)
                 ]
                 logger.info(
-                    "Contextual review scope: BRANCH (%d file(s) changed vs %s)",
-                    len(branch_files),
+                    "Contextual review scope: BRANCH "
+                    "(%d file(s) changed vs %s, %d in scope after exclusions)",
+                    len(raw_branch_files),
                     default_branch,
+                    len(branch_files),
                 )
                 return ReviewScope.BRANCH, branch_files
 
