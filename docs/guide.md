@@ -26,6 +26,9 @@ Options:
   --pr-threads-introspect-only    Fetch the PR's unresolved review threads, run introspection
                                   on them, then exit. Does not run checks, local review, or
                                   attempt fixes.
+  --improve-prompts               Ask pi to update the user-owned prompt templates under
+                                  <FDR_HOME>/templates/ based on accumulated introspection data.
+                                  Seeds user copies on first use; never mutates the package.
   --test-model TEXT               Test model compatibility before running (exits after test)
   -d, --debug                     Enable debug mode (timestamped session logs and verbose logging)
   --version                       Show the version and exit.
@@ -50,6 +53,7 @@ All options can be set via `FDR_`-prefixed environment variables:
 | `FDR_CONTEXTUAL_REVIEW` | Smart contextual review (report-only) | `0` |
 | `FDR_FULL_CODEBASE_REVIEW` | Audit the entire codebase (report-only) | `0` |
 | `FDR_PR_THREADS_INTROSPECT_ONLY` | Fetch unresolved PR threads, introspect, then exit | `0` |
+| `FDR_IMPROVE_PROMPTS` | Update user templates from introspection data, then exit | `0` |
 | `FDR_HOME` | Base directory for central state (`~/.fix-die-repeat/`) | (unset) |
 | `FDR_DEBUG` | Enable debug mode | `0` |
 | `FDR_NTFY_ENABLED` | Enable ntfy notifications | `1` |
@@ -180,6 +184,21 @@ fix-die-repeat --pr-threads-introspect-only
 Fetches the PR's unresolved review threads, runs introspection on them, and
 exits. Skips checks, local review, and fixes — useful when you only want the
 analysis without touching the code.
+
+### Improve Prompts
+
+```bash
+fix-die-repeat --improve-prompts
+```
+
+Reads `~/.fix-die-repeat/introspection.yaml` and asks pi to update the four
+language-agnostic prompt templates (`fix_checks.j2`, `local_review.j2`,
+`resolve_review_issues.j2`, `pr_threads_header.j2`) so future runs close the
+gaps surfaced by real PR feedback. The user-owned copies live under
+`~/.fix-die-repeat/templates/` and take precedence over the shipped defaults;
+they are seeded from the package on first use and never mutated inside the
+install. Pending introspection entries are marked `reviewed` once pi has
+processed them.
 
 ---
 

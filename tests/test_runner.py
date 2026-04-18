@@ -1886,6 +1886,7 @@ class TestRunContextualReviewOnce:
         """contextual_review dispatch takes priority over full_codebase_review."""
         runner, review_manager, _logger = self._build_runner(tmp_path)
         runner.settings.pr_threads_introspect_only = False
+        runner.settings.improve_prompts = False
         runner.settings.full_codebase_review = True
 
         def fake_review(_iteration: int, _callback: object) -> None:

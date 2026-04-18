@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 from jinja2 import UndefinedError
 
-from fix_die_repeat.prompts import render_prompt
+from fix_die_repeat.config import get_user_templates_dir
+from fix_die_repeat.prompts import clear_prompt_cache, render_prompt
 from tests.conftest import FAKE_TEMPLATE_CONTEXT
 
 # Reuse the shared constant so template-context keys stay aligned across tests.
@@ -387,3 +388,83 @@ class TestNoLegacyPathsInTemplates:
             **FAKE_PATHS,
         )
         assert ".fix-die-repeat" not in prompt
+
+
+class TestUserTemplateOverride:
+    """User-dir templates win over the shipped package copies (ChoiceLoader)."""
+
+    def test_user_template_overrides_package(self) -> None:
+        """A file under FDR_HOME/templates/ takes precedence when rendered."""
+        user_dir = get_user_templates_dir()
+        user_dir.mkdir(parents=True, exist_ok=True)
+        override = user_dir / "pr_threads_header.j2"
+        override.write_text("USER OVERRIDE {{ unresolved_count }} {{ pr_url }}")
+        clear_prompt_cache()
+
+        try:
+            prompt = render_prompt(
+                "pr_threads_header.j2",
+                unresolved_count=7,
+                pr_number=1,
+                pr_url="https://example.com/pr/1",
+                **FAKE_PATHS,
+            )
+        finally:
+            override.unlink()
+            clear_prompt_cache()
+
+        assert "USER OVERRIDE 7" in prompt
+        assert "https://example.com/pr/1" in prompt
+
+    def test_package_fallback_when_no_user_file(self) -> None:
+        """When FDR_HOME/templates/ has no match, the shipped package file is used."""
+        user_dir = get_user_templates_dir()
+        # The autouse fixture points FDR_HOME at a tmp dir so this is clean.
+        assert not (user_dir / "pr_threads_header.j2").exists()
+        clear_prompt_cache()
+
+        prompt = render_prompt(
+            "pr_threads_header.j2",
+            unresolved_count=3,
+            pr_number=42,
+            pr_url="https://example.com/pr/42",
+            **FAKE_PATHS,
+        )
+
+        # The shipped template does not contain the user sentinel.
+        assert "USER OVERRIDE" not in prompt
+        # And renders the PR URL the shipped template asks for.
+        assert "https://example.com/pr/42" in prompt
+
+
+class TestImprovePromptsTemplate:
+    """Coverage for the improve_prompts.j2 template."""
+
+    def test_renders_with_expected_context(self, tmp_path: Path) -> None:
+        """improve_prompts.j2 renders with all required variables and lists target templates."""
+        templates_dir = tmp_path / "templates"
+        template_paths = {
+            "fix_checks.j2": str(templates_dir / "fix_checks.j2"),
+            "local_review.j2": str(templates_dir / "local_review.j2"),
+            "resolve_review_issues.j2": str(templates_dir / "resolve_review_issues.j2"),
+            "pr_threads_header.j2": str(templates_dir / "pr_threads_header.j2"),
+        }
+
+        prompt = render_prompt(
+            "improve_prompts.j2",
+            introspection_file_path=str(tmp_path / "introspection.yaml"),
+            archive_file_path=str(tmp_path / "introspection-archive.yaml"),
+            templates_dir=str(templates_dir),
+            template_paths=template_paths,
+        )
+
+        assert "introspection.yaml" in prompt
+        assert "introspection-archive.yaml" in prompt
+        for name, path in template_paths.items():
+            assert name in prompt
+            assert path in prompt
+        # Workflow markers
+        assert "status: pending" in prompt
+        assert "status: reviewed" in prompt
+        # Language-agnostic guard rail
+        assert "language-agnostic" in prompt

@@ -97,6 +97,13 @@ class Settings(BaseSettings):
         description="Fetch unresolved PR threads and run introspection without attempting fixes",
     )
 
+    # Prompt-improvement mode (uses pi to update user-templates from introspection data)
+    improve_prompts: bool = pyd.Field(
+        default=False,
+        alias="FDR_IMPROVE_PROMPTS",
+        description="Run pi over accumulated introspection data to update user prompt templates",
+    )
+
     # Debug mode
     debug: bool = pyd.Field(
         default=False,
@@ -187,6 +194,7 @@ class CliOptions:
     full_codebase_review: bool = False
     contextual_review: bool = False
     pr_threads_introspect_only: bool = False
+    improve_prompts: bool = False
     test_model: str | None = None
     debug: bool = False
 
@@ -274,6 +282,8 @@ def _apply_boolean_flags(settings: Settings, options: CliOptions) -> None:
         settings.contextual_review = options.contextual_review
     if options.pr_threads_introspect_only:
         settings.pr_threads_introspect_only = options.pr_threads_introspect_only
+    if options.improve_prompts:
+        settings.improve_prompts = options.improve_prompts
     if options.debug:
         settings.debug = options.debug
 
@@ -395,3 +405,24 @@ def get_introspection_file_path() -> Path:
     central = _central_root()
     central.mkdir(parents=True, exist_ok=True)
     return central / "introspection.yaml"
+
+
+def get_introspection_archive_file_path() -> Path:
+    """Return the introspection archive path (``<FDR_HOME>/introspection-archive.yaml``).
+
+    Unlike ``get_introspection_file_path``, this function does not create
+    the parent directory — the archive is only materialized by the
+    prompt-improvement compaction step when it actually writes content.
+    """
+    return _central_root() / "introspection-archive.yaml"
+
+
+def get_user_templates_dir() -> Path:
+    """Return the user-editable templates directory (``<FDR_HOME>/templates/``).
+
+    Templates written here override the ones shipped in the package. The
+    directory is created lazily so unused installs don't clutter the
+    dotfolder, but callers that intend to write a template should call
+    ``.mkdir(parents=True, exist_ok=True)`` on the returned path first.
+    """
+    return _central_root() / "templates"

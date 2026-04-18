@@ -104,9 +104,21 @@ class TestCliMain:
         assert "--pr-threads-introspect-only" in result.output
         assert "unresolved review threads" in result.output
 
+    def test_cli_with_improve_prompts(self) -> None:
+        """Test CLI help exposes --improve-prompts."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--help"])
+        assert "--improve-prompts" in result.output
+        assert "user-owned" in result.output
+
     @pytest.mark.parametrize(
         "flag",
-        ["--full-codebase-review", "--pr-threads-introspect-only", "--contextual-review"],
+        [
+            "--full-codebase-review",
+            "--pr-threads-introspect-only",
+            "--contextual-review",
+            "--improve-prompts",
+        ],
     )
     def test_standalone_modes_skip_check_cmd(
         self,

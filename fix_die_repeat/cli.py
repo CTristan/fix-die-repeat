@@ -26,7 +26,7 @@ _MAIN_HELP = (
     "  FDR_ARCHIVE_ARTIFACTS, FDR_COMPACT_ARTIFACTS,\n"
     "  FDR_PR_REVIEW, FDR_PR_REVIEW_INTROSPECT,\n"
     "  FDR_CONTEXTUAL_REVIEW, FDR_FULL_CODEBASE_REVIEW,\n"
-    "  FDR_PR_THREADS_INTROSPECT_ONLY,\n"
+    "  FDR_PR_THREADS_INTROSPECT_ONLY, FDR_IMPROVE_PROMPTS,\n"
     "  FDR_TEST_MODEL, FDR_DEBUG, FDR_LANGUAGES,\n"
     "  FDR_HOME (base directory for state; defaults to ~/.fix-die-repeat),\n"
     "  FDR_NTFY_ENABLED (default: 1),\n"
@@ -57,6 +57,9 @@ _MAIN_HELP = (
     "\b\n"
     "  # Fetch and introspect unresolved PR review threads, then exit\n"
     "  fix-die-repeat --pr-threads-introspect-only\n"
+    "\b\n"
+    "  # Have pi update the user prompt templates from accumulated introspection data\n"
+    "  fix-die-repeat --improve-prompts\n"
 )
 
 
@@ -143,6 +146,16 @@ _MAIN_HELP = (
     envvar="FDR_PR_THREADS_INTROSPECT_ONLY",
 )
 @click.option(
+    "--improve-prompts",
+    is_flag=True,
+    help=(
+        "Read accumulated introspection data and have pi update the user-owned "
+        "prompt templates under <FDR_HOME>/templates/. Seeds copies of the shipped "
+        "templates on first use; never mutates the package. Runs once and exits."
+    ),
+    envvar="FDR_IMPROVE_PROMPTS",
+)
+@click.option(
     "--test-model",
     help="Test model compatibility before running (exits after test)",
     envvar="FDR_TEST_MODEL",
@@ -206,6 +219,7 @@ def _build_cli_options(kwargs: dict[str, str | int | bool | None]) -> CliOptions
         full_codebase_review=bool(kwargs.get("full_codebase_review", False)),
         contextual_review=bool(kwargs.get("contextual_review", False)),
         pr_threads_introspect_only=bool(kwargs.get("pr_threads_introspect_only", False)),
+        improve_prompts=bool(kwargs.get("improve_prompts", False)),
         test_model=str(test_model) if test_model is not None else None,
         debug=bool(kwargs.get("debug", False)),
     )
@@ -270,6 +284,7 @@ def _run_main(options: CliOptions) -> int:
         settings.full_codebase_review
         or settings.pr_threads_introspect_only
         or settings.contextual_review
+        or settings.improve_prompts
     )
 
     if needs_check_cmd:

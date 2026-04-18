@@ -10,8 +10,10 @@ from fix_die_repeat.config import (
     CliOptions,
     Paths,
     Settings,
+    get_introspection_archive_file_path,
     get_introspection_file_path,
     get_settings,
+    get_user_templates_dir,
 )
 from fix_die_repeat.utils import run_command
 
@@ -114,6 +116,23 @@ class TestSettings:
 
         assert settings.pr_review
         assert not settings.pr_review_introspect
+
+    def test_improve_prompts_default(self) -> None:
+        """improve_prompts defaults to False."""
+        settings = Settings()
+        assert not settings.improve_prompts
+
+    def test_improve_prompts_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """improve_prompts can be set via FDR_IMPROVE_PROMPTS env var."""
+        monkeypatch.setenv("FDR_IMPROVE_PROMPTS", "1")
+        settings = Settings()
+        assert settings.improve_prompts
+
+    def test_improve_prompts_from_cli(self) -> None:
+        """improve_prompts can be set via CliOptions."""
+        options = CliOptions(improve_prompts=True)
+        settings = get_settings(options)
+        assert settings.improve_prompts
 
     def test_invalid_max_iters(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that invalid max_iters raises ValueError."""
@@ -384,3 +403,46 @@ class TestGetIntrospectionFilePath:
 
         assert path.parent.exists()
         assert path.parent.is_dir()
+
+
+class TestGetIntrospectionArchiveFilePath:
+    """Tests for get_introspection_archive_file_path function."""
+
+    def test_lives_under_fdr_home(self) -> None:
+        """The archive file path lives at FDR_HOME/introspection-archive.yaml."""
+        path = get_introspection_archive_file_path()
+        fdr_home = Path(os.environ["FDR_HOME"])
+        assert path == fdr_home / "introspection-archive.yaml"
+
+    def test_does_not_create_parent(self) -> None:
+        """Unlike the main introspection path, the archive helper does not create FDR_HOME."""
+        fdr_home = Path(os.environ["FDR_HOME"])
+        if fdr_home.exists():
+            shutil.rmtree(fdr_home)
+
+        path = get_introspection_archive_file_path()
+
+        # The archive is only materialized by the compaction step itself,
+        # so the helper must not eagerly create the parent directory.
+        assert not fdr_home.exists()
+        assert path.parent == fdr_home
+
+
+class TestGetUserTemplatesDir:
+    """Tests for get_user_templates_dir function."""
+
+    def test_lives_under_fdr_home(self) -> None:
+        """The user templates dir lives at FDR_HOME/templates/."""
+        path = get_user_templates_dir()
+        fdr_home = Path(os.environ["FDR_HOME"])
+        assert path == fdr_home / "templates"
+
+    def test_does_not_create_directory(self) -> None:
+        """The helper does not create the directory on access."""
+        fdr_home = Path(os.environ["FDR_HOME"])
+        if fdr_home.exists():
+            shutil.rmtree(fdr_home)
+
+        path = get_user_templates_dir()
+
+        assert not path.exists()
