@@ -72,7 +72,9 @@ class ImprovePromptsManager:
             Exit code (0 on success, non-zero on failure).
 
         """
-        introspection_file = get_introspection_file_path()
+        # Avoid creating <FDR_HOME>/ for no-op runs; the file's presence implies
+        # the parent already exists, and we exit early below when it doesn't.
+        introspection_file = get_introspection_file_path(create=False)
 
         if not self._has_pending_entries(introspection_file):
             self.logger.info(

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fix_die_repeat.config import (
@@ -17,7 +19,6 @@ from fix_die_repeat.runner_improve_prompts import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     import pytest
 
@@ -56,7 +57,9 @@ class TestPendingDetection:
     """run_improve_prompts should short-circuit unless there's pending work."""
 
     def test_missing_file_exits_zero_without_calling_pi(self) -> None:
-        """No introspection file means nothing to do."""
+        """No introspection file means nothing to do — and no dotfolder is created."""
+        fdr_home = Path(os.environ["FDR_HOME"])
+        assert not fdr_home.exists(), "precondition: FDR_HOME starts clean"
         spy = _PiSpy()
         manager = _manager()
 
@@ -66,6 +69,8 @@ class TestPendingDetection:
         assert spy.calls == []
         # And no user templates should be seeded yet
         assert not get_user_templates_dir().exists()
+        # No-op runs must not materialize <FDR_HOME>/ as a side effect.
+        assert not fdr_home.exists()
 
     def test_empty_file_exits_zero_without_calling_pi(self) -> None:
         """An empty introspection file is treated the same as missing."""

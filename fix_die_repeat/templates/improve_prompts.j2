@@ -31,7 +31,7 @@ These are the language-agnostic prompt templates (and their shared partials) who
    - Add guidance to `fix_checks.j2` for fix patterns that were commonly needed.
    - Add context to `resolve_review_issues.j2` for issue types the agent struggled with.
    - Update `pr_threads_header.j2` only if you find thread-level framing gaps.
-   - Only edit `local_review.j2`, `contextual_review.j2`, or `full_codebase_review.j2` directly for framing that is unique to one scope — shared content belongs in a partial.
+   - Prefer shared partials for guidance that should apply across review scopes. Only edit a top-level review template directly if it is one of the paths listed above and the framing is truly unique to that scope.
 5. After editing, rewrite `{{ introspection_file_path }}` so every entry you processed has `status: reviewed` instead of `pending`. Leave every other entry untouched. Preserve the `---` document separators.
 6. **Compact the introspection file** if it has reached 2000+ lines:
    - Keep all `pending` entries in the main file (there should be none after step 5, but future entries may land here).

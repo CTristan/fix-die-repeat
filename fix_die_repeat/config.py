@@ -400,10 +400,18 @@ class Paths:
         }
 
 
-def get_introspection_file_path() -> Path:
-    """Return the global introspection file path (``<FDR_HOME>/introspection.yaml``)."""
+def get_introspection_file_path(*, create: bool = True) -> Path:
+    """Return the global introspection file path (``<FDR_HOME>/introspection.yaml``).
+
+    Args:
+        create: When ``True`` (default), ensure ``<FDR_HOME>/`` exists. Pass
+            ``False`` for read-only/no-op callers that only need the path and
+            don't want to materialize the dotfolder as a side effect.
+
+    """
     central = _central_root()
-    central.mkdir(parents=True, exist_ok=True)
+    if create:
+        central.mkdir(parents=True, exist_ok=True)
     return central / "introspection.yaml"
 
 
