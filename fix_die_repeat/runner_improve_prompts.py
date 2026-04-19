@@ -47,19 +47,16 @@ class ImprovePromptsManager:
     def __init__(
         self,
         settings: Settings,
-        project_root: Path,
         logger: logging.Logger,
     ) -> None:
         """Initialize the manager.
 
         Args:
             settings: Configuration settings.
-            project_root: Project root (used only for logging context).
             logger: Logger instance for output.
 
         """
         self.settings = settings
-        self.project_root = project_root
         self.logger = logger
 
     def run_improve_prompts(

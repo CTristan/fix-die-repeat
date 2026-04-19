@@ -97,9 +97,7 @@ class PiRunner:
         self.introspection_manager = IntrospectionManager(
             self.settings, self.paths, self.project_root, self.logger
         )
-        self.improve_prompts_manager = ImprovePromptsManager(
-            self.settings, self.project_root, self.logger
-        )
+        self.improve_prompts_manager = ImprovePromptsManager(self.settings, self.logger)
 
     def _get_artifact_manager(self) -> ArtifactManager | None:
         """Return the artifact manager when initialized."""
