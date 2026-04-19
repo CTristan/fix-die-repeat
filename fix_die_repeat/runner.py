@@ -2,13 +2,13 @@
 
 import json
 import re
-import shlex
 import sys
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from fix_die_repeat.backends import Backend, BackendRequest, PiBackend
 from fix_die_repeat.config import (
     Paths,
     Settings,
@@ -62,7 +62,6 @@ class PiRunner:
         self.paths = paths
         self.project_root = paths.project_root
         self.iteration = 0
-        self.pi_invocation_count = 0
         self.script_start_time: float = 0.0
         self.start_sha = ""
         self.pr_review_no_progress_count = 0
@@ -86,6 +85,14 @@ class PiRunner:
             fdr_log=self.paths.fdr_log,
             session_log=self.session_log,
             debug=self.settings.debug,
+        )
+
+        # Agent backend — swappable per multi-backend roadmap (pi today; Gemini next).
+        self.backend: Backend = PiBackend(
+            self.settings,
+            self.paths,
+            self.logger,
+            on_long_context=self.emergency_compact,
         )
 
         # Initialize manager classes
@@ -134,79 +141,20 @@ class PiRunner:
             return manager
         return None
 
-    def before_pi_call(self) -> None:
-        """Add delay between sequential pi calls to reduce lock contention."""
-        if self.pi_invocation_count > 0:
-            time.sleep(self.settings.pi_sequential_delay_seconds)
-        self.pi_invocation_count += 1
-
     def run_pi(self, *args: str) -> tuple[int, str, str]:
-        """Run pi command with logging.
+        """Legacy shim: delegate to :meth:`Backend.invoke_raw` via ``self.backend``.
 
-        Args:
-            *args: Arguments to pass to pi
-
-        Returns:
-            Tuple of (exit_code, stdout, stderr)
-
+        Kept so existing tests that mock ``runner.run_pi`` / ``runner.run_pi_safe``
+        continue to work. New callers should use ``self.backend.invoke(...)``
+        with a structured :class:`BackendRequest`.
         """
-        self.before_pi_call()
-
-        cmd_args = ["pi", *args]
-        returncode, stdout, stderr = run_command(cmd_args, cwd=self.paths.project_root)
-
-        # Log output
-        if self.paths.pi_log:
-            with self.paths.pi_log.open("a", encoding="utf-8") as f:
-                f.write(f"Command: {shlex.join(cmd_args)}\n")
-                f.write(f"Exit code: {returncode}\n")
-                if stdout:
-                    f.write(f"STDOUT:\n{stdout}\n")
-                if stderr:
-                    f.write(f"STDERR:\n{stderr}\n")
-                f.write("\n")
-
-        if returncode != 0:
-            self.logger.error("pi exited with code %s", returncode)
-            if self.paths.pi_log:
-                self.logger.error("pi output logged to: %s", self.paths.pi_log)
-
-        return (returncode, stdout, stderr)
+        result = self.backend.invoke_raw(*args)  # type: ignore[attr-defined]
+        return (result.returncode, result.stdout, result.stderr)
 
     def run_pi_safe(self, *args: str) -> tuple[int, str, str]:
-        """Run pi with single retry on failure.
-
-        Args:
-            *args: Arguments to pass to pi
-
-        Returns:
-            Tuple of (exit_code, stdout, stderr)
-
-        """
-        returncode, stdout, stderr = self.run_pi(*args)
-
-        if returncode == 0:
-            return (returncode, stdout, stderr)
-
-        # Detect capacity error (503)
-        if self.paths.pi_log and self.paths.pi_log.exists():
-            content = self.paths.pi_log.read_text()
-            if "503" in content or "No capacity" in content:
-                self.logger.info("Detected model capacity error (503). Skipping current model...")
-                self.run_pi("-p", "/model-skip")  # Trigger model skip
-
-        # Detect long context error (429)
-        if self.paths.pi_log and self.paths.pi_log.exists():
-            content = self.paths.pi_log.read_text()
-            if "429" in content.lower() and "long context" in content.lower():
-                self.logger.info(
-                    "Detected long context rate limit (429). Forcing emergency compaction...",
-                )
-                self.emergency_compact()
-                self.logger.info("Emergency compaction complete. Retrying...")
-
-        self.logger.info("pi failed (exit %s). Retrying once...", returncode)
-        return self.run_pi(*args)
+        """Legacy shim: delegate to :meth:`Backend.invoke_raw_safe`."""
+        result = self.backend.invoke_raw_safe(*args)  # type: ignore[attr-defined]
+        return (result.returncode, result.stdout, result.stderr)
 
     def test_model(self) -> None:
         """Test model compatibility before running full loop."""
@@ -222,21 +170,16 @@ class PiRunner:
         )
         self.logger.info("Running simple write test to verify model can use pi's tools...")
 
-        # Create test prompt
-        self.before_pi_call()
-        returncode, _stdout, _stderr = run_command(
-            [
-                "pi",
-                "-p",
-                "--model",
-                self.settings.test_model,
-                (
+        result = self.backend.invoke(
+            BackendRequest(
+                prompt=(
                     f"Write 'MODEL TEST OK' to file {test_file}. "
                     "Do NOT use any other tools or generate pseudo-code."
                 ),
-            ],
-            cwd=self.paths.project_root,
+                model=self.settings.test_model,
+            ),
         )
+        returncode = result.returncode
 
         if returncode != 0:
             self.logger.error("pi test invocation failed with code %s", returncode)

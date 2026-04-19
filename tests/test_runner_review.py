@@ -37,7 +37,6 @@ class TestRunReviewFixAttempt:
         runner.iteration = 1
         runner.consecutive_toolless_attempts = 0
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
         runner.resolve_pr_threads = MagicMock()  # type: ignore[method-assign]
 
@@ -80,7 +79,6 @@ class TestRunReviewFixAttempt:
         runner.iteration = 1
         runner.consecutive_toolless_attempts = 0
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(1, "", "error"))  # type: ignore[method-assign]
 
         paths.review_current_file.write_text("[CRITICAL] Bug found")
@@ -114,7 +112,6 @@ class TestRunReviewFixAttempt:
         runner.iteration = 1
         runner.consecutive_toolless_attempts = 0
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
         runner.resolve_pr_threads = MagicMock()  # type: ignore[method-assign]
 
@@ -148,7 +145,6 @@ class TestResolvePrThreads:
         runner.settings = settings
         runner.paths = paths
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
 
         runner.resolve_pr_threads()
 
@@ -170,7 +166,6 @@ class TestResolvePrThreads:
         runner.settings = settings
         runner.paths = paths
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
 
         # Create empty file
         paths.pr_resolved_threads_file.write_text("")
@@ -195,7 +190,6 @@ class TestResolvePrThreads:
         runner.settings = settings
         runner.paths = paths
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
 
         # Create resolved file with thread IDs
         paths.pr_resolved_threads_file.write_text("thread1\nthread2\n")
@@ -221,7 +215,6 @@ class TestResolvePrThreads:
         runner.settings = settings
         runner.paths = paths
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
 
         # Create resolved file with thread IDs
         paths.pr_resolved_threads_file.write_text("thread1\nthread2\nthread3\n")
@@ -251,7 +244,6 @@ class TestResolvePrThreads:
         runner.settings = settings
         runner.paths = paths
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
 
         # Create resolved file with thread IDs (some not in scope)
         paths.pr_resolved_threads_file.write_text("thread1\nthread2\nthread3\n")
@@ -284,7 +276,6 @@ class TestResolvePrThreads:
         runner.settings = settings
         runner.paths = paths
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
 
         # Create resolved file with thread IDs
         thread_id_1 = "PRRT_kwDORYGRb85wxpuZ"
@@ -345,7 +336,6 @@ class TestResolvePrThreads:
         runner.settings = settings
         runner.paths = paths
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
 
         # Create resolved file with thread IDs
         thread_id_1 = "PRRT_kwDORYGRb85wxpuZ"
@@ -395,7 +385,6 @@ class TestResolvePrThreads:
         runner.settings = settings
         runner.paths = paths
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.fetch_pr_threads = MagicMock()  # type: ignore[method-assign]
 
         # Create resolved file with thread IDs
@@ -437,7 +426,6 @@ class TestResolvePrThreads:
         runner.settings = settings
         runner.paths = paths
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.fetch_pr_threads = MagicMock()  # type: ignore[method-assign]
 
         # Create resolved file with thread IDs
@@ -485,7 +473,6 @@ class TestResolvePrThreads:
         runner.settings = settings
         runner.paths = paths
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
 
         # Create resolved file with thread IDs
         thread_id = "PRRT_kwDORYGRb85wxpuZ"

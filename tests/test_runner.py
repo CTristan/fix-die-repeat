@@ -14,8 +14,6 @@ from fix_die_repeat.runner_introspection import (  # Testing private class is in
 from tests.conftest import FAKE_TEMPLATE_CONTEXT
 
 # Constants for runner test values
-TEST_PI_DELAY_SECONDS = 2
-EXPECTED_PI_INVOCATION_COUNT = 2
 EMERGENCY_COMPACT_LINES = 100
 REGULAR_COMPACT_LINES = 50
 FILTERED_CHECKS_LOG_SMALL_LINES = 100
@@ -26,45 +24,8 @@ MIN_SEEK_CALLS = 2
 _FAKE_TEMPLATE_CONTEXT = FAKE_TEMPLATE_CONTEXT
 
 
-class TestBeforePiCall:
-    """Tests for before_pi_call method."""
-
-    def test_first_call_no_delay(self, tmp_path: Path) -> None:
-        """Test that first call doesn't add delay."""
-        settings = MagicMock()
-        paths = MagicMock()
-        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
-        paths.fdr_dir = tmp_path
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.pi_invocation_count = 0
-
-        with patch("fix_die_repeat.runner.time.sleep") as mock_sleep:
-            runner.before_pi_call()
-            assert not mock_sleep.called
-            assert runner.pi_invocation_count == 1
-
-    def test_subsequent_call_adds_delay(self, tmp_path: Path) -> None:
-        """Test that subsequent calls add delay."""
-        settings = MagicMock()
-        settings.pi_sequential_delay_seconds = TEST_PI_DELAY_SECONDS
-        paths = MagicMock()
-        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
-        paths.fdr_dir = tmp_path
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.pi_invocation_count = 1
-
-        with patch("fix_die_repeat.runner.time.sleep") as mock_sleep:
-            runner.before_pi_call()
-            mock_sleep.assert_called_once_with(TEST_PI_DELAY_SECONDS)
-            assert runner.pi_invocation_count == EXPECTED_PI_INVOCATION_COUNT
+# Note: TestBeforePiCall was removed — the sequential-call delay is now owned by
+# PiBackend. See tests/test_backends/test_pi_backend.py::test_invoke_applies_sequential_delay.
 
 
 class TestGenerateDiff:
@@ -243,7 +204,6 @@ class TestRunFixAttempt:
         runner.paths = paths
         runner.iteration = 1
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
         runner.check_oscillation = MagicMock(return_value="Oscillation detected!")  # type: ignore[method-assign]
         runner.filter_checks_log = MagicMock()  # type: ignore[method-assign]
@@ -282,7 +242,6 @@ class TestRunFixAttempt:
         runner.paths = paths
         runner.iteration = 1
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(1, "", "error"))  # type: ignore[method-assign]
         runner.check_oscillation = MagicMock(return_value=None)  # type: ignore[method-assign]
         runner.filter_checks_log = MagicMock()  # type: ignore[method-assign]
@@ -324,7 +283,6 @@ class TestRunFixAttempt:
         runner.paths = paths
         runner.iteration = 1
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
         runner.check_oscillation = MagicMock(return_value=None)  # type: ignore[method-assign]
         runner.filter_checks_log = MagicMock()  # type: ignore[method-assign]
@@ -364,7 +322,6 @@ class TestRunFixAttempt:
         runner.paths = paths
         runner.iteration = 1
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
         runner.check_oscillation = MagicMock(return_value=None)  # type: ignore[method-assign]
         runner.filter_checks_log = MagicMock()  # type: ignore[method-assign]
@@ -404,7 +361,6 @@ class TestRunFixAttempt:
         runner.paths = paths
         runner.iteration = 1
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
         runner.check_oscillation = MagicMock(return_value=None)  # type: ignore[method-assign]
         runner.filter_checks_log = MagicMock()  # type: ignore[method-assign]
@@ -449,7 +405,6 @@ class TestRunFixAttempt:
         runner.paths = paths
         runner.iteration = 1
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
         runner.check_oscillation = MagicMock(return_value=None)  # type: ignore[method-assign]
         runner.filter_checks_log = MagicMock()  # type: ignore[method-assign]
@@ -803,7 +758,6 @@ class TestRunPiReview:
         runner.settings = settings
         runner.paths = paths
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
 
         # Create diff file
@@ -829,7 +783,6 @@ class TestRunPiReview:
         runner.settings = settings
         runner.paths = paths
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
 
         runner.run_pi_review(200000, runner.run_pi_safe)  # type: ignore[arg-type]
@@ -852,7 +805,6 @@ class TestRunPiReview:
         runner.settings = settings
         runner.paths = paths
         runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
         runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
 
         # Create review history

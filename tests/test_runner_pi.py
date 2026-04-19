@@ -1,102 +1,30 @@
-"""Tests for runner pi interactions and setup."""
+"""Tests for PiRunner setup paths that exercise pi through the Backend abstraction.
+
+The per-call pi invocation behavior (argv, log writing, retry) lives in
+:mod:`tests.test_backends.test_pi_backend`. This module covers the wider
+``test_model`` / ``setup_run`` / ``check_oscillation`` PiRunner flows that
+sit above the backend.
+"""
 
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from fix_die_repeat.backends import BackendResult
 from fix_die_repeat.config import Paths
 from fix_die_repeat.runner import PiRunner
 from fix_die_repeat.utils import get_git_revision_hash
 
 
-class TestRunPi:
-    """Tests for run_pi and run_pi_safe."""
-
-    def test_run_pi_writes_log(self, tmp_path: Path) -> None:
-        """Test run_pi writes stdout/stderr to pi.log."""
-        settings = MagicMock()
-        paths = MagicMock()
-        paths.project_root = tmp_path
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
-
-        with patch("fix_die_repeat.runner.run_command") as mock_run:
-            mock_run.return_value = (0, "hello", "warn")
-            returncode, stdout, stderr = runner.run_pi("-p", "hello")
-
-        assert returncode == 0
-        assert stdout == "hello"
-        assert stderr == "warn"
-        log_content = paths.pi_log.read_text()
-        assert "Command: pi -p hello" in log_content
-        assert "STDOUT:\nhello" in log_content
-        assert "STDERR:\nwarn" in log_content
-
-    def test_run_pi_logs_error_on_failure(self, tmp_path: Path) -> None:
-        """Test run_pi logs error when pi fails."""
-        settings = MagicMock()
-        paths = MagicMock()
-        paths.project_root = tmp_path
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
-
-        with patch("fix_die_repeat.runner.run_command") as mock_run:
-            mock_run.return_value = (1, "", "boom")
-            runner.run_pi("-p", "boom")
-
-        runner.logger.error.assert_any_call("pi exited with code %s", 1)
-
-    def test_run_pi_safe_capacity_error(self, tmp_path: Path) -> None:
-        """Test run_pi_safe triggers model skip on 503 errors."""
-        settings = MagicMock()
-        paths = MagicMock()
-        paths.pi_log = tmp_path / "pi.log"
-        paths.pi_log.write_text("503 No capacity")
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.logger = MagicMock()
-        runner.run_pi = MagicMock(  # type: ignore[method-assign]
-            side_effect=[(1, "", ""), (0, "", ""), (0, "", "")],
-        )
-
-        returncode, _stdout, _stderr = runner.run_pi_safe("-p", "fix")
-
-        assert returncode == 0
-        assert runner.run_pi.call_args_list[1].args == ("-p", "/model-skip")
-
-    def test_run_pi_safe_long_context_error(self, tmp_path: Path) -> None:
-        """Test run_pi_safe triggers emergency compaction on 429 errors."""
-        settings = MagicMock()
-        paths = MagicMock()
-        paths.pi_log = tmp_path / "pi.log"
-        paths.pi_log.write_text("429 long context")
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.logger = MagicMock()
-        runner.emergency_compact = MagicMock()  # type: ignore[method-assign]
-        runner.run_pi = MagicMock(  # type: ignore[method-assign]
-            side_effect=[(1, "", ""), (0, "", "")],
-        )
-
-        returncode, _stdout, _stderr = runner.run_pi_safe("-p", "fix")
-
-        assert returncode == 0
-        runner.emergency_compact.assert_called_once()
+def _make_runner_with_stub_backend() -> tuple[PiRunner, MagicMock]:
+    """Build a PiRunner (via ``__new__``) with a MagicMock backend attached."""
+    runner = PiRunner.__new__(PiRunner)
+    runner.logger = MagicMock()
+    backend = MagicMock()
+    runner.backend = backend  # type: ignore[assignment]
+    return runner, backend
 
 
 class TestModelAndSetup:
@@ -110,26 +38,27 @@ class TestModelAndSetup:
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
 
-        runner = PiRunner.__new__(PiRunner)
+        runner, backend = _make_runner_with_stub_backend()
         runner.settings = settings
         runner.paths = paths
-        runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
 
         test_file = tmp_path / ".model_test_result.txt"
 
-        def fake_run_command(*_args: str, **_kwargs: object) -> tuple[int, str, str]:
+        def fake_invoke(_request: object) -> BackendResult:
             test_file.write_text("MODEL TEST OK")
-            return (0, "", "")
+            return BackendResult(0, "", "")
 
-        with (
-            patch("fix_die_repeat.runner.run_command", side_effect=fake_run_command),
-            pytest.raises(SystemExit) as excinfo,
-        ):
+        backend.invoke.side_effect = fake_invoke
+
+        with pytest.raises(SystemExit) as excinfo:
             runner.test_model()
 
         assert excinfo.value.code == 0
         assert not test_file.exists()
+        # Backend received a structured request with the test model.
+        request = backend.invoke.call_args.args[0]
+        assert request.model == "test-model"
+        assert "MODEL TEST OK" in request.prompt
 
     def test_test_model_pseudocode_failure(self, tmp_path: Path) -> None:
         """Test test_model warns on pseudo-code and exits with failure."""
@@ -139,26 +68,23 @@ class TestModelAndSetup:
         paths.fdr_dir = tmp_path
         paths.project_root = tmp_path
 
-        runner = PiRunner.__new__(PiRunner)
+        runner, backend = _make_runner_with_stub_backend()
         runner.settings = settings
         runner.paths = paths
-        runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
 
         test_file = tmp_path / ".model_test_result.txt"
 
-        def fake_run_command(*_args: str, **_kwargs: object) -> tuple[int, str, str]:
+        def fake_invoke(_request: object) -> BackendResult:
             test_file.write_text("File.write('oops')")
-            return (0, "", "")
+            return BackendResult(0, "", "")
 
-        with (
-            patch("fix_die_repeat.runner.run_command", side_effect=fake_run_command),
-            pytest.raises(SystemExit) as excinfo,
-        ):
+        backend.invoke.side_effect = fake_invoke
+
+        with pytest.raises(SystemExit) as excinfo:
             runner.test_model()
 
         assert excinfo.value.code == 1
-        assert runner.logger.warning.called
+        assert cast("MagicMock", runner.logger).warning.called
         assert not test_file.exists()
 
     def test_setup_run_archives_artifacts(self, tmp_path: Path) -> None:

@@ -229,6 +229,26 @@ class TestPiBackendInvokeSafe:
         assert backend.invoke.call_count == EXPECTED_RETRY_COUNT
 
 
+class TestPiBackendInvokeRawSafe:
+    """Tests for PiBackend.invoke_raw_safe() — the legacy-argv safe path."""
+
+    def test_invoke_raw_safe_retries_once_on_failure(self, tmp_path: Path) -> None:
+        """invoke_raw_safe reuses the same retry semantics as invoke_safe."""
+        backend = _make_backend(tmp_path)
+        (tmp_path / "pi.log").write_text("generic failure")
+        backend.invoke_raw = MagicMock(  # type: ignore[method-assign]
+            side_effect=[
+                BackendResult(1, "", ""),
+                BackendResult(0, "", ""),
+            ],
+        )
+
+        result = backend.invoke_raw_safe("-p", "hello")
+
+        assert result.returncode == 0
+        assert backend.invoke_raw.call_count == EXPECTED_RETRY_COUNT
+
+
 class TestBackendProtocol:
     """Confirm PiBackend satisfies the structural Backend protocol."""
 

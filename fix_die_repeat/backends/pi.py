@@ -75,7 +75,14 @@ class PiBackend:
 
     def invoke_safe(self, request: BackendRequest) -> BackendResult:
         """Run pi with a single retry, handling capacity and long-context errors."""
-        result = self.invoke(request)
+        return self._retry(lambda: self.invoke(request))
+
+    def invoke_raw_safe(self, *args: str) -> BackendResult:
+        """Legacy-argv variant of :meth:`invoke_safe` used by PiRunner shims."""
+        return self._retry(lambda: self.invoke_raw(*args))
+
+    def _retry(self, call: Callable[[], BackendResult]) -> BackendResult:
+        result = call()
         if result.returncode == 0:
             return result
 
@@ -95,7 +102,7 @@ class PiBackend:
             self.logger.info("Emergency compaction complete. Retrying...")
 
         self.logger.info("pi failed (exit %s). Retrying once...", result.returncode)
-        return self.invoke(request)
+        return call()
 
     def _before_invoke(self) -> None:
         if self._invocation_count > 0:
