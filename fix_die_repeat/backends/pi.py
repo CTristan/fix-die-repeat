@@ -64,22 +64,18 @@ class PiBackend:
         """Run pi once for the given request, no retry."""
         return self._run(["pi", *self.build_argv(request)])
 
-    def invoke_raw(self, *args: str) -> BackendResult:
-        """Escape hatch: run pi with a pre-built argv list.
-
-        Used only by the `PiRunner.run_pi[_safe]` legacy shims and by the
-        `/model-skip` retry path inside :meth:`invoke_safe`. New callers
-        should use :meth:`invoke` / :meth:`invoke_safe` with BackendRequest.
-        """
-        return self._run(["pi", *args])
-
     def invoke_safe(self, request: BackendRequest) -> BackendResult:
         """Run pi with a single retry, handling capacity and long-context errors."""
         return self._retry(lambda: self.invoke(request))
 
-    def invoke_raw_safe(self, *args: str) -> BackendResult:
-        """Legacy-argv variant of :meth:`invoke_safe` used by PiRunner shims."""
-        return self._retry(lambda: self.invoke_raw(*args))
+    def _invoke_raw(self, *args: str) -> BackendResult:
+        """Pi-internal escape hatch: run pi with a pre-built argv list.
+
+        Used only by the ``/model-skip`` retry path inside :meth:`_retry`.
+        External callers must use :meth:`invoke` / :meth:`invoke_safe` with
+        :class:`BackendRequest`.
+        """
+        return self._run(["pi", *args])
 
     def _retry(self, call: Callable[[], BackendResult]) -> BackendResult:
         result = call()
@@ -92,7 +88,7 @@ class PiBackend:
             self.logger.info(
                 "Detected model capacity error (503). Skipping current model...",
             )
-            self.invoke_raw("-p", "/model-skip")
+            self._invoke_raw("-p", "/model-skip")
 
         if "429" in log_content.lower() and "long context" in log_content.lower():
             self.logger.info(

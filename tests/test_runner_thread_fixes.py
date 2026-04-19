@@ -3,6 +3,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from fix_die_repeat.backends import BackendResult
 from fix_die_repeat.runner import PiRunner
 from tests.conftest import FAKE_TEMPLATE_CONTEXT
 
@@ -16,8 +17,11 @@ EXPECTED_GIT_COMMAND_CALLS = 2
 class TestRunFixAttemptThreadFixes:
     """Tests for run_fix_attempt regression fixes."""
 
-    def test_returns_pi_exit_code_and_runs_git_with_project_root(self, tmp_path: Path) -> None:
-        """run_fix_attempt should return pi's exit code and scope git commands to repo root."""
+    def test_returns_backend_exit_code_and_runs_git_with_project_root(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """run_fix_attempt should return backend exit code and scope git commands to repo root."""
         settings = MagicMock()
         settings.max_iters = TEST_MAX_ITERS
         paths = MagicMock()
@@ -34,8 +38,9 @@ class TestRunFixAttemptThreadFixes:
         runner.logger = MagicMock()
         runner.check_oscillation = MagicMock(return_value=None)  # type: ignore[method-assign]
         runner.filter_checks_log = MagicMock()  # type: ignore[method-assign]
-        runner.run_pi_safe = MagicMock(  # type: ignore[method-assign]
-            return_value=(TEST_PI_FAILURE_EXIT_CODE, "", ""),
+        runner.backend = MagicMock()  # type: ignore[assignment]
+        runner.backend.invoke_safe = MagicMock(
+            return_value=BackendResult(TEST_PI_FAILURE_EXIT_CODE, "", ""),
         )
 
         with patch("fix_die_repeat.runner.run_command") as mock_run_command:

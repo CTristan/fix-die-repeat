@@ -138,15 +138,15 @@ class TestPiBackendInvoke:
         assert mock_sleep.call_args_list == [((3,), {}), ((3,), {})]
 
 
-class TestPiBackendInvokeRaw:
-    """Tests for PiBackend.invoke_raw() (legacy *args path used by PiRunner shims)."""
+class TestPiBackendInvokeRawInternal:
+    """Tests for PiBackend._invoke_raw() — the pi-internal escape hatch for /model-skip."""
 
     def test_invoke_raw_passes_args_through(self, tmp_path: Path) -> None:
-        """invoke_raw prepends ``pi`` and forwards args verbatim."""
+        """_invoke_raw prepends ``pi`` and forwards args verbatim."""
         backend = _make_backend(tmp_path)
         with patch("fix_die_repeat.backends.pi.run_command") as mock_run:
             mock_run.return_value = (0, "", "")
-            result = backend.invoke_raw("-p", "--tools", "read", "hello")
+            result = backend._invoke_raw("-p", "--tools", "read", "hello")  # noqa: SLF001
 
         mock_run.assert_called_once_with(
             ["pi", "-p", "--tools", "read", "hello"],
@@ -174,7 +174,7 @@ class TestPiBackendInvokeSafe:
         self,
         tmp_path: Path,
     ) -> None:
-        """A 503 in pi.log triggers ``/model-skip`` via invoke_raw, then retry."""
+        """A 503 in pi.log triggers ``/model-skip`` via _invoke_raw, then retry."""
         backend = _make_backend(tmp_path)
         (tmp_path / "pi.log").write_text("503 No capacity")
         backend.invoke = MagicMock(  # type: ignore[method-assign]
@@ -183,14 +183,14 @@ class TestPiBackendInvokeSafe:
                 BackendResult(0, "", ""),  # retry succeeds
             ],
         )
-        backend.invoke_raw = MagicMock(  # type: ignore[method-assign]
+        backend._invoke_raw = MagicMock(  # type: ignore[method-assign]  # noqa: SLF001
             return_value=BackendResult(0, "", ""),
         )
 
         result = backend.invoke_safe(BackendRequest(prompt="fix"))
 
         assert result.returncode == 0
-        backend.invoke_raw.assert_called_once_with("-p", "/model-skip")
+        backend._invoke_raw.assert_called_once_with("-p", "/model-skip")  # noqa: SLF001
 
     def test_invoke_safe_long_context_triggers_on_long_context_callback(
         self,
@@ -213,7 +213,7 @@ class TestPiBackendInvokeSafe:
         on_long_context.assert_called_once()
 
     def test_invoke_safe_generic_failure_retries_once(self, tmp_path: Path) -> None:
-        """No 503/429 detected → retry once anyway, matching run_pi_safe today."""
+        """No 503/429 detected → retry once anyway."""
         backend = _make_backend(tmp_path)
         (tmp_path / "pi.log").write_text("some other error")
         backend.invoke = MagicMock(  # type: ignore[method-assign]
@@ -227,26 +227,6 @@ class TestPiBackendInvokeSafe:
 
         assert result.returncode == 0
         assert backend.invoke.call_count == EXPECTED_RETRY_COUNT
-
-
-class TestPiBackendInvokeRawSafe:
-    """Tests for PiBackend.invoke_raw_safe() — the legacy-argv safe path."""
-
-    def test_invoke_raw_safe_retries_once_on_failure(self, tmp_path: Path) -> None:
-        """invoke_raw_safe reuses the same retry semantics as invoke_safe."""
-        backend = _make_backend(tmp_path)
-        (tmp_path / "pi.log").write_text("generic failure")
-        backend.invoke_raw = MagicMock(  # type: ignore[method-assign]
-            side_effect=[
-                BackendResult(1, "", ""),
-                BackendResult(0, "", ""),
-            ],
-        )
-
-        result = backend.invoke_raw_safe("-p", "hello")
-
-        assert result.returncode == 0
-        assert backend.invoke_raw.call_count == EXPECTED_RETRY_COUNT
 
 
 class TestBackendProtocol:

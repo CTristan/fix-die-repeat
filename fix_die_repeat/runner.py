@@ -141,21 +141,6 @@ class PiRunner:
             return manager
         return None
 
-    def run_pi(self, *args: str) -> tuple[int, str, str]:
-        """Legacy shim: delegate to :meth:`Backend.invoke_raw` via ``self.backend``.
-
-        Kept so existing tests that mock ``runner.run_pi`` / ``runner.run_pi_safe``
-        continue to work. New callers should use ``self.backend.invoke(...)``
-        with a structured :class:`BackendRequest`.
-        """
-        result = self.backend.invoke_raw(*args)  # type: ignore[attr-defined]
-        return (result.returncode, result.stdout, result.stderr)
-
-    def run_pi_safe(self, *args: str) -> tuple[int, str, str]:
-        """Legacy shim: delegate to :meth:`Backend.invoke_raw_safe`."""
-        result = self.backend.invoke_raw_safe(*args)  # type: ignore[attr-defined]
-        return (result.returncode, result.stdout, result.stderr)
-
     def test_model(self) -> None:
         """Test model compatibility before running full loop."""
         if not self.settings.test_model:
@@ -355,19 +340,18 @@ class PiRunner:
         else:
             self.filter_checks_log()
 
-        # Build pi command
-        pi_args = ["-p", "--tools", "read,edit,write,bash,grep,find,ls"]
-        pi_args.append(f"@{self.paths.checks_filtered_log}")
+        # Build attachments
+        attachments: list[Path] = [self.paths.checks_filtered_log]
 
         # Add historical context
         if self.paths.review_file.exists():
-            pi_args.append(f"@{self.paths.review_file}")
+            attachments.append(self.paths.review_file)
         if self.paths.build_history_file.exists():
-            pi_args.append(f"@{self.paths.build_history_file}")
+            attachments.append(self.paths.build_history_file)
 
         # Attach changed files in push mode
         if context_mode == "push":
-            pi_args.extend(f"@{filepath}" for filepath in changed_files)
+            attachments.extend(Path(filepath) for filepath in changed_files)
 
         # Detect languages for language-specific checks
         languages = resolve_languages(changed_files, self.settings.languages)
@@ -387,7 +371,14 @@ class PiRunner:
         )
 
         self.logger.info("Running backend to fix errors (attempt %s)...", fix_attempt)
-        pi_returncode, _, _ = self.run_pi_safe(*pi_args, prompt)
+        result = self.backend.invoke_safe(
+            BackendRequest(
+                prompt=prompt,
+                tools=("read", "edit", "write", "bash", "grep", "find", "ls"),
+                attachments=tuple(attachments),
+            ),
+        )
+        pi_returncode = result.returncode
 
         if pi_returncode != 0:
             self.logger.info("Backend could not produce a fix on attempt %s.", fix_attempt)
@@ -1634,18 +1625,13 @@ class PiRunner:
             max_fix_attempts,
         )
 
-        pi_args = ["-p", "--tools", "read,edit,write,bash,grep,find,ls"]
-
-        if self.settings.model:
-            pi_args.extend(["--model", self.settings.model])
-
-        pi_args.append(f"@{self.paths.review_current_file}")
+        attachments: list[Path] = [self.paths.review_current_file]
 
         # Attach recent history
         if self.paths.review_file.exists():
             lines = self.paths.review_file.read_text().splitlines()[-50:]
             self.paths.review_recent_file.write_text("\n".join(lines))
-            pi_args.append(f"@{self.paths.review_recent_file}")
+            attachments.append(self.paths.review_recent_file)
 
         # Build fix prompt
         fix_prompt = render_prompt(
@@ -1653,7 +1639,15 @@ class PiRunner:
             **self.paths.template_context(),
         )
 
-        returncode, _, _ = self.run_pi_safe(*pi_args, fix_prompt)
+        result = self.backend.invoke_safe(
+            BackendRequest(
+                prompt=fix_prompt,
+                tools=("read", "edit", "write", "bash", "grep", "find", "ls"),
+                attachments=tuple(attachments),
+                model=self.settings.model,
+            ),
+        )
+        returncode = result.returncode
 
         if returncode != 0:
             self.logger.info("Backend fix failed on attempt %s.", fix_attempt)
@@ -1963,16 +1957,16 @@ class PiRunner:
 
         This is a compatibility wrapper for tests. In normal operation,
         introspection runs via _run_post_run_introspection which has access
-        to current iteration, start_sha, and run_pi_safe.
+        to current iteration, start_sha, and the injected backend.
 
         Args:
             iteration: Current iteration number (not used, for test compatibility)
             start_sha: Starting git commit SHA (not used, for test compatibility)
-            run_pi_callback: Function to run pi (not used, for test compatibility)
+            run_pi_callback: Function to run the backend (not used, for test compatibility)
 
         """
         # Parameters accepted for test compatibility but not used
-        # _run_post_run_introspection uses self.iteration, self.start_sha, self.run_pi_safe
+        # _run_post_run_introspection uses self.iteration, self.start_sha, self.backend
         self._run_post_run_introspection()
 
 

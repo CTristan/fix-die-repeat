@@ -38,7 +38,8 @@ class TestRunReviewFixAttempt:
         runner.iteration = 1
         runner.consecutive_toolless_attempts = 0
         runner.logger = MagicMock()
-        runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
+        runner.backend = MagicMock()  # type: ignore[assignment]
+        runner.backend.invoke_safe = MagicMock(return_value=BackendResult(0, "", ""))
         runner.resolve_pr_threads = MagicMock()  # type: ignore[method-assign]
 
         paths.review_current_file.write_text("[CRITICAL] Bug found")
@@ -52,10 +53,10 @@ class TestRunReviewFixAttempt:
             result = runner.run_review_fix_attempt(1, 3)
 
         assert result is True
-        assert runner.run_pi_safe.called
-        pi_args = runner.run_pi_safe.call_args.args
-        assert "--tools" in pi_args
-        assert "read,edit,write,bash,grep,find,ls" in pi_args
+        assert runner.backend.invoke_safe.called
+        request = runner.backend.invoke_safe.call_args.args[0]
+        assert request.tools == ("read", "edit", "write", "bash", "grep", "find", "ls")
+        assert request.model == "test-model"
         assert mock_git.call_args_list[0].kwargs["cwd"] == tmp_path
         assert mock_git.call_args_list[1].kwargs["cwd"] == tmp_path
 
@@ -80,7 +81,8 @@ class TestRunReviewFixAttempt:
         runner.iteration = 1
         runner.consecutive_toolless_attempts = 0
         runner.logger = MagicMock()
-        runner.run_pi_safe = MagicMock(return_value=(1, "", "error"))  # type: ignore[method-assign]
+        runner.backend = MagicMock()  # type: ignore[assignment]
+        runner.backend.invoke_safe = MagicMock(return_value=BackendResult(1, "", "error"))
 
         paths.review_current_file.write_text("[CRITICAL] Bug found")
 
@@ -113,7 +115,8 @@ class TestRunReviewFixAttempt:
         runner.iteration = 1
         runner.consecutive_toolless_attempts = 0
         runner.logger = MagicMock()
-        runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
+        runner.backend = MagicMock()  # type: ignore[assignment]
+        runner.backend.invoke_safe = MagicMock(return_value=BackendResult(0, "", ""))
         runner.resolve_pr_threads = MagicMock()  # type: ignore[method-assign]
 
         paths.review_current_file.write_text("[CRITICAL] Bug found")

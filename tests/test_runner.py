@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fix_die_repeat import runner_introspection as runner_introspection_module
+from fix_die_repeat.backends import BackendResult
 from fix_die_repeat.runner import PiRunner
 from fix_die_repeat.runner_introspection import (  # Testing private class is intentional
     _FileLock,
@@ -204,7 +205,8 @@ class TestRunFixAttempt:
         runner.paths = paths
         runner.iteration = 1
         runner.logger = MagicMock()
-        runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
+        runner.backend = MagicMock()  # type: ignore[assignment]
+        runner.backend.invoke_safe = MagicMock(return_value=BackendResult(0, "", ""))
         runner.check_oscillation = MagicMock(return_value="Oscillation detected!")  # type: ignore[method-assign]
         runner.filter_checks_log = MagicMock()  # type: ignore[method-assign]
 
@@ -220,8 +222,8 @@ class TestRunFixAttempt:
             "",
         )
 
-        # Should have called run_pi_safe
-        assert runner.run_pi_safe.called
+        # Should have called backend.invoke_safe
+        assert runner.backend.invoke_safe.called
 
     def test_run_fix_attempt_pi_failure(self, tmp_path: Path) -> None:
         """Test fix attempt when pi fails."""
@@ -242,7 +244,8 @@ class TestRunFixAttempt:
         runner.paths = paths
         runner.iteration = 1
         runner.logger = MagicMock()
-        runner.run_pi_safe = MagicMock(return_value=(1, "", "error"))  # type: ignore[method-assign]
+        runner.backend = MagicMock()  # type: ignore[assignment]
+        runner.backend.invoke_safe = MagicMock(return_value=BackendResult(1, "", "error"))
         runner.check_oscillation = MagicMock(return_value=None)  # type: ignore[method-assign]
         runner.filter_checks_log = MagicMock()  # type: ignore[method-assign]
 
@@ -261,7 +264,7 @@ class TestRunFixAttempt:
                 "",
             )
 
-            # Should have logged about pi failure
+            # Should have logged about backend failure
             assert runner.logger.info.called
 
     def test_run_fix_attempt_with_review_history(self, tmp_path: Path) -> None:
@@ -283,7 +286,8 @@ class TestRunFixAttempt:
         runner.paths = paths
         runner.iteration = 1
         runner.logger = MagicMock()
-        runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
+        runner.backend = MagicMock()  # type: ignore[assignment]
+        runner.backend.invoke_safe = MagicMock(return_value=BackendResult(0, "", ""))
         runner.check_oscillation = MagicMock(return_value=None)  # type: ignore[method-assign]
         runner.filter_checks_log = MagicMock()  # type: ignore[method-assign]
 
@@ -300,8 +304,8 @@ class TestRunFixAttempt:
             "",
         )
 
-        # Should have called run_pi_safe
-        assert runner.run_pi_safe.called
+        # Should have called backend.invoke_safe
+        assert runner.backend.invoke_safe.called
 
     def test_run_fix_attempt_with_build_history(self, tmp_path: Path) -> None:
         """Test fix attempt with build history."""
@@ -322,7 +326,8 @@ class TestRunFixAttempt:
         runner.paths = paths
         runner.iteration = 1
         runner.logger = MagicMock()
-        runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
+        runner.backend = MagicMock()  # type: ignore[assignment]
+        runner.backend.invoke_safe = MagicMock(return_value=BackendResult(0, "", ""))
         runner.check_oscillation = MagicMock(return_value=None)  # type: ignore[method-assign]
         runner.filter_checks_log = MagicMock()  # type: ignore[method-assign]
 
@@ -339,8 +344,8 @@ class TestRunFixAttempt:
             "",
         )
 
-        # Should have called run_pi_safe
-        assert runner.run_pi_safe.called
+        # Should have called backend.invoke_safe
+        assert runner.backend.invoke_safe.called
 
     def test_run_fix_attempt_push_mode(self, tmp_path: Path) -> None:
         """Test fix attempt in push mode."""
@@ -361,7 +366,8 @@ class TestRunFixAttempt:
         runner.paths = paths
         runner.iteration = 1
         runner.logger = MagicMock()
-        runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
+        runner.backend = MagicMock()  # type: ignore[assignment]
+        runner.backend.invoke_safe = MagicMock(return_value=BackendResult(0, "", ""))
         runner.check_oscillation = MagicMock(return_value=None)  # type: ignore[method-assign]
         runner.filter_checks_log = MagicMock()  # type: ignore[method-assign]
 
@@ -383,8 +389,8 @@ class TestRunFixAttempt:
             "",
         )
 
-        # Should have called run_pi_safe with file attachments
-        assert runner.run_pi_safe.called
+        # Should have called backend.invoke_safe with file attachments
+        assert runner.backend.invoke_safe.called
 
     def test_run_fix_attempt_pull_mode(self, tmp_path: Path) -> None:
         """Test fix attempt in pull mode."""
@@ -405,7 +411,8 @@ class TestRunFixAttempt:
         runner.paths = paths
         runner.iteration = 1
         runner.logger = MagicMock()
-        runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
+        runner.backend = MagicMock()  # type: ignore[assignment]
+        runner.backend.invoke_safe = MagicMock(return_value=BackendResult(0, "", ""))
         runner.check_oscillation = MagicMock(return_value=None)  # type: ignore[method-assign]
         runner.filter_checks_log = MagicMock()  # type: ignore[method-assign]
 
@@ -423,8 +430,8 @@ class TestRunFixAttempt:
             "",
         )
 
-        # Should have called run_pi_safe
-        assert runner.run_pi_safe.called
+        # Should have called backend.invoke_safe
+        assert runner.backend.invoke_safe.called
 
 
 class TestPrepareFixContext:
