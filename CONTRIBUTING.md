@@ -163,10 +163,15 @@ fix_die_repeat/
 
 `prompts.py` resolves Jinja templates from `<FDR_HOME>/templates/` first, then
 falls through to the package copies. The `--improve-prompts` mode seeds the
-four language-agnostic templates (`fix_checks.j2`, `local_review.j2`,
-`resolve_review_issues.j2`, `pr_threads_header.j2`) into that directory on
-demand and asks pi to update them in place. Nothing inside the installed
-package is mutated, so pip/uv upgrades stay safe.
+four top-level language-agnostic templates (`fix_checks.j2`, `local_review.j2`,
+`resolve_review_issues.j2`, `pr_threads_header.j2`) plus the shared review
+fragments under `partials/` (`_issue_classification.j2`, `_critical_checklist.j2`,
+`_language_checks.j2`, `_review_reporting_rules.j2`, `_review_output_contract.j2`,
+`_review_readonly_task.j2`) into that directory on demand and asks pi to update
+them in place. The three review prompts (`local_review.j2`, `contextual_review.j2`,
+`full_codebase_review.j2`) compose those partials, so editing a partial changes
+every review mode that includes it. Nothing inside the installed package is
+mutated, so pip/uv upgrades stay safe.
 
 ### Dependencies
 

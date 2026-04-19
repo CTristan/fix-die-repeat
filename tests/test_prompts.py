@@ -37,8 +37,8 @@ class TestRenderPrompt:
         assert FAKE_PATHS["build_history_path"] in prompt
         assert "- app.py" in prompt
         assert "CRITICAL WARNING: large file" in prompt
-        assert "structured data or external tool output" in prompt
-        assert "atomic/locked writes" in prompt
+        assert "ANALYZE the log" in prompt
+        assert "APPLY the fix" in prompt
         assert "python, javascript" in prompt
         assert "Use idiomatic patterns" in prompt
 
@@ -91,18 +91,14 @@ class TestRenderPrompt:
         )
 
         assert "No test configuration changes without explicit approval" in prompt
-        assert "external tool output or parsed JSON/YAML" in prompt
+        assert "CRITICAL REVIEW CHECKLIST (LANGUAGE-AGNOSTIC):" in prompt
         assert (
-            "Data serialization: structured outputs (JSON/YAML/etc.) use safe serializers" in prompt
+            "Data serialization: structured outputs use safe serializers "
+            "and are validated against expected schema" in prompt
         )
-        assert (
-            "docs/prompts/config instructions and examples match actual behavior "
-            "and required fields" in prompt
-        )
-        assert "avoid terminating the process from library/orchestration code" in prompt
-        assert "propagate internal failure codes to process exit status" in prompt
-        assert "tests assert observable behavior" in prompt
-        assert "user-facing logs/errors clearly explain limits, skips, or partial results" in prompt
+        assert "library/orchestration code returns status instead of terminating" in prompt
+        assert "CLI layers propagate failure codes" in prompt
+        assert "tests don't leak global state" in prompt
         assert "LANGUAGE-SPECIFIC CHECKS:" not in prompt
 
     def test_introspect_pr_review_template(self, tmp_path: Path) -> None:
@@ -468,3 +464,52 @@ class TestImprovePromptsTemplate:
         assert "status: reviewed" in prompt
         # Language-agnostic guard rail
         assert "language-agnostic" in prompt
+
+
+class TestReviewPartials:
+    """Each partial renders standalone with the context keys it actually needs."""
+
+    def test_review_readonly_task_renders(self) -> None:
+        """_review_readonly_task emits the identify-don't-fix framing."""
+        prompt = render_prompt("partials/_review_readonly_task.j2")
+        assert "identify and document issues" in prompt
+        assert "'edit' or 'bash'" in prompt
+
+    def test_issue_classification_renders(self) -> None:
+        """_issue_classification defines CRITICAL vs NIT."""
+        prompt = render_prompt("partials/_issue_classification.j2")
+        assert "[CRITICAL]" in prompt
+        assert "[NIT]" in prompt
+
+    def test_critical_checklist_renders(self) -> None:
+        """_critical_checklist renders the language-agnostic checklist."""
+        prompt = render_prompt("partials/_critical_checklist.j2")
+        assert "CRITICAL REVIEW CHECKLIST (LANGUAGE-AGNOSTIC):" in prompt
+        assert "No test configuration changes without explicit approval" in prompt
+
+    def test_language_checks_renders_with_languages(self) -> None:
+        """_language_checks emits the lang-specific section when languages is non-empty."""
+        prompt = render_prompt("partials/_language_checks.j2", languages=["python"])
+        assert "LANGUAGE-SPECIFIC CHECKS:" in prompt
+        assert "Python:" in prompt
+
+    def test_language_checks_empty_is_empty(self) -> None:
+        """_language_checks skips its section entirely when languages is empty."""
+        prompt = render_prompt("partials/_language_checks.j2", languages=[])
+        assert "LANGUAGE-SPECIFIC CHECKS" not in prompt
+
+    def test_review_reporting_rules_renders(self) -> None:
+        """_review_reporting_rules emits the canonical reporting rules with line numbers."""
+        prompt = render_prompt("partials/_review_reporting_rules.j2")
+        assert "ONLY report [NIT] issues" in prompt
+        assert "Include file paths and line numbers" in prompt
+
+    def test_review_output_contract_renders(self, tmp_path: Path) -> None:
+        """_review_output_contract emits the write/NO_ISSUES contract with the given path."""
+        review_current = tmp_path / "review_current.md"
+        prompt = render_prompt(
+            "partials/_review_output_contract.j2",
+            review_current_path=str(review_current),
+        )
+        assert str(review_current) in prompt
+        assert "NO_ISSUES" in prompt

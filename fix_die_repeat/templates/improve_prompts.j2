@@ -11,7 +11,7 @@ You are improving fix-die-repeat's own prompt templates based on accumulated PR 
 
 # Templates you may edit
 
-These are the four language-agnostic prompt templates whose wording affects every fix-die-repeat run. Each path below is where the user-owned copy lives; if a file is missing, a fresh copy has already been seeded from the shipped defaults before this prompt ran. Edit the file at the given path directly — do not edit the package copy.
+These are the language-agnostic prompt templates (and their shared partials) whose wording affects every fix-die-repeat run. Each path below is where the user-owned copy lives; if a file is missing, a fresh copy has already been seeded from the shipped defaults before this prompt ran. Edit the file at the given path directly — do not edit the package copy. Partials under `partials/` are included by the top-level review templates, so editing a partial changes every template that composes it.
 
 {% for name, path in template_paths.items() -%}
 - `{{ name }}` — `{{ path }}`
@@ -26,10 +26,12 @@ These are the four language-agnostic prompt templates whose wording affects ever
    - **Gap analysis**: Is this category already covered by the four templates? Is the coverage sufficient?
    - **Actionability**: Can a template change realistically catch this class of issue earlier?
 4. Edit the user templates at the paths above to address identified gaps:
-   - Add checklist items to `local_review.j2` for categories not currently covered.
+   - Add checklist items to `partials/_critical_checklist.j2` for categories not currently covered (the three review prompts all compose it).
+   - Tighten `partials/_review_reporting_rules.j2`, `partials/_issue_classification.j2`, or `partials/_review_readonly_task.j2` if reviewer framing is the gap.
    - Add guidance to `fix_checks.j2` for fix patterns that were commonly needed.
    - Add context to `resolve_review_issues.j2` for issue types the agent struggled with.
    - Update `pr_threads_header.j2` only if you find thread-level framing gaps.
+   - Only edit `local_review.j2`, `contextual_review.j2`, or `full_codebase_review.j2` directly for framing that is unique to one scope — shared content belongs in a partial.
 5. After editing, rewrite `{{ introspection_file_path }}` so every entry you processed has `status: reviewed` instead of `pending`. Leave every other entry untouched. Preserve the `---` document separators.
 6. **Compact the introspection file** if it has reached 2000+ lines:
    - Keep all `pending` entries in the main file (there should be none after step 5, but future entries may land here).

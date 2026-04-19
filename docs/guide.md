@@ -191,14 +191,17 @@ analysis without touching the code.
 fix-die-repeat --improve-prompts
 ```
 
-Reads `~/.fix-die-repeat/introspection.yaml` and asks pi to update the four
+Reads `~/.fix-die-repeat/introspection.yaml` and asks pi to update the
 language-agnostic prompt templates (`fix_checks.j2`, `local_review.j2`,
-`resolve_review_issues.j2`, `pr_threads_header.j2`) so future runs close the
-gaps surfaced by real PR feedback. The user-owned copies live under
-`~/.fix-die-repeat/templates/` and take precedence over the shipped defaults;
-they are seeded from the package on first use and never mutated inside the
-install. Pending introspection entries are marked `reviewed` once pi has
-processed them.
+`resolve_review_issues.j2`, `pr_threads_header.j2`) and the shared review
+partials under `partials/` (checklist, issue classification, reporting rules,
+output contract, etc.) so future runs close the gaps surfaced by real PR
+feedback. The user-owned copies live under `~/.fix-die-repeat/templates/` and
+take precedence over the shipped defaults; they are seeded from the package on
+first use and never mutated inside the install. Editing a partial changes every
+review mode that composes it (`local_review`, `contextual_review`,
+`full_codebase_review`). Pending introspection entries are marked `reviewed`
+once pi has processed them.
 
 ---
 

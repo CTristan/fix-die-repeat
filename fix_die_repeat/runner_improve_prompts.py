@@ -23,14 +23,21 @@ from fix_die_repeat.config import (
 )
 from fix_die_repeat.prompts import clear_prompt_cache, render_prompt
 
-# Templates exposed to pi for editing. Kept intentionally narrow: only the
-# four language-agnostic prompts that steer every run. Per-language
+# Templates exposed to pi for editing. Kept intentionally narrow: the
+# four top-level language-agnostic prompts that steer every run, plus the
+# shared ``partials/`` fragments those prompts compose. Per-language
 # partials under ``lang_checks/`` are deliberately excluded.
 EDITABLE_TEMPLATES = (
     "fix_checks.j2",
     "local_review.j2",
     "resolve_review_issues.j2",
     "pr_threads_header.j2",
+    "partials/_review_readonly_task.j2",
+    "partials/_issue_classification.j2",
+    "partials/_critical_checklist.j2",
+    "partials/_language_checks.j2",
+    "partials/_review_reporting_rules.j2",
+    "partials/_review_output_contract.j2",
 )
 
 
@@ -155,7 +162,13 @@ class ImprovePromptsManager:
         for name in EDITABLE_TEMPLATES:
             target = templates_dir / name
             if not target.exists():
-                source = package_templates.joinpath(name)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                # Traversable.joinpath('a/b') works for filesystem packages but
+                # is not portable to zip/wheel resources; chain the components
+                # so this keeps working after packaging.
+                source = package_templates
+                for part in name.split("/"):
+                    source = source.joinpath(part)
                 with resources.as_file(source) as source_path:
                     shutil.copyfile(source_path, target)
                 self.logger.info(

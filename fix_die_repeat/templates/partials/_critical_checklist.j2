@@ -1,0 +1,9 @@
+CRITICAL REVIEW CHECKLIST (LANGUAGE-AGNOSTIC):
+- [ ] Security: no injection flaws, auth/permission bypasses, secret exposure, unsafe deserialization, or insecure defaults
+- [ ] Performance: no obvious regressions, unbounded growth, heavy work in hot paths, or N+1 style patterns
+- [ ] Correctness/reliability: missing input validation, unsafe error handling, resource leaks, concurrency hazards, silent failures
+- [ ] Data serialization: structured outputs use safe serializers and are validated against expected schema
+- [ ] Code quality: no unjustified suppression of errors/warnings; library/orchestration code returns status instead of terminating; CLI layers propagate failure codes
+- [ ] Accuracy: docs/prompts/config match actual behavior; user-facing logs/errors explain limits and skips; non-obvious platform behavior is documented
+- [ ] Testing: complex logic has unit tests asserting observable behavior; tests don't leak global state
+- [ ] No test configuration changes without explicit approval
