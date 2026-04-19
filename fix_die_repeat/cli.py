@@ -118,8 +118,8 @@ _MAIN_HELP = (
     help=(
         "Smart contextual review (report-only). Reviews uncommitted changes, "
         "branch diff vs default branch, or full codebase if neither applies. "
-        "If multiple standalone-mode flags are set, precedence is: "
-        "--pr-threads-introspect-only > --contextual-review > --full-codebase-review."
+        "Standalone mode — mutually exclusive with --full-codebase-review, "
+        "--pr-threads-introspect-only, and --improve-prompts."
     ),
     envvar="FDR_CONTEXTUAL_REVIEW",
 )
@@ -129,8 +129,8 @@ _MAIN_HELP = (
     help=(
         "Audit the entire codebase instead of a diff. Report-only: "
         "never attempts fixes. Ignores --pr-review if also set. "
-        "Lowest precedence among standalone-mode flags: "
-        "--pr-threads-introspect-only and --contextual-review both win over this."
+        "Standalone mode — mutually exclusive with --contextual-review, "
+        "--pr-threads-introspect-only, and --improve-prompts."
     ),
     envvar="FDR_FULL_CODEBASE_REVIEW",
 )
@@ -140,8 +140,8 @@ _MAIN_HELP = (
     help=(
         "Fetch the PR's unresolved review threads, run introspection on them, "
         "then exit. Does not run checks, local review, or attempt fixes. "
-        "Highest precedence among standalone-mode flags: wins over "
-        "--contextual-review and --full-codebase-review."
+        "Standalone mode — mutually exclusive with --contextual-review, "
+        "--full-codebase-review, and --improve-prompts."
     ),
     envvar="FDR_PR_THREADS_INTROSPECT_ONLY",
 )
@@ -256,6 +256,31 @@ def _run_main_with_error_handling(
         return 1
 
 
+_STANDALONE_MODE_FLAGS: tuple[tuple[str, str], ...] = (
+    ("pr_threads_introspect_only", "--pr-threads-introspect-only"),
+    ("improve_prompts", "--improve-prompts"),
+    ("contextual_review", "--contextual-review"),
+    ("full_codebase_review", "--full-codebase-review"),
+)
+
+
+def _validate_standalone_modes_mutually_exclusive(settings: object) -> None:
+    """Reject combinations of standalone-mode flags.
+
+    Each standalone mode runs a one-shot codepath and exits; combining
+    them would silently drop all but one. Raise ValueError so the user
+    sees an actionable error instead of surprising behavior.
+    """
+    active = [cli_flag for attr, cli_flag in _STANDALONE_MODE_FLAGS if getattr(settings, attr)]
+    if len(active) > 1:
+        joined = ", ".join(active)
+        msg = (
+            f"The following flags are mutually exclusive: {joined}. "
+            "Pick one — each runs a one-shot mode and exits."
+        )
+        raise ValueError(msg)
+
+
 def _run_main(options: CliOptions) -> int:
     """Run main application logic using CliOptions.
 
@@ -275,6 +300,8 @@ def _run_main(options: CliOptions) -> int:
 
     # Get settings
     settings = get_settings(options)
+
+    _validate_standalone_modes_mutually_exclusive(settings)
 
     # Initialize paths
     paths = Paths()

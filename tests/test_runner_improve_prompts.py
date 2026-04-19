@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from fix_die_repeat.config import (
     Settings,
+    get_introspection_archive_file_path,
     get_introspection_file_path,
     get_user_templates_dir,
 )
@@ -16,6 +17,7 @@ from fix_die_repeat.runner_improve_prompts import (
     EDITABLE_TEMPLATES,
     ImprovePromptsManager,
 )
+from fix_die_repeat.runner_introspection import _FileLock  # Testing private class is intentional
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -190,6 +192,158 @@ class TestSeedingAndPiInvocation:
         rc = manager.run_improve_prompts(spy)
 
         assert rc == PI_FAILURE_EXIT_CODE
+
+
+class TestEnsureUserTemplatesName:
+    """The seeding helper should be named for its ensure-or-noop semantics."""
+
+    def test_method_named_ensure_user_templates(self) -> None:
+        """ImprovePromptsManager exposes _ensure_user_templates (the rename from _seed_...)."""
+        assert hasattr(ImprovePromptsManager, "_ensure_user_templates"), (
+            "_seed_user_templates was renamed to _ensure_user_templates because it "
+            "returns all paths regardless of whether they were freshly seeded"
+        )
+        assert not hasattr(ImprovePromptsManager, "_seed_user_templates"), (
+            "old name should be gone — rename, don't alias"
+        )
+
+
+class TestFileLockHeldDuringPi:
+    """run_improve_prompts must serialize with other FDR processes via _FileLock."""
+
+    def test_holds_file_lock_around_pi_call(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The pi callback must run inside a _FileLock context on the introspection file."""
+        _write_introspection(
+            "date: '2026-04-01'\nstatus: pending\npr_number: 1\npr_url: https://example.com/pr/1\n"
+            "project: demo\nthreads: []\n",
+        )
+
+        events: list[str] = []
+
+        original_enter = _FileLock.__enter__
+        original_exit = _FileLock.__exit__
+
+        def spy_enter(self: _FileLock) -> object:
+            events.append("lock-enter")
+            return original_enter(self)
+
+        def spy_exit(
+            self: _FileLock,
+            exc_type: type[BaseException] | None,
+            exc_val: BaseException | None,
+            exc_tb: object,
+        ) -> None:
+            events.append("lock-exit")
+            return original_exit(self, exc_type, exc_val, exc_tb)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(_FileLock, "__enter__", spy_enter)
+        monkeypatch.setattr(_FileLock, "__exit__", spy_exit)
+
+        def pi_spy(*_args: str) -> tuple[int, str, str]:
+            events.append("pi")
+            return (0, "", "")
+
+        manager = _manager()
+        rc = manager.run_improve_prompts(pi_spy)
+
+        assert rc == 0
+        assert events == ["lock-enter", "pi", "lock-exit"], (
+            f"pi must run between lock acquire and release; got {events!r}"
+        )
+
+
+class TestValidationAndRollback:
+    """The introspection file must survive a misbehaving pi."""
+
+    _PENDING_ENTRY = (
+        "date: '2026-04-01'\nstatus: pending\npr_number: 1\n"
+        "pr_url: https://example.com/pr/1\nproject: demo\nthreads: []\n"
+    )
+
+    def test_rolls_back_when_pi_corrupts_introspection_file(self) -> None:
+        """If pi leaves malformed YAML, restore pre-pi content and return non-zero."""
+        path = _write_introspection(self._PENDING_ENTRY)
+        original = path.read_text()
+
+        def corrupting_pi(*_args: str) -> tuple[int, str, str]:
+            path.write_text(": : : bad yaml : : :")
+            return (0, "", "")
+
+        manager = _manager()
+        rc = manager.run_improve_prompts(corrupting_pi)
+
+        assert path.read_text() == original, "pre-pi content must be restored"
+        assert rc != 0, "rollback must surface a non-zero exit code"
+
+    def test_accepts_valid_pi_edits(self) -> None:
+        """Valid YAML after pi must be kept as-is with a zero exit."""
+        path = _write_introspection(self._PENDING_ENTRY)
+        new_content = (
+            "date: '2026-04-01'\nstatus: reviewed\npr_number: 1\n"
+            "pr_url: https://example.com/pr/1\nproject: demo\nthreads: []\n"
+        )
+
+        def well_behaved_pi(*_args: str) -> tuple[int, str, str]:
+            path.write_text(new_content)
+            return (0, "", "")
+
+        manager = _manager()
+        rc = manager.run_improve_prompts(well_behaved_pi)
+
+        assert rc == 0
+        assert path.read_text() == new_content
+
+    def test_rolls_back_when_pi_corrupts_archive(self) -> None:
+        """If pi creates/rewrites a malformed archive, rollback both files."""
+        path = _write_introspection(self._PENDING_ENTRY)
+        archive = get_introspection_archive_file_path()
+        # Pre-existing valid archive that pi will clobber.
+        archive_original = (
+            "date: '2025-01-01'\nstatus: reviewed\npr_number: 99\n"
+            "pr_url: https://example.com/pr/99\nproject: demo\nthreads: []\n"
+        )
+        archive.write_text(archive_original)
+        main_original = path.read_text()
+
+        def archive_corrupting_pi(*_args: str) -> tuple[int, str, str]:
+            # pi leaves main file valid but archive malformed.
+            path.write_text(self._PENDING_ENTRY.replace("pending", "reviewed"))
+            archive.write_text(": : : bad yaml : : :")
+            return (0, "", "")
+
+        manager = _manager()
+        rc = manager.run_improve_prompts(archive_corrupting_pi)
+
+        assert rc != 0
+        assert path.read_text() == main_original, "main file must roll back too"
+        assert archive.read_text() == archive_original, "archive must roll back"
+
+    def test_no_backup_files_left_on_success(self) -> None:
+        """Happy path must not leave .bak files under FDR_HOME."""
+        _write_introspection(self._PENDING_ENTRY)
+
+        manager = _manager()
+        manager.run_improve_prompts(lambda *_a: (0, "", ""))
+
+        fdr_home = Path(os.environ["FDR_HOME"])
+        assert not list(fdr_home.rglob("*.bak"))
+
+    def test_no_backup_files_left_on_rollback(self) -> None:
+        """Rollback path must also clean up .bak files."""
+        path = _write_introspection(self._PENDING_ENTRY)
+
+        def corrupting_pi(*_args: str) -> tuple[int, str, str]:
+            path.write_text(": : : bad yaml : : :")
+            return (0, "", "")
+
+        manager = _manager()
+        manager.run_improve_prompts(corrupting_pi)
+
+        fdr_home = Path(os.environ["FDR_HOME"])
+        assert not list(fdr_home.rglob("*.bak"))
 
 
 class TestCacheClear:

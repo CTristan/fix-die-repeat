@@ -22,6 +22,7 @@ from fix_die_repeat.config import (
     get_user_templates_dir,
 )
 from fix_die_repeat.prompts import clear_prompt_cache, render_prompt
+from fix_die_repeat.runner_introspection import _FileLock
 
 # Templates exposed to pi for editing. Kept intentionally narrow: the
 # four top-level language-agnostic prompts that steer every run, plus the
@@ -39,6 +40,10 @@ EDITABLE_TEMPLATES = (
     "partials/_review_reporting_rules.j2",
     "partials/_review_output_contract.j2",
 )
+
+# Non-zero exit code returned when pi succeeds but leaves the introspection
+# or archive file unparseable, so the user notices the rollback.
+_ROLLBACK_EXIT_CODE = 1
 
 
 class ImprovePromptsManager:
@@ -85,12 +90,13 @@ class ImprovePromptsManager:
 
         templates_dir = get_user_templates_dir()
         templates_dir.mkdir(parents=True, exist_ok=True)
-        template_paths = self._seed_user_templates(templates_dir)
+        template_paths = self._ensure_user_templates(templates_dir)
 
+        archive_file = get_introspection_archive_file_path()
         prompt = render_prompt(
             "improve_prompts.j2",
             introspection_file_path=str(introspection_file),
-            archive_file_path=str(get_introspection_archive_file_path()),
+            archive_file_path=str(archive_file),
             templates_dir=str(templates_dir),
             template_paths={name: str(path) for name, path in template_paths.items()},
         )
@@ -98,11 +104,11 @@ class ImprovePromptsManager:
         self.logger.info(
             "[ImprovePrompts] Asking pi to review introspection data and update user templates...",
         )
-        returncode, _stdout, _stderr = run_pi_callback(
-            "-p",
-            "--tools",
-            "read,write,edit",
-            prompt,
+        returncode = self._run_pi_with_rollback(
+            introspection_file=introspection_file,
+            archive_file=archive_file,
+            run_pi_callback=run_pi_callback,
+            prompt=prompt,
         )
 
         # Refresh the Jinja environment so the edits land on the next render,
@@ -121,6 +127,110 @@ class ImprovePromptsManager:
             templates_dir,
         )
         return 0
+
+    def _run_pi_with_rollback(
+        self,
+        *,
+        introspection_file: Path,
+        archive_file: Path,
+        run_pi_callback: Callable[..., tuple[int, str, str]],
+        prompt: str,
+    ) -> int:
+        """Hold an exclusive lock on the introspection file for the pi call.
+
+        Acquires ``_FileLock`` on ``introspection.yaml`` so a concurrent FDR
+        process appending introspection entries serializes with us. Takes a
+        backup of both the main and archive files before invoking pi, and
+        rolls back if pi leaves either file unparseable.
+        """
+        # Open in r+ so we can hold an exclusive flock without truncating pi's
+        # edits. pi rewrites the file in place via its own open(...) calls; our
+        # handle exists only to anchor the flock.
+        with introspection_file.open("r+") as lock_handle, _FileLock(lock_handle):
+            main_backup = self._create_backup(introspection_file)
+            archive_existed = archive_file.exists()
+            archive_backup = self._create_backup(archive_file) if archive_existed else None
+
+            try:
+                returncode, _stdout, _stderr = run_pi_callback(
+                    "-p",
+                    "--tools",
+                    "read,write,edit",
+                    prompt,
+                )
+                if not self._is_valid_yaml(introspection_file) or not self._is_valid_yaml(
+                    archive_file
+                ):
+                    self.logger.error(
+                        "[ImprovePrompts] pi left %s or %s unparseable; rolling back.",
+                        introspection_file,
+                        archive_file,
+                    )
+                    self._restore_backup(introspection_file, main_backup)
+                    self._restore_archive(
+                        archive_file,
+                        archive_backup,
+                        archive_existed_before=archive_existed,
+                    )
+                    if returncode == 0:
+                        returncode = _ROLLBACK_EXIT_CODE
+                return returncode
+            finally:
+                if main_backup is not None and main_backup.exists():
+                    main_backup.unlink()
+                if archive_backup is not None and archive_backup.exists():
+                    archive_backup.unlink()
+
+    @staticmethod
+    def _create_backup(source: Path) -> Path | None:
+        """Copy ``source`` to a sibling ``.bak`` path and return it, or None if absent."""
+        if not source.exists():
+            return None
+        backup = source.with_suffix(source.suffix + ".bak")
+        shutil.copy2(source, backup)
+        return backup
+
+    def _is_valid_yaml(self, path: Path) -> bool:
+        """Return True if ``path`` is absent, empty, or parses as YAML documents."""
+        if not path.exists():
+            return True
+        try:
+            content = path.read_text()
+        except OSError as exc:
+            self.logger.warning("[ImprovePrompts] Failed to read %s: %s", path, exc)
+            return False
+        if not content.strip():
+            return True
+        try:
+            list(yaml.safe_load_all(content))
+        except yaml.YAMLError as exc:
+            self.logger.warning("[ImprovePrompts] %s is not valid YAML: %s", path, exc)
+            return False
+        return True
+
+    @staticmethod
+    def _restore_backup(target: Path, backup: Path | None) -> None:
+        """Overwrite ``target`` with ``backup`` if ``backup`` exists."""
+        if backup is not None and backup.exists():
+            shutil.copy2(backup, target)
+
+    def _restore_archive(
+        self,
+        archive_file: Path,
+        archive_backup: Path | None,
+        *,
+        archive_existed_before: bool,
+    ) -> None:
+        """Restore the archive file to its pre-pi state.
+
+        If the archive existed before pi ran, restore from its backup. If it
+        didn't exist before, delete any file pi created so we don't leave a
+        half-formed archive behind.
+        """
+        if archive_existed_before:
+            self._restore_backup(archive_file, archive_backup)
+        elif archive_file.exists():
+            archive_file.unlink()
 
     def _has_pending_entries(self, introspection_file: Path) -> bool:
         """Return True if ``introspection_file`` has at least one ``status: pending`` document."""
@@ -148,16 +258,17 @@ class ImprovePromptsManager:
             return False
         return any(isinstance(doc, dict) and doc.get("status") == "pending" for doc in documents)
 
-    def _seed_user_templates(self, templates_dir: Path) -> dict[str, Path]:
+    def _ensure_user_templates(self, templates_dir: Path) -> dict[str, Path]:
         """Ensure the editable templates exist under ``templates_dir``.
 
         For each template in ``EDITABLE_TEMPLATES``, copy the shipped
         package version into ``templates_dir`` if the user doesn't already
         have their own. Returns a mapping of template filename to the
-        absolute user path.
+        absolute user path (for all entries, whether freshly seeded or
+        pre-existing).
         """
         package_templates = resources.files("fix_die_repeat").joinpath("templates")
-        seeded: dict[str, Path] = {}
+        ensured: dict[str, Path] = {}
         for name in EDITABLE_TEMPLATES:
             target = templates_dir / name
             if not target.exists():
@@ -174,5 +285,5 @@ class ImprovePromptsManager:
                     "[ImprovePrompts] Seeded %s from shipped defaults.",
                     target,
                 )
-            seeded[name] = target
-        return seeded
+            ensured[name] = target
+        return ensured

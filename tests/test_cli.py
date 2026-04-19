@@ -112,6 +112,61 @@ class TestCliMain:
         assert "user-owned" in result.output
 
     @pytest.mark.parametrize(
+        ("flags", "expected_fragments"),
+        [
+            (
+                ["--improve-prompts", "--full-codebase-review"],
+                ("--improve-prompts", "--full-codebase-review"),
+            ),
+            (
+                ["--improve-prompts", "--contextual-review"],
+                ("--improve-prompts", "--contextual-review"),
+            ),
+            (
+                ["--pr-threads-introspect-only", "--full-codebase-review"],
+                ("--pr-threads-introspect-only", "--full-codebase-review"),
+            ),
+            (
+                ["--contextual-review", "--full-codebase-review"],
+                ("--contextual-review", "--full-codebase-review"),
+            ),
+            (
+                [
+                    "--improve-prompts",
+                    "--contextual-review",
+                    "--full-codebase-review",
+                ],
+                ("--improve-prompts", "--contextual-review", "--full-codebase-review"),
+            ),
+        ],
+    )
+    def test_mutually_exclusive_standalone_flags_error(
+        self,
+        flags: list[str],
+        expected_fragments: tuple[str, ...],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Combining standalone-mode flags must exit 1 with a clear error."""
+        original_paths = config.Paths
+
+        def mock_paths(_project_root: Path | None = None) -> config.Paths:
+            return original_paths(project_root=tmp_path)
+
+        monkeypatch.setattr(config, "Paths", mock_paths)
+        # Guard: if validation ever fails silently, we don't want a real run.
+        monkeypatch.setattr(runner.PiRunner, "run", lambda _self: 0)
+
+        cli_runner = CliRunner()
+        result = cli_runner.invoke(main, flags, catch_exceptions=False)
+
+        assert result.exit_code == 1
+        for fragment in expected_fragments:
+            assert fragment in result.output, (
+                f"error output {result.output!r} should name {fragment}"
+            )
+
+    @pytest.mark.parametrize(
         "flag",
         [
             "--full-codebase-review",
