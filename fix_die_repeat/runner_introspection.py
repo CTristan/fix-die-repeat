@@ -277,14 +277,18 @@ class IntrospectionManager:
                 global_introspection_file,
             )
 
+            # Result file consumed; safe to remove. Any earlier return (pi
+            # failure, validation failure, exception) leaves it on disk so
+            # the analysis can be recovered manually.
+            self.paths.introspection_result_file.unlink(missing_ok=True)
+
         except Exception:
             self.logger.exception(
                 "[Introspection] Unexpected error during introspection (non-blocking)",
             )
         finally:
-            # Clean up temporary files
+            # Always clean up the input data file; it has no value post-run.
             self.paths.introspection_data_file.unlink(missing_ok=True)
-            self.paths.introspection_result_file.unlink(missing_ok=True)
 
     def _validate_prerequisites_for_introspection(self) -> IntrospectionPrInfo | None:
         """Validate introspection prerequisites and get PR info.
