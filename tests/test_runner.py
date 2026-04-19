@@ -1761,7 +1761,7 @@ class TestPrThreadsIntrospectOnly:
         runner.iteration = 0
         runner.logger = logger
         runner.start_sha = "abc123"
-        runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
+        runner.backend = MagicMock()  # type: ignore[assignment]
 
         with (
             patch.object(runner, "_get_pr_manager", return_value=pr_manager),
@@ -1778,6 +1778,6 @@ class TestPrThreadsIntrospectOnly:
         assert result == 0
         introspection_manager.run_introspection.assert_called_once()
         call_args = introspection_manager.run_introspection.call_args
-        # Signature: (iteration, start_sha, run_pi_callback, *, introspect_only=...)
+        # Signature: (iteration, start_sha, backend, *, introspect_only=...)
         assert call_args.args[1] == ""
         assert call_args.kwargs.get("introspect_only") is True

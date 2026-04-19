@@ -9,13 +9,14 @@ import logging
 import os
 import sys
 import types
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 import yaml
+
+from fix_die_repeat.backends import Backend, BackendRequest
 
 # Platform-specific file locking imports
 if sys.platform == "win32":  # pragma: no cover
@@ -154,6 +155,9 @@ class IntrospectionPrInfo:
     url: str
 
 
+INTROSPECTION_TOOLS: tuple[str, ...] = ("read", "write")
+
+
 class IntrospectionManager:
     """Manages PR review introspection for the fix-die-repeat runner.
 
@@ -188,7 +192,7 @@ class IntrospectionManager:
         self,
         iteration: int,
         start_sha: str,
-        run_pi_callback: Callable[..., tuple[int, str, str]],
+        backend: Backend,
         *,
         introspect_only: bool = False,
     ) -> None:
@@ -196,7 +200,7 @@ class IntrospectionManager:
 
         This is a post-run step that:
         1. Collects PR thread data and agent outcomes
-        2. Calls pi with the introspection prompt template
+        2. Calls the backend with the introspection prompt template
         3. Appends the result to the global introspection file
 
         This step does NOT block or fail the overall run. Any errors are
@@ -205,7 +209,7 @@ class IntrospectionManager:
         Args:
             iteration: Current iteration number
             start_sha: Starting git commit SHA
-            run_pi_callback: Function to run pi (from PiRunner)
+            backend: Agent backend (e.g. ``PiBackend``)
             introspect_only: If True, skip fix-loop assumptions and mark every
                 in-scope thread with outcome "not-attempted"
 
@@ -228,7 +232,7 @@ class IntrospectionManager:
                 )
                 return
 
-            # Render prompt and build pi command
+            # Render prompt and build backend request
             prompt = render_prompt(
                 "introspect_pr_review.j2",
                 run_date=datetime.now(tz=UTC).strftime("%Y-%m-%d"),
@@ -237,19 +241,22 @@ class IntrospectionManager:
                 pr_url=pr_info.url,
                 output_path=str(self.paths.introspection_result_file),
             )
-            pi_args = ["-p", "--tools", "read,write"]
-            pi_args.append(f"@{self.paths.introspection_data_file}")
 
-            # Run pi and validate result
             self.logger.info(
                 "[Introspection] Calling pi to analyze PR threads...",
             )
-            returncode, _stdout, _stderr = run_pi_callback(*pi_args, prompt)
+            result = backend.invoke_safe(
+                BackendRequest(
+                    prompt=prompt,
+                    tools=INTROSPECTION_TOOLS,
+                    attachments=(self.paths.introspection_data_file,),
+                ),
+            )
 
-            if returncode != 0:
+            if result.returncode != 0:
                 self.logger.warning(
                     "[Introspection] pi call failed (exit %s), skipping introspection",
-                    returncode,
+                    result.returncode,
                 )
                 return
 

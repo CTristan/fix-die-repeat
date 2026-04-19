@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from fix_die_repeat.backends import BackendResult
 from fix_die_repeat.config import Paths, Settings, get_introspection_file_path
 from fix_die_repeat.runner import PiRunner
 from fix_die_repeat.runner_introspection import (
@@ -161,7 +162,11 @@ class TestRunIntrospection:
         with patch.object(runner, "collect_introspection_data"):
             with patch.object(runner, "get_branch_name", return_value="branch"):
                 with patch.object(runner, "get_pr_info", return_value=pr_info):
-                    with patch.object(runner, "run_pi_safe", return_value=(1, "", "error")):
+                    with patch.object(
+                        runner.backend,
+                        "invoke_safe",
+                        return_value=BackendResult(1, "", "error"),
+                    ):
                         runner.run_introspection()
 
         # Global introspection file should not be modified
@@ -204,7 +209,11 @@ class TestRunIntrospection:
                 "fix_die_repeat.runner_introspection.run_command",
                 return_value=(0, pr_json, ""),
             ):
-                with patch.object(runner, "run_pi_safe", return_value=(1, "", "killed")):
+                with patch.object(
+                    runner.backend,
+                    "invoke_safe",
+                    return_value=BackendResult(1, "", "killed"),
+                ):
                     runner.run_introspection()
 
         # Result file must survive so pi's analysis is recoverable
@@ -226,7 +235,7 @@ class TestRunIntrospection:
                 (0, "main\n", ""),
                 (0, pr_json, ""),
             ]
-            with patch.object(runner, "run_pi_safe") as mock_pi:
+            with patch.object(runner.backend, "invoke_safe") as mock_pi:
                 runner.run_introspection()
 
         mock_pi.assert_not_called()
@@ -274,7 +283,11 @@ class TestRunIntrospection:
                 "fix_die_repeat.runner_introspection.run_command",
                 return_value=(0, pr_json, ""),
             ):
-                with patch.object(runner, "run_pi_safe", return_value=(0, "", "")):
+                with patch.object(
+                    runner.backend,
+                    "invoke_safe",
+                    return_value=BackendResult(0, "", ""),
+                ):
                     # Don't mock collect_introspection_data, we already created the file
                     runner.run_introspection()
 
@@ -321,7 +334,11 @@ class TestRunIntrospection:
                     (0, "main\n", ""),
                     (0, pr_json, ""),
                 ]
-                with patch.object(runner, "run_pi_safe", return_value=(0, "", "")):
+                with patch.object(
+                    runner.backend,
+                    "invoke_safe",
+                    return_value=BackendResult(0, "", ""),
+                ):
                     runner.run_introspection()
 
         content = test_global_file.read_text()
@@ -362,7 +379,11 @@ class TestRunIntrospection:
                     "fix_die_repeat.runner_introspection.run_command",
                     return_value=(0, pr_json, ""),
                 ):
-                    with patch.object(runner, "run_pi_safe", return_value=(0, "", "")):
+                    with patch.object(
+                        runner.backend,
+                        "invoke_safe",
+                        return_value=BackendResult(0, "", ""),
+                    ):
                         # Create invalid YAML result file
                         runner.paths.introspection_result_file.write_text(invalid_yaml)
                         runner.run_introspection()
