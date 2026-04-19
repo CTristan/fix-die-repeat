@@ -15,35 +15,14 @@ Focus your review on the following {{ file_list | length }} changed file(s):
 
 {{ diff_context }}
 
-Your task is ONLY to identify and document issues in these changes. Do NOT attempt to fix them. You do not have access to 'edit' or 'bash'.
-
+{% include "partials/_review_readonly_task.j2" %}
 Use the 'read', 'grep', 'find', and 'ls' tools to examine the changed files and their surrounding context. Read each changed file fully to understand the impact of the changes.
 
-Classify issues as:
-- [CRITICAL]: Security vulnerabilities, data loss/corruption, correctness bugs, broken builds, performance regressions, or violations of project policy.
-- [NIT]: Style issues, minor optimizations, comments, formatting.
+{% include "partials/_issue_classification.j2" %}
 
-CRITICAL REVIEW CHECKLIST (LANGUAGE-AGNOSTIC):
-- [ ] Security: no injection flaws, auth/permission bypasses, secret exposure, unsafe deserialization, or insecure defaults
-- [ ] Performance: no obvious regressions, unbounded growth, heavy work in hot paths, or N+1 style patterns
-- [ ] Correctness/reliability: missing input validation, unsafe error handling, resource leaks, concurrency hazards, silent failures
-- [ ] Data serialization: structured outputs use safe serializers and are validated against expected schema
-- [ ] Code quality: no unjustified suppression of errors/warnings; library/orchestration code returns status instead of terminating; CLI layers propagate failure codes
-- [ ] Accuracy: docs/prompts/config match actual behavior; user-facing logs/errors explain limits and skips; non-obvious platform behavior is documented
-- [ ] Testing: complex logic has unit tests asserting observable behavior; tests don't leak global state
-- [ ] No test configuration changes without explicit approval
-{% if languages %}
+{% include "partials/_critical_checklist.j2" %}
+{% include "partials/_language_checks.j2" %}
 
-LANGUAGE-SPECIFIC CHECKS:
-{% for lang in languages %}
-{% include "lang_checks/" ~ lang ~ ".j2" %}
-{% endfor %}
-{% endif %}
+{% include "partials/_review_reporting_rules.j2" %}
 
-IMPORTANT:
-1. ONLY report [NIT] issues if you also find [CRITICAL] issues.
-2. If you only find [NIT] issues (no [CRITICAL] issues), treat this as "no critical issues found".
-3. If you find [CRITICAL] issues, report BOTH [CRITICAL] and [NIT] issues. Include file paths and line numbers so a human can verify each finding.
-
-If you find [CRITICAL] issues, use the 'write' tool to save them to '{{ review_current_path }}'.
-If you find NO [CRITICAL] issues, use the 'write' tool to write ONLY the text "NO_ISSUES" (no other text, no whitespace) to '{{ review_current_path }}'.
+{% include "partials/_review_output_contract.j2" %}

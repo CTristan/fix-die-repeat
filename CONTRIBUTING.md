@@ -144,15 +144,34 @@ uv run pytest && uv run ruff check --fix fix_die_repeat tests && uv run ruff for
 
 ```
 fix_die_repeat/
-├── cli.py          # CLI — uses Click
-├── config.py       # Settings and paths — uses Pydantic
-├── detection.py    # Check command resolution and auto-detection
-├── messages.py     # Constants and message generators for user-facing text
-├── prompts.py      # Jinja template renderer for pi prompts
-├── runner.py       # Main loop — orchestrates check/fix/review
-├── utils.py        # Utilities — logging, git, file operations
-└── templates/      # Prompt templates used by runner (Jinja2)
+├── cli.py                       # CLI — uses Click
+├── config.py                    # Settings and paths — uses Pydantic
+├── detection.py                 # Check command resolution and auto-detection
+├── messages.py                  # Constants and message generators for user-facing text
+├── prompts.py                   # Jinja template renderer for pi prompts (ChoiceLoader: user-dir wins)
+├── runner.py                    # Main loop — orchestrates check/fix/review
+├── runner_improve_prompts.py    # --improve-prompts mode: pi updates user templates
+├── runner_introspection.py      # PR review introspection pass
+├── runner_pr.py                 # PR review mode
+├── runner_review.py             # Local + contextual + full-codebase review
+├── runner_artifacts.py          # Attach/compact logs and diffs
+├── utils.py                     # Utilities — logging, git, file operations
+└── templates/                   # Shipped default prompt templates (Jinja2)
 ```
+
+### User-owned prompt templates
+
+`prompts.py` resolves Jinja templates from `<FDR_HOME>/templates/` first, then
+falls through to the package copies. The `--improve-prompts` mode seeds the
+four top-level language-agnostic templates (`fix_checks.j2`, `local_review.j2`,
+`resolve_review_issues.j2`, `pr_threads_header.j2`) plus the shared review
+fragments under `partials/` (`_issue_classification.j2`, `_critical_checklist.j2`,
+`_language_checks.j2`, `_review_reporting_rules.j2`, `_review_output_contract.j2`,
+`_review_readonly_task.j2`) into that directory on demand and asks pi to update
+them in place. The three review prompts (`local_review.j2`, `contextual_review.j2`,
+`full_codebase_review.j2`) compose those partials, so editing a partial changes
+every review mode that includes it. Nothing inside the installed package is
+mutated, so pip/uv upgrades stay safe.
 
 ### Dependencies
 
@@ -180,6 +199,15 @@ fix_die_repeat/
 All runtime state is stored outside the target repo, under
 `~/.fix-die-repeat/repos/<basename>-<8charhash>/` (override via `FDR_HOME`).
 Nothing is written inside the repo and `.gitignore` is never modified.
+
+Two additional files live one level up — directly under `<FDR_HOME>/` — because
+they're global rather than per-repo:
+
+| File | Purpose |
+|------|----------|
+| `introspection.yaml` | Appended log of PR review introspection documents |
+| `introspection-archive.yaml` | Archive of older reviewed entries after compaction |
+| `templates/` | User-owned prompt template overrides (see above) |
 
 | File | Purpose |
 |------|----------|

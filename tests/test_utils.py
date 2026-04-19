@@ -3,6 +3,7 @@
 import hashlib
 import importlib
 import importlib.metadata
+import subprocess
 import sys
 from pathlib import Path
 from subprocess import CalledProcessError
@@ -419,6 +420,20 @@ class TestRunCommand:
 
         assert returncode == 0
         assert "test.txt" in stdout
+
+    def test_run_command_closes_child_stdin(self) -> None:
+        """Regression: child processes must see stdin EOF, not inherit parent's stdin.
+
+        pi in -p mode reads stdin to merge with the prompt; if fdr inherits the
+        parent's interactive stdin, pi never sees EOF and hangs in its event loop
+        after finishing its work.
+        """
+        with patch("fix_die_repeat.utils.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            run_command(["echo", "test"], check=False)
+
+        mock_run.assert_called_once()
+        assert mock_run.call_args.kwargs.get("stdin") == subprocess.DEVNULL
 
 
 class TestPlayCompletionSound:

@@ -25,6 +25,7 @@ from fix_die_repeat.messages import (
 )
 from fix_die_repeat.prompts import render_prompt
 from fix_die_repeat.runner_artifacts import ArtifactManager
+from fix_die_repeat.runner_improve_prompts import ImprovePromptsManager
 from fix_die_repeat.runner_introspection import (
     IntrospectionManager,
     IntrospectionPrInfo,
@@ -96,6 +97,7 @@ class PiRunner:
         self.introspection_manager = IntrospectionManager(
             self.settings, self.paths, self.project_root, self.logger
         )
+        self.improve_prompts_manager = ImprovePromptsManager(self.settings, self.logger)
 
     def _get_artifact_manager(self) -> ArtifactManager | None:
         """Return the artifact manager when initialized."""
@@ -122,6 +124,13 @@ class PiRunner:
         """Return the introspection manager when initialized."""
         manager = self.__dict__.get("introspection_manager")
         if isinstance(manager, IntrospectionManager):
+            return manager
+        return None
+
+    def _get_improve_prompts_manager(self) -> ImprovePromptsManager | None:
+        """Return the improve-prompts manager when initialized."""
+        manager = self.__dict__.get("improve_prompts_manager")
+        if isinstance(manager, ImprovePromptsManager):
             return manager
         return None
 
@@ -618,6 +627,8 @@ class PiRunner:
         """
         if self.settings.pr_threads_introspect_only:
             return self.run_pr_threads_introspect_only()
+        if self.settings.improve_prompts:
+            return self.run_improve_prompts_once()
         if self.settings.contextual_review:
             return self.run_contextual_review_once()
         if self.settings.full_codebase_review:
@@ -846,6 +857,27 @@ class PiRunner:
             return 1
 
         return 0
+
+    def run_improve_prompts_once(self) -> int:
+        """Run the prompt-improvement mode once and exit.
+
+        Reads ``<FDR_HOME>/introspection.yaml``, seeds user template copies
+        under ``<FDR_HOME>/templates/`` if missing, and asks pi to update
+        them based on pending introspection entries. Does not run checks,
+        review, or the fix loop.
+
+        Returns:
+            Exit code (0 on success, non-zero on failure).
+
+        """
+        self.logger.info("Improve-prompts mode: no fix loop, no review.")
+        manager = self._get_improve_prompts_manager()
+        if manager is None:
+            self.logger.error(
+                "Improve-prompts manager not initialized; cannot run --improve-prompts.",
+            )
+            return 1
+        return manager.run_improve_prompts(self.run_pi_safe)
 
     def _fetch_unresolved_pr_threads(
         self, pr_manager: "PrReviewManager"

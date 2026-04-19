@@ -168,6 +168,53 @@ class TestRunIntrospection:
         # Mock failed, so file shouldn't be modified (we can't assert this easily
         # without controlling the exact state, but the test should not error)
 
+    def test_preserves_result_file_on_pi_failure(
+        self,
+        runner: PiRunner,
+        tmp_path: Path,
+    ) -> None:
+        """Regression: result file survives pi non-zero exit (e.g. killed).
+
+        When pi writes the result file but then returns non-zero, the file must
+        stay on disk so the analysis isn't lost.
+        """
+        runner.paths.cumulative_in_scope_threads_file.write_text("thread_1\n")
+        runner.paths.introspection_data_file.write_text(
+            "pr_number: 2\npr_url: https://github.com/test/test/pull/2\n"
+        )
+
+        # Simulate pi writing the result file before its non-zero exit
+        result_yaml = (
+            "date: '2026-04-18'\nproject: 'test-project'\npr_number: 2\n"
+            "pr_url: 'https://github.com/test/test/pull/2'\n"
+            "status: pending\nthreads: []\n"
+        )
+        runner.paths.introspection_result_file.write_text(result_yaml)
+
+        pr_json = '{"number": 2, "url": "https://github.com/test/test/pull/2"}'
+
+        test_global_file = tmp_path / "introspection.yaml"
+        test_global_file.parent.mkdir(parents=True, exist_ok=True)
+
+        with patch(
+            "fix_die_repeat.runner_introspection.get_introspection_file_path",
+            return_value=test_global_file,
+        ):
+            with patch(
+                "fix_die_repeat.runner_introspection.run_command",
+                return_value=(0, pr_json, ""),
+            ):
+                with patch.object(runner, "run_pi_safe", return_value=(1, "", "killed")):
+                    runner.run_introspection()
+
+        # Result file must survive so pi's analysis is recoverable
+        assert runner.paths.introspection_result_file.exists(), (
+            "Result file was deleted despite pi failure — analysis is lost"
+        )
+        assert runner.paths.introspection_result_file.read_text() == result_yaml
+        # Input data file is disposable and should still be cleaned up
+        assert not runner.paths.introspection_data_file.exists()
+
     def test_skips_with_invalid_pr_info(self, runner: PiRunner) -> None:
         """Test that introspection skips when PR info is invalid."""
         runner.paths.cumulative_in_scope_threads_file.write_text("thread_1\n")

@@ -1,0 +1,7 @@
+{% if languages %}
+
+LANGUAGE-SPECIFIC CHECKS:
+{% for lang in languages %}
+{% include "lang_checks/" ~ lang ~ ".j2" %}
+{% endfor %}
+{% endif %}

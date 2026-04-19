@@ -104,9 +104,76 @@ class TestCliMain:
         assert "--pr-threads-introspect-only" in result.output
         assert "unresolved review threads" in result.output
 
+    def test_cli_with_improve_prompts(self) -> None:
+        """Test CLI help exposes --improve-prompts."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--help"])
+        assert "--improve-prompts" in result.output
+        assert "user-owned" in result.output
+
+    @pytest.mark.parametrize(
+        ("flags", "expected_fragments"),
+        [
+            (
+                ["--improve-prompts", "--full-codebase-review"],
+                ("--improve-prompts", "--full-codebase-review"),
+            ),
+            (
+                ["--improve-prompts", "--contextual-review"],
+                ("--improve-prompts", "--contextual-review"),
+            ),
+            (
+                ["--pr-threads-introspect-only", "--full-codebase-review"],
+                ("--pr-threads-introspect-only", "--full-codebase-review"),
+            ),
+            (
+                ["--contextual-review", "--full-codebase-review"],
+                ("--contextual-review", "--full-codebase-review"),
+            ),
+            (
+                [
+                    "--improve-prompts",
+                    "--contextual-review",
+                    "--full-codebase-review",
+                ],
+                ("--improve-prompts", "--contextual-review", "--full-codebase-review"),
+            ),
+        ],
+    )
+    def test_mutually_exclusive_standalone_flags_error(
+        self,
+        flags: list[str],
+        expected_fragments: tuple[str, ...],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Combining standalone-mode flags must exit 1 with a clear error."""
+        original_paths = config.Paths
+
+        def mock_paths(_project_root: Path | None = None) -> config.Paths:
+            return original_paths(project_root=tmp_path)
+
+        monkeypatch.setattr(config, "Paths", mock_paths)
+        # Guard: if validation ever fails silently, we don't want a real run.
+        monkeypatch.setattr(runner.PiRunner, "run", lambda _self: 0)
+
+        cli_runner = CliRunner()
+        result = cli_runner.invoke(main, flags, catch_exceptions=False)
+
+        assert result.exit_code == 1
+        for fragment in expected_fragments:
+            assert fragment in result.output, (
+                f"error output {result.output!r} should name {fragment}"
+            )
+
     @pytest.mark.parametrize(
         "flag",
-        ["--full-codebase-review", "--pr-threads-introspect-only", "--contextual-review"],
+        [
+            "--full-codebase-review",
+            "--pr-threads-introspect-only",
+            "--contextual-review",
+            "--improve-prompts",
+        ],
     )
     def test_standalone_modes_skip_check_cmd(
         self,
@@ -144,6 +211,36 @@ class TestCliMain:
 
         assert result.exit_code == 0
         assert not resolve_called, f"resolve_check_cmd should not be called with {flag}"
+
+    def test_improve_prompts_noop_does_not_materialize_per_repo_state(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A no-op --improve-prompts run must not create <FDR_HOME>/repos/..."""
+        # Mirrors the path the autouse _isolated_fdr_home fixture assigns to FDR_HOME.
+        fdr_home = tmp_path / "fdr_home"
+
+        original_paths = config.Paths
+
+        def mock_paths(_project_root: Path | None = None) -> config.Paths:
+            return original_paths(project_root=tmp_path)
+
+        monkeypatch.setattr(config, "Paths", mock_paths)
+        monkeypatch.delenv("FDR_CHECK_CMD", raising=False)
+
+        def fail_if_runner_used(_self: object) -> int:
+            pytest.fail("PiRunner.run must not be invoked for a no-op --improve-prompts")
+
+        monkeypatch.setattr(runner.PiRunner, "run", fail_if_runner_used)
+
+        cli_runner = CliRunner()
+        result = cli_runner.invoke(main, ["--improve-prompts"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        assert not (fdr_home / "repos").exists(), (
+            "No-op --improve-prompts must not materialize per-repo state"
+        )
 
     def test_cli_with_archive_artifacts(self) -> None:
         """Test CLI with archive-artifacts flag."""

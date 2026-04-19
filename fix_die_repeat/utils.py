@@ -212,9 +212,12 @@ def run_command(
         return (2, "", "No command provided")
 
     try:
+        # stdin=DEVNULL: pi in -p mode reads stdin to merge with its prompt; if we
+        # inherit an interactive tty, pi hangs after its work waiting for EOF.
         result = subprocess.run(  # noqa: S603  # args are tokenized argv with shell disabled.
             args,
             cwd=cwd,
+            stdin=subprocess.DEVNULL,
             capture_output=capture_output,
             text=True,
             check=check,

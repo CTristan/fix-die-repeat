@@ -1,17 +1,24 @@
 """Command-line interface for fix-die-repeat."""
 
+import logging
 import traceback
 
 import click
 from rich.console import Console
 
-from fix_die_repeat.config import CliOptions, Paths, get_settings
+from fix_die_repeat.config import (
+    CliOptions,
+    Paths,
+    get_introspection_file_path,
+    get_settings,
+)
 from fix_die_repeat.detection import (
     get_system_config_path,
     resolve_check_cmd,
     validate_check_cmd_or_exit,
 )
 from fix_die_repeat.runner import PiRunner
+from fix_die_repeat.runner_improve_prompts import ImprovePromptsManager
 from fix_die_repeat.utils import is_running_in_dev_mode
 
 console = Console()
@@ -26,7 +33,7 @@ _MAIN_HELP = (
     "  FDR_ARCHIVE_ARTIFACTS, FDR_COMPACT_ARTIFACTS,\n"
     "  FDR_PR_REVIEW, FDR_PR_REVIEW_INTROSPECT,\n"
     "  FDR_CONTEXTUAL_REVIEW, FDR_FULL_CODEBASE_REVIEW,\n"
-    "  FDR_PR_THREADS_INTROSPECT_ONLY,\n"
+    "  FDR_PR_THREADS_INTROSPECT_ONLY, FDR_IMPROVE_PROMPTS,\n"
     "  FDR_TEST_MODEL, FDR_DEBUG, FDR_LANGUAGES,\n"
     "  FDR_HOME (base directory for state; defaults to ~/.fix-die-repeat),\n"
     "  FDR_NTFY_ENABLED (default: 1),\n"
@@ -57,6 +64,9 @@ _MAIN_HELP = (
     "\b\n"
     "  # Fetch and introspect unresolved PR review threads, then exit\n"
     "  fix-die-repeat --pr-threads-introspect-only\n"
+    "\b\n"
+    "  # Have pi update the user prompt templates from accumulated introspection data\n"
+    "  fix-die-repeat --improve-prompts\n"
 )
 
 
@@ -115,8 +125,8 @@ _MAIN_HELP = (
     help=(
         "Smart contextual review (report-only). Reviews uncommitted changes, "
         "branch diff vs default branch, or full codebase if neither applies. "
-        "If multiple standalone-mode flags are set, precedence is: "
-        "--pr-threads-introspect-only > --contextual-review > --full-codebase-review."
+        "Standalone mode — mutually exclusive with --full-codebase-review, "
+        "--pr-threads-introspect-only, and --improve-prompts."
     ),
     envvar="FDR_CONTEXTUAL_REVIEW",
 )
@@ -126,8 +136,8 @@ _MAIN_HELP = (
     help=(
         "Audit the entire codebase instead of a diff. Report-only: "
         "never attempts fixes. Ignores --pr-review if also set. "
-        "Lowest precedence among standalone-mode flags: "
-        "--pr-threads-introspect-only and --contextual-review both win over this."
+        "Standalone mode — mutually exclusive with --contextual-review, "
+        "--pr-threads-introspect-only, and --improve-prompts."
     ),
     envvar="FDR_FULL_CODEBASE_REVIEW",
 )
@@ -137,10 +147,22 @@ _MAIN_HELP = (
     help=(
         "Fetch the PR's unresolved review threads, run introspection on them, "
         "then exit. Does not run checks, local review, or attempt fixes. "
-        "Highest precedence among standalone-mode flags: wins over "
-        "--contextual-review and --full-codebase-review."
+        "Standalone mode — mutually exclusive with --contextual-review, "
+        "--full-codebase-review, and --improve-prompts."
     ),
     envvar="FDR_PR_THREADS_INTROSPECT_ONLY",
+)
+@click.option(
+    "--improve-prompts",
+    is_flag=True,
+    help=(
+        "Read accumulated introspection data and have pi update the user-owned "
+        "prompt templates under <FDR_HOME>/templates/. Seeds copies of the shipped "
+        "templates on first use; never mutates the package. Runs once and exits. "
+        "Standalone mode — mutually exclusive with --contextual-review, "
+        "--full-codebase-review, and --pr-threads-introspect-only."
+    ),
+    envvar="FDR_IMPROVE_PROMPTS",
 )
 @click.option(
     "--test-model",
@@ -206,6 +228,7 @@ def _build_cli_options(kwargs: dict[str, str | int | bool | None]) -> CliOptions
         full_codebase_review=bool(kwargs.get("full_codebase_review", False)),
         contextual_review=bool(kwargs.get("contextual_review", False)),
         pr_threads_introspect_only=bool(kwargs.get("pr_threads_introspect_only", False)),
+        improve_prompts=bool(kwargs.get("improve_prompts", False)),
         test_model=str(test_model) if test_model is not None else None,
         debug=bool(kwargs.get("debug", False)),
     )
@@ -242,6 +265,31 @@ def _run_main_with_error_handling(
         return 1
 
 
+_STANDALONE_MODE_FLAGS: tuple[tuple[str, str], ...] = (
+    ("pr_threads_introspect_only", "--pr-threads-introspect-only"),
+    ("improve_prompts", "--improve-prompts"),
+    ("contextual_review", "--contextual-review"),
+    ("full_codebase_review", "--full-codebase-review"),
+)
+
+
+def _validate_standalone_modes_mutually_exclusive(settings: object) -> None:
+    """Reject combinations of standalone-mode flags.
+
+    Each standalone mode runs a one-shot codepath and exits; combining
+    them would silently drop all but one. Raise ValueError so the user
+    sees an actionable error instead of surprising behavior.
+    """
+    active = [cli_flag for attr, cli_flag in _STANDALONE_MODE_FLAGS if getattr(settings, attr)]
+    if len(active) > 1:
+        joined = ", ".join(active)
+        msg = (
+            f"The following flags are mutually exclusive: {joined}. "
+            "Pick one — each runs a one-shot mode and exits."
+        )
+        raise ValueError(msg)
+
+
 def _run_main(options: CliOptions) -> int:
     """Run main application logic using CliOptions.
 
@@ -262,6 +310,21 @@ def _run_main(options: CliOptions) -> int:
     # Get settings
     settings = get_settings(options)
 
+    _validate_standalone_modes_mutually_exclusive(settings)
+
+    # --improve-prompts is repo-agnostic: it reads <FDR_HOME>/introspection.yaml
+    # and edits <FDR_HOME>/templates/. When there's no pending work, exit before
+    # constructing Paths/PiRunner so we don't materialize <FDR_HOME>/repos/<slug>/
+    # as a side effect of a no-op run.
+    if settings.improve_prompts and not ImprovePromptsManager.has_pending_work(
+        logging.getLogger("fix-die-repeat.cli")
+    ):
+        console.print(
+            f"[cyan][ImprovePrompts][/cyan] No pending introspection entries at "
+            f"{get_introspection_file_path(create=False)}; nothing to do."
+        )
+        return 0
+
     # Initialize paths
     paths = Paths()
 
@@ -270,6 +333,7 @@ def _run_main(options: CliOptions) -> int:
         settings.full_codebase_review
         or settings.pr_threads_introspect_only
         or settings.contextual_review
+        or settings.improve_prompts
     )
 
     if needs_check_cmd:

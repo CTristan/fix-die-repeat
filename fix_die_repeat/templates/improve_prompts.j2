@@ -1,0 +1,94 @@
+You are improving fix-die-repeat's own prompt templates based on accumulated PR review introspection data.
+
+# Inputs
+
+- **Introspection data file**: `{{ introspection_file_path }}`
+  - Contains one or more YAML documents (separated by `---`).
+  - Each document has a `threads` list where every thread has `category`, `outcome`, `summary`, `relevance`, and `lang_check_gap`.
+  - Only act on entries whose top-level `status` is `pending`.
+- **User template directory**: `{{ templates_dir }}`
+- **Archive file (write only if compacting)**: `{{ archive_file_path }}`
+
+# Templates you may edit
+
+These are the language-agnostic prompt templates (and their shared partials) whose wording affects every fix-die-repeat run. Each path below is where the user-owned copy lives; if a file is missing, a fresh copy has already been seeded from the shipped defaults before this prompt ran. Edit the file at the given path directly — do not edit the package copy. Partials under `partials/` are included by the top-level review templates, so editing a partial changes every template that composes it.
+
+{% for name, path in template_paths.items() -%}
+- `{{ name }}` — `{{ path }}`
+{% endfor %}
+
+# Workflow
+
+1. Read `{{ introspection_file_path }}`.
+2. Filter to entries with `status: pending`.
+3. For each pending entry, read the threads and analyze:
+   - **Pattern detection**: Are multiple threads (across entries) flagging the same category?
+   - **Gap analysis**: Is this category already covered by the four templates? Is the coverage sufficient?
+   - **Actionability**: Can a template change realistically catch this class of issue earlier?
+4. Edit the user templates at the paths above to address identified gaps:
+   - Add checklist items to `partials/_critical_checklist.j2` for categories not currently covered (the three review prompts all compose it).
+   - Tighten `partials/_review_reporting_rules.j2`, `partials/_issue_classification.j2`, or `partials/_review_readonly_task.j2` if reviewer framing is the gap.
+   - Add guidance to `fix_checks.j2` for fix patterns that were commonly needed.
+   - Add context to `resolve_review_issues.j2` for issue types the agent struggled with.
+   - Update `pr_threads_header.j2` only if you find thread-level framing gaps.
+   - Prefer shared partials for guidance that should apply across review scopes. Only edit a top-level review template directly if it is one of the paths listed above and the framing is truly unique to that scope.
+5. After editing, rewrite `{{ introspection_file_path }}` so every entry you processed has `status: reviewed` instead of `pending`. Leave every other entry untouched. Preserve the `---` document separators.
+6. **Compact the introspection file** if it has reached 2000+ lines:
+   - Keep all `pending` entries in the main file (there should be none after step 5, but future entries may land here).
+   - Keep the 50 most recent `reviewed` entries in the main file, sorted by `date` descending.
+   - Move `reviewed` entries older than 6 months to `{{ archive_file_path }}` (create the file if needed, prepend `---` between documents).
+   - If the archive would be empty after the move, do not create it; if it already exists and would become empty, delete it.
+7. Print a short summary of:
+   - Which template files you edited and a one-line rationale per edit.
+   - How many introspection entries you marked as `reviewed`.
+   - Whether compaction ran and how many entries it moved.
+
+# Guidelines
+
+- **Be conservative.** Only edit a template when there's a clear pattern: 2+ threads in the same category across entries, or a single thread with high `relevance`.
+- **Stay language-agnostic.** All four templates must remain language-agnostic. Per-language checks live in `lang_checks/*.j2` and are out of scope here.
+- **Preserve style.** Match the existing template structure, indentation, and wording conventions. Do not restructure a template to suit a single new item.
+- **Do not duplicate.** If a checklist item already covers the gap, strengthen the wording rather than adding a new item.
+- **Explain every edit.** Each template change must correspond to a specific introspection entry or thread; note it in the summary.
+
+# Category reference
+
+Standard categories and what good template coverage looks like for each:
+
+## security
+**Covers:** Injection flaws, auth/permission bypasses, secret exposure, unsafe deserialization, insecure defaults.
+**Good coverage:** Review template explicitly lists common vulnerability patterns. Fix template includes guidance on secure alternatives.
+
+## error-handling
+**Covers:** Missing null/nil checks, unhandled exceptions, resource leaks, missing input validation.
+**Good coverage:** Explicit checklist items for null guards on external inputs, resource cleanup patterns, and error propagation.
+
+## performance
+**Covers:** N+1 queries, unbounded growth, heavy work in hot paths, missing pagination.
+**Good coverage:** Specific mention of common anti-patterns (unbounded queries, missing indexes, synchronous blocking in async contexts).
+
+## correctness
+**Covers:** Logic bugs, off-by-one errors, race conditions, wrong return values, type mismatches.
+**Good coverage:** Mention of boundary condition checking, concurrency hazards, and type safety.
+
+## code-quality
+**Covers:** Suppressed warnings, dead code, naming issues, duplication, overly complex logic.
+**Good coverage:** Guidance on when warning suppression is acceptable vs. when it indicates a real issue.
+
+## testing
+**Covers:** Missing test coverage, fragile tests, test configuration changes.
+**Good coverage:** Guidance on what types of changes require new tests and what test quality looks like.
+
+## documentation
+**Covers:** Inaccurate docs, missing docs, stale comments, misleading error messages.
+**Good coverage:** Explicit check that any behavioral change has corresponding doc/comment updates.
+
+## configuration
+**Covers:** Mismatched config values, insecure defaults, missing env var documentation.
+**Good coverage:** Explicit check for default value safety and config documentation completeness.
+
+# Constraints
+
+- Use the `read`, `write`, and `edit` tools only. Do not run shell commands.
+- Never edit files outside `{{ templates_dir }}`, `{{ introspection_file_path }}`, and `{{ archive_file_path }}`.
+- Never add language-specific content to the four templates above.
