@@ -1,17 +1,24 @@
 """Command-line interface for fix-die-repeat."""
 
+import logging
 import traceback
 
 import click
 from rich.console import Console
 
-from fix_die_repeat.config import CliOptions, Paths, get_settings
+from fix_die_repeat.config import (
+    CliOptions,
+    Paths,
+    get_introspection_file_path,
+    get_settings,
+)
 from fix_die_repeat.detection import (
     get_system_config_path,
     resolve_check_cmd,
     validate_check_cmd_or_exit,
 )
 from fix_die_repeat.runner import PiRunner
+from fix_die_repeat.runner_improve_prompts import ImprovePromptsManager
 from fix_die_repeat.utils import is_running_in_dev_mode
 
 console = Console()
@@ -304,6 +311,19 @@ def _run_main(options: CliOptions) -> int:
     settings = get_settings(options)
 
     _validate_standalone_modes_mutually_exclusive(settings)
+
+    # --improve-prompts is repo-agnostic: it reads <FDR_HOME>/introspection.yaml
+    # and edits <FDR_HOME>/templates/. When there's no pending work, exit before
+    # constructing Paths/PiRunner so we don't materialize <FDR_HOME>/repos/<slug>/
+    # as a side effect of a no-op run.
+    if settings.improve_prompts and not ImprovePromptsManager.has_pending_work(
+        logging.getLogger("fix-die-repeat.cli")
+    ):
+        console.print(
+            f"[cyan][ImprovePrompts][/cyan] No pending introspection entries at "
+            f"{get_introspection_file_path(create=False)}; nothing to do."
+        )
+        return 0
 
     # Initialize paths
     paths = Paths()

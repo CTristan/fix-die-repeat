@@ -64,6 +64,17 @@ class ImprovePromptsManager:
         self.settings = settings
         self.logger = logger
 
+    @classmethod
+    def has_pending_work(cls, logger: logging.Logger) -> bool:
+        """Return True if ``<FDR_HOME>/introspection.yaml`` has pending entries.
+
+        Exposed as a classmethod so callers (e.g. the CLI) can decide whether
+        --improve-prompts needs to materialize per-repo state before invoking
+        the manager — matching the ``create=False`` no-op contract.
+        """
+        introspection_file = get_introspection_file_path(create=False)
+        return cls._file_has_pending_entries(introspection_file, logger)
+
     def run_improve_prompts(
         self,
         run_pi_callback: Callable[..., tuple[int, str, str]],
@@ -243,12 +254,17 @@ class ImprovePromptsManager:
 
     def _has_pending_entries(self, introspection_file: Path) -> bool:
         """Return True if ``introspection_file`` has at least one ``status: pending`` document."""
+        return self._file_has_pending_entries(introspection_file, self.logger)
+
+    @staticmethod
+    def _file_has_pending_entries(introspection_file: Path, logger: logging.Logger) -> bool:
+        """Shared YAML-parsing core for ``has_pending_work`` / ``_has_pending_entries``."""
         if not introspection_file.exists():
             return False
         try:
             content = introspection_file.read_text()
         except OSError as exc:
-            self.logger.warning(
+            logger.warning(
                 "[ImprovePrompts] Failed to read %s: %s",
                 introspection_file,
                 exc,
@@ -259,7 +275,7 @@ class ImprovePromptsManager:
         try:
             documents = list(yaml.safe_load_all(content))
         except yaml.YAMLError as exc:
-            self.logger.warning(
+            logger.warning(
                 "[ImprovePrompts] %s is not valid YAML: %s",
                 introspection_file,
                 exc,
