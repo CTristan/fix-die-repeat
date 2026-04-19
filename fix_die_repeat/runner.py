@@ -376,6 +376,7 @@ class PiRunner:
                 prompt=prompt,
                 tools=("read", "edit", "write", "bash", "grep", "find", "ls"),
                 attachments=tuple(attachments),
+                model=self.settings.model,
             ),
         )
         pi_returncode = result.returncode

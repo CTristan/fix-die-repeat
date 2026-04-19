@@ -174,12 +174,11 @@ class TestPiBackendInvokeSafe:
         self,
         tmp_path: Path,
     ) -> None:
-        """A 503 in pi.log triggers ``/model-skip`` via _invoke_raw, then retry."""
+        """A 503 in the failing call's output triggers ``/model-skip``, then retry."""
         backend = _make_backend(tmp_path)
-        (tmp_path / "pi.log").write_text("503 No capacity")
         backend.invoke = MagicMock(  # type: ignore[method-assign]
             side_effect=[
-                BackendResult(1, "", ""),  # first invocation fails
+                BackendResult(1, "503 No capacity", ""),  # first invocation fails
                 BackendResult(0, "", ""),  # retry succeeds
             ],
         )
@@ -196,13 +195,12 @@ class TestPiBackendInvokeSafe:
         self,
         tmp_path: Path,
     ) -> None:
-        """A 429 + long context in pi.log fires the injected on_long_context callback."""
+        """A 429 + long context in the failing call's output fires on_long_context."""
         on_long_context = MagicMock()
         backend = _make_backend(tmp_path, on_long_context=on_long_context)
-        (tmp_path / "pi.log").write_text("429 long context")
         backend.invoke = MagicMock(  # type: ignore[method-assign]
             side_effect=[
-                BackendResult(1, "", ""),
+                BackendResult(1, "429 long context", ""),
                 BackendResult(0, "", ""),
             ],
         )
@@ -215,10 +213,9 @@ class TestPiBackendInvokeSafe:
     def test_invoke_safe_generic_failure_retries_once(self, tmp_path: Path) -> None:
         """No 503/429 detected → retry once anyway."""
         backend = _make_backend(tmp_path)
-        (tmp_path / "pi.log").write_text("some other error")
         backend.invoke = MagicMock(  # type: ignore[method-assign]
             side_effect=[
-                BackendResult(2, "", ""),
+                BackendResult(2, "some other error", ""),
                 BackendResult(0, "", ""),
             ],
         )
@@ -227,6 +224,41 @@ class TestPiBackendInvokeSafe:
 
         assert result.returncode == 0
         assert backend.invoke.call_count == EXPECTED_RETRY_COUNT
+
+    def test_invoke_safe_ignores_stale_503_from_prior_invocation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Stale 503 in pi.log must NOT trigger /model-skip on a later, unrelated failure.
+
+        Regression test for PR #22 review thread (copilot): the pre-fix code
+        scanned the entire append-only pi.log, so a past "503 No capacity" line
+        from any earlier call in the same run would incorrectly trigger
+        capacity/long-context retry on a later, unrelated failure.
+        """
+        backend = _make_backend(tmp_path)
+        # Pre-stage stale indicators in pi.log from a prior, unrelated invocation.
+        (tmp_path / "pi.log").write_text(
+            "Command: pi -p old\nExit code: 1\nSTDOUT:\n503 No capacity\n429 long context\n\n",
+        )
+        on_long_context = MagicMock()
+        backend.on_long_context = on_long_context
+        backend.invoke = MagicMock(  # type: ignore[method-assign]
+            side_effect=[
+                # Current failure has nothing to do with capacity/long-context.
+                BackendResult(2, "syntax error in foo.py", ""),
+                BackendResult(0, "", ""),
+            ],
+        )
+        backend._invoke_raw = MagicMock(  # type: ignore[method-assign]  # noqa: SLF001
+            return_value=BackendResult(0, "", ""),
+        )
+
+        result = backend.invoke_safe(BackendRequest(prompt="fix"))
+
+        assert result.returncode == 0
+        backend._invoke_raw.assert_not_called()  # noqa: SLF001
+        on_long_context.assert_not_called()
 
 
 class TestBackendProtocol:

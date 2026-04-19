@@ -203,6 +203,7 @@ class ReviewManager:
                 prompt=review_prompt,
                 tools=REVIEW_TOOLS,
                 attachments=tuple(attachments),
+                model=self.settings.model,
             ),
         )
 
@@ -408,7 +409,11 @@ class ReviewManager:
 
         self.logger.info("[Step 5] Running backend to audit full codebase...")
         result = backend.invoke_safe(
-            BackendRequest(prompt=review_prompt, tools=REVIEW_TOOLS),
+            BackendRequest(
+                prompt=review_prompt,
+                tools=REVIEW_TOOLS,
+                model=self.settings.model,
+            ),
         )
 
         if result.returncode != 0:
@@ -510,6 +515,7 @@ class ReviewManager:
                 prompt=review_prompt,
                 tools=REVIEW_TOOLS,
                 attachments=tuple(attachments),
+                model=self.settings.model,
             ),
         )
 

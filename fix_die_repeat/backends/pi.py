@@ -82,15 +82,19 @@ class PiBackend:
         if result.returncode == 0:
             return result
 
-        log_content = self._read_pi_log()
+        # Scan only the failing call's own output. pi.log is append-only across
+        # invocations within a run, so reading it would let stale 503/429 lines
+        # from prior unrelated calls misroute the retry decision.
+        failing_output = f"{result.stdout}\n{result.stderr}"
 
-        if "503" in log_content or "No capacity" in log_content:
+        if "503" in failing_output or "No capacity" in failing_output:
             self.logger.info(
                 "Detected model capacity error (503). Skipping current model...",
             )
             self._invoke_raw("-p", "/model-skip")
 
-        if "429" in log_content.lower() and "long context" in log_content.lower():
+        lowered = failing_output.lower()
+        if "429" in lowered and "long context" in lowered:
             self.logger.info(
                 "Detected long context rate limit (429). Forcing emergency compaction...",
             )
@@ -125,11 +129,6 @@ class PiBackend:
                 self.logger.error("pi output logged to: %s", self.paths.pi_log)
 
         return BackendResult(returncode=returncode, stdout=stdout, stderr=stderr)
-
-    def _read_pi_log(self) -> str:
-        if self.paths.pi_log and self.paths.pi_log.exists():
-            return self.paths.pi_log.read_text()
-        return ""
 
 
 __all__ = ["PiBackend"]

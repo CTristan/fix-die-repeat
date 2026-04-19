@@ -175,7 +175,11 @@ class ImprovePromptsManager:
 
             try:
                 result = backend.invoke_safe(
-                    BackendRequest(prompt=prompt, tools=_IMPROVE_PROMPTS_TOOLS),
+                    BackendRequest(
+                        prompt=prompt,
+                        tools=_IMPROVE_PROMPTS_TOOLS,
+                        model=self.settings.model,
+                    ),
                 )
                 returncode = result.returncode
                 introspection_exists = introspection_file.exists()

@@ -250,6 +250,7 @@ class IntrospectionManager:
                     prompt=prompt,
                     tools=INTROSPECTION_TOOLS,
                     attachments=(self.paths.introspection_data_file,),
+                    model=self.settings.model,
                 ),
             )
 
