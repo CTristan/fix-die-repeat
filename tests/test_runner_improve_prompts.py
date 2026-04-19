@@ -345,6 +345,29 @@ class TestValidationAndRollback:
         fdr_home = Path(os.environ["FDR_HOME"])
         assert not list(fdr_home.rglob("*.bak"))
 
+    def test_readonly_introspection_file_returns_nonzero_without_crashing(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A non-writable introspection file must log and exit cleanly, not crash."""
+        path = _write_introspection(self._PENDING_ENTRY)
+        original_mode = path.stat().st_mode
+        path.chmod(0o400)  # read-only
+        try:
+            spy = _PiSpy()
+            manager = _manager()
+
+            with caplog.at_level(logging.ERROR, logger="test-improve-prompts"):
+                rc = manager.run_improve_prompts(spy)
+
+            assert rc != 0, "read-only file must surface a non-zero exit code"
+            assert spy.calls == [], "pi must not be invoked if we can't lock the file"
+            assert any(str(path) in record.message for record in caplog.records), (
+                "error log must name the unwritable path"
+            )
+        finally:
+            path.chmod(original_mode)
+
 
 class TestCacheClear:
     """After pi finishes, the Jinja cache should be cleared so edits are visible."""

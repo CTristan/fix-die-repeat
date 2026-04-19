@@ -146,7 +146,16 @@ class ImprovePromptsManager:
         # Open in r+ so we can hold an exclusive flock without truncating pi's
         # edits. pi rewrites the file in place via its own open(...) calls; our
         # handle exists only to anchor the flock.
-        with introspection_file.open("r+") as lock_handle, _FileLock(lock_handle):
+        try:
+            lock_handle = introspection_file.open("r+")
+        except OSError:
+            self.logger.exception(
+                "[ImprovePrompts] Failed to open introspection file %s for locking",
+                introspection_file,
+            )
+            return _ROLLBACK_EXIT_CODE
+
+        with lock_handle, _FileLock(lock_handle):
             main_backup = self._create_backup(introspection_file)
             archive_existed = archive_file.exists()
             archive_backup = self._create_backup(archive_file) if archive_existed else None
