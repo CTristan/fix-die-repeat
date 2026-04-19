@@ -321,6 +321,46 @@ class TestValidationAndRollback:
         assert path.read_text() == main_original, "main file must roll back too"
         assert archive.read_text() == archive_original, "archive must roll back"
 
+    def test_rolls_back_when_pi_deletes_introspection_file(self) -> None:
+        """If pi unlinks the introspection file, restore it and return non-zero."""
+        path = _write_introspection(self._PENDING_ENTRY)
+        original = path.read_text()
+
+        def deleting_pi(*_args: str) -> tuple[int, str, str]:
+            path.unlink()
+            return (0, "", "")
+
+        manager = _manager()
+        rc = manager.run_improve_prompts(deleting_pi)
+
+        assert path.exists(), "missing introspection file must be restored"
+        assert path.read_text() == original, "pre-pi content must be restored"
+        assert rc != 0, "rollback must surface a non-zero exit code"
+
+    def test_rolls_back_when_pi_deletes_pre_existing_archive(self) -> None:
+        """If pi unlinks an archive that existed before, restore it and return non-zero."""
+        path = _write_introspection(self._PENDING_ENTRY)
+        archive = get_introspection_archive_file_path()
+        archive_original = (
+            "date: '2025-01-01'\nstatus: reviewed\npr_number: 99\n"
+            "pr_url: https://example.com/pr/99\nproject: demo\nthreads: []\n"
+        )
+        archive.write_text(archive_original)
+        main_original = path.read_text()
+
+        def archive_deleting_pi(*_args: str) -> tuple[int, str, str]:
+            path.write_text(self._PENDING_ENTRY.replace("pending", "reviewed"))
+            archive.unlink()
+            return (0, "", "")
+
+        manager = _manager()
+        rc = manager.run_improve_prompts(archive_deleting_pi)
+
+        assert rc != 0
+        assert path.read_text() == main_original, "main file must roll back too"
+        assert archive.exists(), "pre-existing archive must be restored"
+        assert archive.read_text() == archive_original, "archive must roll back"
+
     def test_no_backup_files_left_on_success(self) -> None:
         """Happy path must not leave .bak files under FDR_HOME."""
         _write_introspection(self._PENDING_ENTRY)

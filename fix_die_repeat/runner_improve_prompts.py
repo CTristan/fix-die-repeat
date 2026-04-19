@@ -178,11 +178,17 @@ class ImprovePromptsManager:
                     "read,write,edit",
                     prompt,
                 )
-                if not self._is_valid_yaml(introspection_file) or not self._is_valid_yaml(
-                    archive_file
-                ):
+                introspection_exists = introspection_file.exists()
+                archive_exists = archive_file.exists()
+                introspection_invalid = not introspection_exists or not self._is_valid_yaml(
+                    introspection_file
+                )
+                archive_invalid = (archive_existed and not archive_exists) or (
+                    archive_exists and not self._is_valid_yaml(archive_file)
+                )
+                if introspection_invalid or archive_invalid:
                     self.logger.error(
-                        "[ImprovePrompts] pi left %s or %s unparseable; rolling back.",
+                        "[ImprovePrompts] pi left %s or %s missing or unparseable; rolling back.",
                         introspection_file,
                         archive_file,
                     )
