@@ -243,7 +243,7 @@ class IntrospectionManager:
             )
 
             self.logger.info(
-                "[Introspection] Calling pi to analyze PR threads...",
+                "[Introspection] Calling backend to analyze PR threads...",
             )
             result = backend.invoke_safe(
                 BackendRequest(
@@ -255,7 +255,7 @@ class IntrospectionManager:
 
             if result.returncode != 0:
                 self.logger.warning(
-                    "[Introspection] pi call failed (exit %s), skipping introspection",
+                    "[Introspection] Backend call failed (exit %s), skipping introspection",
                     result.returncode,
                 )
                 return
@@ -387,7 +387,7 @@ class IntrospectionManager:
         # Check if result file was created
         if not self.paths.introspection_result_file.exists():
             self.logger.warning(
-                "[Introspection] pi did not create result file, skipping",
+                "[Introspection] Backend did not create result file, skipping",
             )
             return None
 

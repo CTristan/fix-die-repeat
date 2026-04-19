@@ -177,7 +177,7 @@ class ReviewManager:
             changed_files: List of changed files for language detection (optional)
 
         """
-        self.logger.info("[Step 5] Running pi to review files...")
+        self.logger.info("[Step 5] Running backend to review files...")
 
         attachments: list[Path] = []
         review_prompt_prefix = self.build_review_prompt(diff_size, attachments)
@@ -207,7 +207,7 @@ class ReviewManager:
         )
 
         if result.returncode != 0:
-            self.logger.info("pi review failed. Treating as no issues found.")
+            self.logger.info("Backend review failed. Treating as no issues found.")
             self.paths.review_current_file.write_text("NO_ISSUES")
 
     def build_review_prompt(
@@ -251,7 +251,7 @@ class ReviewManager:
                     "or is empty). Review the scoped file list directly. If no files are "
                     "available to inspect, write exactly NO_ISSUES.\n"
                 )
-            self.logger.info("Review diff is empty. Instructing pi to write NO_ISSUES.")
+            self.logger.info("Review diff is empty. Instructing backend to write NO_ISSUES.")
             return (
                 "No diff is available for this review (the diff could not be computed or "
                 "is empty), and no changed-file list is attached in this review mode. "
@@ -406,13 +406,13 @@ class ReviewManager:
             **self.paths.template_context(),
         )
 
-        self.logger.info("[Step 5] Running pi to audit full codebase...")
+        self.logger.info("[Step 5] Running backend to audit full codebase...")
         result = backend.invoke_safe(
             BackendRequest(prompt=review_prompt, tools=REVIEW_TOOLS),
         )
 
         if result.returncode != 0:
-            self.logger.info("pi review failed. Treating as no issues found.")
+            self.logger.info("Backend review failed. Treating as no issues found.")
             self.paths.review_current_file.write_text("NO_ISSUES")
 
         # Copy the pi output verbatim into review.md (no iteration headers).
@@ -504,7 +504,7 @@ class ReviewManager:
             **self.paths.template_context(),
         )
 
-        self.logger.info("[Step 5] Running pi to review scoped changes...")
+        self.logger.info("[Step 5] Running backend to review scoped changes...")
         result = backend.invoke_safe(
             BackendRequest(
                 prompt=review_prompt,
@@ -514,7 +514,7 @@ class ReviewManager:
         )
 
         if result.returncode != 0:
-            self.logger.info("pi review failed. Treating as no issues found.")
+            self.logger.info("Backend review failed. Treating as no issues found.")
             self.paths.review_current_file.write_text("NO_ISSUES")
 
         # Copy the pi output verbatim into review.md (no iteration headers).

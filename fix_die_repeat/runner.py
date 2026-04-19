@@ -168,7 +168,7 @@ class PiRunner:
             "===== Testing model compatibility: %s =====",
             self.settings.test_model,
         )
-        self.logger.info("Running simple write test to verify model can use pi's tools...")
+        self.logger.info("Running simple write test to verify model can use backend tools...")
 
         result = self.backend.invoke(
             BackendRequest(
@@ -182,7 +182,7 @@ class PiRunner:
         returncode = result.returncode
 
         if returncode != 0:
-            self.logger.error("pi test invocation failed with code %s", returncode)
+            self.logger.error("Backend test invocation failed with code %s", returncode)
             self.logger.error(
                 "Model %s failed basic invocation test.",
                 self.settings.test_model,
@@ -344,7 +344,7 @@ class PiRunner:
             oscillation_warning = self.check_oscillation()
 
         self.logger.info(
-            "[Step 2A] Checks failed (fix attempt %s/%s). Running pi to fix errors...",
+            "[Step 2A] Checks failed (fix attempt %s/%s). Running backend to fix errors...",
             fix_attempt,
             self.settings.max_iters,
         )
@@ -386,11 +386,11 @@ class PiRunner:
             **self.paths.template_context(),
         )
 
-        self.logger.info("Running pi to fix errors (attempt %s)...", fix_attempt)
+        self.logger.info("Running backend to fix errors (attempt %s)...", fix_attempt)
         pi_returncode, _, _ = self.run_pi_safe(*pi_args, prompt)
 
         if pi_returncode != 0:
-            self.logger.info("pi could not produce a fix on attempt %s.", fix_attempt)
+            self.logger.info("Backend could not produce a fix on attempt %s.", fix_attempt)
 
         # Check if changes were made
         _git_returncode, stdout, _ = run_command(
@@ -1629,7 +1629,7 @@ class PiRunner:
 
         """
         self.logger.info(
-            "[Step 6A] Pi fix attempt %s of %s...",
+            "[Step 6A] Backend fix attempt %s of %s...",
             fix_attempt,
             max_fix_attempts,
         )
@@ -1656,7 +1656,7 @@ class PiRunner:
         returncode, _, _ = self.run_pi_safe(*pi_args, fix_prompt)
 
         if returncode != 0:
-            self.logger.info("pi fix failed on attempt %s.", fix_attempt)
+            self.logger.info("Backend fix failed on attempt %s.", fix_attempt)
 
         # Record resolution attempt
         timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1732,7 +1732,7 @@ class PiRunner:
 
         # Issues found - fix them
         self.logger.info(
-            "[Step 6A] Issues found in %s. Running pi to fix them...",
+            "[Step 6A] Issues found in %s. Running backend to fix them...",
             self.paths.review_current_file,
         )
 
