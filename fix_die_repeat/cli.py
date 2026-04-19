@@ -151,7 +151,9 @@ _MAIN_HELP = (
     help=(
         "Read accumulated introspection data and have pi update the user-owned "
         "prompt templates under <FDR_HOME>/templates/. Seeds copies of the shipped "
-        "templates on first use; never mutates the package. Runs once and exits."
+        "templates on first use; never mutates the package. Runs once and exits. "
+        "Standalone mode — mutually exclusive with --contextual-review, "
+        "--full-codebase-review, and --pr-threads-introspect-only."
     ),
     envvar="FDR_IMPROVE_PROMPTS",
 )
