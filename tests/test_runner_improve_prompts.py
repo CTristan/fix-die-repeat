@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from fix_die_repeat.backends import BackendRequest, BackendResult
 from fix_die_repeat.config import (
     Settings,
     get_introspection_archive_file_path,
@@ -29,15 +30,43 @@ PI_FAILURE_EXIT_CODE = 3
 
 
 class _PiSpy:
-    """Captures pi invocations so tests can assert on arguments."""
+    """Backend stub that captures ``invoke_safe`` calls for assertions."""
 
     def __init__(self, returncode: int = 0) -> None:
         self.returncode = returncode
-        self.calls: list[tuple[str, ...]] = []
+        self.calls: list[BackendRequest] = []
 
-    def __call__(self, *args: str) -> tuple[int, str, str]:
-        self.calls.append(args)
-        return (self.returncode, "", "")
+    def invoke(self, request: BackendRequest) -> BackendResult:
+        return self.invoke_safe(request)
+
+    def invoke_safe(self, request: BackendRequest) -> BackendResult:
+        self.calls.append(request)
+        return BackendResult(self.returncode, "", "")
+
+
+class _BackendStub:
+    """Backend stub that runs ``side_effect`` (which may mutate files) per invoke."""
+
+    def __init__(
+        self,
+        side_effect: Callable[[BackendRequest], int | BackendResult] | None = None,
+        returncode: int = 0,
+    ) -> None:
+        self._side_effect = side_effect
+        self._returncode = returncode
+        self.calls: list[BackendRequest] = []
+
+    def invoke(self, request: BackendRequest) -> BackendResult:
+        return self.invoke_safe(request)
+
+    def invoke_safe(self, request: BackendRequest) -> BackendResult:
+        self.calls.append(request)
+        if self._side_effect is None:
+            return BackendResult(self._returncode, "", "")
+        outcome = self._side_effect(request)
+        if isinstance(outcome, BackendResult):
+            return outcome
+        return BackendResult(outcome, "", "")
 
 
 def _manager() -> ImprovePromptsManager:
@@ -170,15 +199,12 @@ class TestSeedingAndPiInvocation:
         manager.run_improve_prompts(spy)
 
         assert len(spy.calls) == 1
-        args = spy.calls[0]
-        assert args[0] == "-p"
-        assert args[1] == "--tools"
-        assert args[2] == "read,write,edit"
-        prompt = args[3]
+        request = spy.calls[0]
+        assert request.tools == ("read", "write", "edit")
         # Rendered prompt should reference the introspection file and every editable template
-        assert str(get_introspection_file_path()) in prompt
+        assert str(get_introspection_file_path()) in request.prompt
         for name in EDITABLE_TEMPLATES:
-            assert name in prompt
+            assert name in request.prompt
 
     def test_propagates_pi_nonzero_exit(self) -> None:
         """A non-zero pi exit is surfaced as the mode's exit code."""
@@ -242,12 +268,14 @@ class TestFileLockHeldDuringPi:
         monkeypatch.setattr(_FileLock, "__enter__", spy_enter)
         monkeypatch.setattr(_FileLock, "__exit__", spy_exit)
 
-        def pi_spy(*_args: str) -> tuple[int, str, str]:
+        def record_pi_call(_request: BackendRequest) -> int:
             events.append("pi")
-            return (0, "", "")
+            return 0
+
+        backend = _BackendStub(side_effect=record_pi_call)
 
         manager = _manager()
-        rc = manager.run_improve_prompts(pi_spy)
+        rc = manager.run_improve_prompts(backend)
 
         assert rc == 0
         assert events == ["lock-enter", "pi", "lock-exit"], (
@@ -268,12 +296,12 @@ class TestValidationAndRollback:
         path = _write_introspection(self._PENDING_ENTRY)
         original = path.read_text()
 
-        def corrupting_pi(*_args: str) -> tuple[int, str, str]:
+        def corrupting_pi(_request: BackendRequest) -> int:
             path.write_text(": : : bad yaml : : :")
-            return (0, "", "")
+            return 0
 
         manager = _manager()
-        rc = manager.run_improve_prompts(corrupting_pi)
+        rc = manager.run_improve_prompts(_BackendStub(side_effect=corrupting_pi))
 
         assert path.read_text() == original, "pre-pi content must be restored"
         assert rc != 0, "rollback must surface a non-zero exit code"
@@ -286,12 +314,12 @@ class TestValidationAndRollback:
             "pr_url: https://example.com/pr/1\nproject: demo\nthreads: []\n"
         )
 
-        def well_behaved_pi(*_args: str) -> tuple[int, str, str]:
+        def well_behaved_pi(_request: BackendRequest) -> int:
             path.write_text(new_content)
-            return (0, "", "")
+            return 0
 
         manager = _manager()
-        rc = manager.run_improve_prompts(well_behaved_pi)
+        rc = manager.run_improve_prompts(_BackendStub(side_effect=well_behaved_pi))
 
         assert rc == 0
         assert path.read_text() == new_content
@@ -308,14 +336,14 @@ class TestValidationAndRollback:
         archive.write_text(archive_original)
         main_original = path.read_text()
 
-        def archive_corrupting_pi(*_args: str) -> tuple[int, str, str]:
+        def archive_corrupting_pi(_request: BackendRequest) -> int:
             # pi leaves main file valid but archive malformed.
             path.write_text(self._PENDING_ENTRY.replace("pending", "reviewed"))
             archive.write_text(": : : bad yaml : : :")
-            return (0, "", "")
+            return 0
 
         manager = _manager()
-        rc = manager.run_improve_prompts(archive_corrupting_pi)
+        rc = manager.run_improve_prompts(_BackendStub(side_effect=archive_corrupting_pi))
 
         assert rc != 0
         assert path.read_text() == main_original, "main file must roll back too"
@@ -326,12 +354,12 @@ class TestValidationAndRollback:
         path = _write_introspection(self._PENDING_ENTRY)
         original = path.read_text()
 
-        def deleting_pi(*_args: str) -> tuple[int, str, str]:
+        def deleting_pi(_request: BackendRequest) -> int:
             path.unlink()
-            return (0, "", "")
+            return 0
 
         manager = _manager()
-        rc = manager.run_improve_prompts(deleting_pi)
+        rc = manager.run_improve_prompts(_BackendStub(side_effect=deleting_pi))
 
         assert path.exists(), "missing introspection file must be restored"
         assert path.read_text() == original, "pre-pi content must be restored"
@@ -348,13 +376,13 @@ class TestValidationAndRollback:
         archive.write_text(archive_original)
         main_original = path.read_text()
 
-        def archive_deleting_pi(*_args: str) -> tuple[int, str, str]:
+        def archive_deleting_pi(_request: BackendRequest) -> int:
             path.write_text(self._PENDING_ENTRY.replace("pending", "reviewed"))
             archive.unlink()
-            return (0, "", "")
+            return 0
 
         manager = _manager()
-        rc = manager.run_improve_prompts(archive_deleting_pi)
+        rc = manager.run_improve_prompts(_BackendStub(side_effect=archive_deleting_pi))
 
         assert rc != 0
         assert path.read_text() == main_original, "main file must roll back too"
@@ -366,7 +394,7 @@ class TestValidationAndRollback:
         _write_introspection(self._PENDING_ENTRY)
 
         manager = _manager()
-        manager.run_improve_prompts(lambda *_a: (0, "", ""))
+        manager.run_improve_prompts(_BackendStub())
 
         fdr_home = Path(os.environ["FDR_HOME"])
         assert not list(fdr_home.rglob("*.bak"))
@@ -375,12 +403,12 @@ class TestValidationAndRollback:
         """Rollback path must also clean up .bak files."""
         path = _write_introspection(self._PENDING_ENTRY)
 
-        def corrupting_pi(*_args: str) -> tuple[int, str, str]:
+        def corrupting_pi(_request: BackendRequest) -> int:
             path.write_text(": : : bad yaml : : :")
-            return (0, "", "")
+            return 0
 
         manager = _manager()
-        manager.run_improve_prompts(corrupting_pi)
+        manager.run_improve_prompts(_BackendStub(side_effect=corrupting_pi))
 
         fdr_home = Path(os.environ["FDR_HOME"])
         assert not list(fdr_home.rglob("*.bak"))
@@ -431,9 +459,8 @@ class TestCacheClear:
             "date: '2026-04-01'\nstatus: pending\npr_number: 1\npr_url: https://example.com/pr/1\n"
             "project: demo\nthreads: []\n",
         )
-        spy: Callable[..., tuple[int, str, str]] = _PiSpy()
         manager = _manager()
 
-        manager.run_improve_prompts(spy)
+        manager.run_improve_prompts(_PiSpy())
 
         assert cleared == [True]

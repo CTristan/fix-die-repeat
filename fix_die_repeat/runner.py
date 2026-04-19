@@ -820,7 +820,7 @@ class PiRunner:
                 "Improve-prompts manager not initialized; cannot run --improve-prompts.",
             )
             return 1
-        return manager.run_improve_prompts(self.run_pi_safe)
+        return manager.run_improve_prompts(self.backend)
 
     def _fetch_unresolved_pr_threads(
         self, pr_manager: "PrReviewManager"

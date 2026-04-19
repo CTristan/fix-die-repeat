@@ -9,12 +9,12 @@ mutated.
 
 import logging
 import shutil
-from collections.abc import Callable
 from importlib import resources
 from pathlib import Path
 
 import yaml
 
+from fix_die_repeat.backends import Backend, BackendRequest
 from fix_die_repeat.config import (
     Settings,
     get_introspection_archive_file_path,
@@ -40,6 +40,8 @@ EDITABLE_TEMPLATES = (
     "partials/_review_reporting_rules.j2",
     "partials/_review_output_contract.j2",
 )
+
+_IMPROVE_PROMPTS_TOOLS: tuple[str, ...] = ("read", "write", "edit")
 
 # Non-zero exit code returned when pi succeeds but leaves the introspection
 # or archive file unparseable, so the user notices the rollback.
@@ -77,12 +79,12 @@ class ImprovePromptsManager:
 
     def run_improve_prompts(
         self,
-        run_pi_callback: Callable[..., tuple[int, str, str]],
+        backend: Backend,
     ) -> int:
         """Run the prompt-improvement mode.
 
         Args:
-            run_pi_callback: Function to invoke pi (from ``PiRunner``).
+            backend: Agent backend (e.g. ``PiBackend``).
 
         Returns:
             Exit code (0 on success, non-zero on failure).
@@ -118,7 +120,7 @@ class ImprovePromptsManager:
         returncode = self._run_pi_with_rollback(
             introspection_file=introspection_file,
             archive_file=archive_file,
-            run_pi_callback=run_pi_callback,
+            backend=backend,
             prompt=prompt,
         )
 
@@ -144,7 +146,7 @@ class ImprovePromptsManager:
         *,
         introspection_file: Path,
         archive_file: Path,
-        run_pi_callback: Callable[..., tuple[int, str, str]],
+        backend: Backend,
         prompt: str,
     ) -> int:
         """Hold an exclusive lock on the introspection file for the pi call.
@@ -172,12 +174,10 @@ class ImprovePromptsManager:
             archive_backup = self._create_backup(archive_file) if archive_existed else None
 
             try:
-                returncode, _stdout, _stderr = run_pi_callback(
-                    "-p",
-                    "--tools",
-                    "read,write,edit",
-                    prompt,
+                result = backend.invoke_safe(
+                    BackendRequest(prompt=prompt, tools=_IMPROVE_PROMPTS_TOOLS),
                 )
+                returncode = result.returncode
                 introspection_exists = introspection_file.exists()
                 archive_exists = archive_file.exists()
                 introspection_invalid = not introspection_exists or not self._is_valid_yaml(
