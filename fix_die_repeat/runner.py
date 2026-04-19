@@ -550,7 +550,7 @@ class PiRunner:
             or not self.paths.review_current_file.read_text()
         ):
             # Skip local review if we have PR threads to process
-            self.review_manager.run_local_review(self.iteration, self.start_sha, self.run_pi_safe)
+            self.review_manager.run_local_review(self.iteration, self.start_sha, self.backend)
         else:
             self.logger.info(
                 "[Step 4] Using PR threads from %s for review.",
@@ -635,7 +635,7 @@ class PiRunner:
         self.artifact_manager.check_and_compact_artifacts()
 
         self.paths.review_current_file.unlink(missing_ok=True)
-        self.review_manager.run_full_codebase_review(self.iteration, self.run_pi_safe)
+        self.review_manager.run_full_codebase_review(self.iteration, self.backend)
 
         if not self.paths.review_current_file.exists():
             self.logger.error(
@@ -701,7 +701,7 @@ class PiRunner:
         self.artifact_manager.check_and_compact_artifacts()
 
         self.paths.review_current_file.unlink(missing_ok=True)
-        self.review_manager.run_contextual_review(self.iteration, self.run_pi_safe)
+        self.review_manager.run_contextual_review(self.iteration, self.backend)
 
         if not self.paths.review_current_file.exists():
             self.logger.error(
@@ -1919,83 +1919,6 @@ class PiRunner:
                 else:
                     f.write("_No issues found._\n")
                 f.write("\n")
-
-    def build_review_prompt(self, diff_size: int, pi_args: list[str]) -> str:
-        """Build review prompt based on diff size.
-
-        Args:
-            diff_size: Size of the diff in bytes
-            pi_args: List to append diff file to if within threshold
-
-        Returns:
-            Review prompt prefix
-
-        """
-        review_manager = self._get_review_manager()
-        if review_manager:
-            return review_manager.build_review_prompt(diff_size, pi_args)
-        # Fallback for tests
-        if diff_size > self.settings.auto_attach_threshold:
-            return (
-                f"The changes are too large to attach automatically ({diff_size} bytes). "
-                f"You MUST use the 'read' tool to inspect '{self.paths.diff_file}'.\n"
-            )
-        if diff_size == 0:
-            return (
-                "No diff is available for this review (the diff could not be computed or "
-                "is empty), and no changed-file list is attached in this review mode. "
-                "Do not assume any changes are available to inspect. Write exactly "
-                "NO_ISSUES.\n"
-            )
-        pi_args.append(f"@{self.paths.diff_file}")
-        return (
-            f"I have attached '{self.paths.diff_file}' which contains the changes "
-            "made in this session.\n"
-        )
-
-    def run_pi_review(
-        self,
-        diff_size: int,
-        run_pi_callback: Callable[..., tuple[int, str, str]],
-    ) -> None:
-        """Run pi to review changes.
-
-        Args:
-            diff_size: Size of the diff in bytes
-            run_pi_callback: Function to run pi (from PiRunner)
-
-        """
-        review_manager = self._get_review_manager()
-        if review_manager:
-            review_manager.run_pi_review(diff_size, run_pi_callback)
-            return
-
-        # Fallback for tests when review_manager is not initialized
-        self.logger.info("[Step 5] Running pi to review files...")
-
-        pi_args = ["-p", "--tools", "read,write,grep,find,ls"]
-        review_prompt_prefix = self.build_review_prompt(diff_size, pi_args)
-
-        if self.paths.review_file.exists():
-            pi_args.append(f"@{self.paths.review_file}")
-
-        # Detect languages for language-specific checks
-        changed_files = get_changed_files(self.paths.project_root)
-        languages = resolve_languages(changed_files, self.settings.languages)
-        languages = filter_supported_languages(languages)
-
-        review_prompt = render_prompt(
-            "local_review.j2",
-            review_prompt_prefix=review_prompt_prefix,
-            languages=sorted(languages),
-            **self.paths.template_context(),
-        )
-
-        returncode, _, _ = run_pi_callback(*pi_args, review_prompt)
-
-        if returncode != 0:
-            self.logger.info("pi review failed. Treating as no issues found.")
-            self.paths.review_current_file.write_text("NO_ISSUES")
 
     def collect_introspection_data(
         self,

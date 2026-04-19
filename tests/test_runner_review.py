@@ -3,6 +3,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from fix_die_repeat.backends import BackendRequest, BackendResult
 from fix_die_repeat.config import Paths, Settings
 from fix_die_repeat.runner import PiRunner
 from fix_die_repeat.runner_review import ReviewManager
@@ -510,32 +511,28 @@ class TestRunFullCodebaseReview:
         # Pre-populate review.md with prior findings — these must NOT be passed to pi.
         manager.paths.review_file.write_text("[CRITICAL] stale finding from earlier run\n")
 
-        def fake_run_pi(*_args: str, **_kwargs: object) -> tuple[int, str, str]:
+        def fake_invoke(_request: BackendRequest) -> BackendResult:
             manager.paths.review_current_file.write_text("[CRITICAL] fresh finding\n")
-            return (0, "", "")
+            return BackendResult(0, "", "")
 
-        run_pi = MagicMock(side_effect=fake_run_pi)
+        backend = MagicMock()
+        backend.invoke_safe.side_effect = fake_invoke
 
         with patch(
             "fix_die_repeat.runner_review.get_all_tracked_files",
             return_value=["fix_die_repeat/runner.py"],
         ):
-            manager.run_full_codebase_review(iteration=1, run_pi_callback=run_pi)
+            manager.run_full_codebase_review(iteration=1, backend=backend)
 
-        assert run_pi.called
-        pi_args = run_pi.call_args.args
-        assert "--tools" in pi_args
-        assert "read,write,grep,find,ls" in pi_args
+        assert backend.invoke_safe.called
+        request = backend.invoke_safe.call_args.args[0]
+        assert request.tools == ("read", "write", "grep", "find", "ls")
         # No diff attached in full-codebase mode
-        assert not any(isinstance(a, str) and a.endswith("changes.diff") for a in pi_args)
+        assert not any(p.name == "changes.diff" for p in request.attachments)
         # No historical review.md attached — single-pass mode does not pass history.
-        assert not any(
-            isinstance(a, str) and a.startswith("@") and a.endswith("review.md") for a in pi_args
-        )
+        assert not any(p.name == "review.md" for p in request.attachments)
         # Prompt text should reference full-codebase audit framing
-        prompt = pi_args[-1]
-        assert isinstance(prompt, str)
-        assert "full-codebase audit" in prompt
+        assert "full-codebase audit" in request.prompt
         # review.md is overwritten with the fresh findings, not appended.
         assert manager.paths.review_file.read_text() == "[CRITICAL] fresh finding\n"
         assert "stale finding" not in manager.paths.review_file.read_text()
@@ -546,18 +543,19 @@ class TestRunFullCodebaseReview:
 
         findings = iter(["[CRITICAL] first run\n", "[CRITICAL] second run\n"])
 
-        def fake_run_pi(*_args: str, **_kwargs: object) -> tuple[int, str, str]:
+        def fake_invoke(_request: BackendRequest) -> BackendResult:
             manager.paths.review_current_file.write_text(next(findings))
-            return (0, "", "")
+            return BackendResult(0, "", "")
 
-        run_pi = MagicMock(side_effect=fake_run_pi)
+        backend = MagicMock()
+        backend.invoke_safe.side_effect = fake_invoke
 
         with patch(
             "fix_die_repeat.runner_review.get_all_tracked_files",
             return_value=["fix_die_repeat/runner.py"],
         ):
-            manager.run_full_codebase_review(iteration=1, run_pi_callback=run_pi)
-            manager.run_full_codebase_review(iteration=1, run_pi_callback=run_pi)
+            manager.run_full_codebase_review(iteration=1, backend=backend)
+            manager.run_full_codebase_review(iteration=1, backend=backend)
 
         content = manager.paths.review_file.read_text()
         assert content == "[CRITICAL] second run\n"
@@ -566,13 +564,14 @@ class TestRunFullCodebaseReview:
     def test_pi_failure_writes_no_issues(self, tmp_path: Path) -> None:
         """When pi fails we should still produce a NO_ISSUES marker."""
         manager = self._make_manager(tmp_path)
-        run_pi = MagicMock(return_value=(1, "", "boom"))
+        backend = MagicMock()
+        backend.invoke_safe.return_value = BackendResult(1, "", "boom")
 
         with patch(
             "fix_die_repeat.runner_review.get_all_tracked_files",
             return_value=[],
         ):
-            manager.run_full_codebase_review(iteration=1, run_pi_callback=run_pi)
+            manager.run_full_codebase_review(iteration=1, backend=backend)
 
         assert manager.paths.review_current_file.read_text() == "NO_ISSUES"
         assert manager.paths.review_file.read_text().strip() == "NO_ISSUES"
@@ -591,11 +590,12 @@ class TestRunContextualReview:
         """UNCOMMITTED scope generates a diff and passes correct template."""
         manager = self._make_manager(tmp_path)
 
-        def fake_run_pi(*_args: str, **_kwargs: object) -> tuple[int, str, str]:
+        def fake_invoke(_request: BackendRequest) -> BackendResult:
             manager.paths.review_current_file.write_text("[CRITICAL] issue\n")
-            return (0, "", "")
+            return BackendResult(0, "", "")
 
-        run_pi = MagicMock(side_effect=fake_run_pi)
+        backend = MagicMock()
+        backend.invoke_safe.side_effect = fake_invoke
 
         with (
             patch(
@@ -608,12 +608,11 @@ class TestRunContextualReview:
             ),
         ):
             # Patch the enum comparison to work
-
             mock_scope.return_value = (ReviewScope.UNCOMMITTED, ["dirty.py"])
-            manager.run_contextual_review(iteration=1, run_pi_callback=run_pi)
+            manager.run_contextual_review(iteration=1, backend=backend)
 
-        assert run_pi.called
-        prompt = run_pi.call_args.args[-1]
+        assert backend.invoke_safe.called
+        prompt = backend.invoke_safe.call_args.args[0].prompt
         assert "uncommitted" in prompt.lower()
         assert "dirty.py" in prompt
         assert manager.paths.review_file.read_text() == "[CRITICAL] issue\n"
@@ -622,11 +621,12 @@ class TestRunContextualReview:
         """BRANCH scope renders correct template with default branch info."""
         manager = self._make_manager(tmp_path)
 
-        def fake_run_pi(*_args: str, **_kwargs: object) -> tuple[int, str, str]:
+        def fake_invoke(_request: BackendRequest) -> BackendResult:
             manager.paths.review_current_file.write_text("NO_ISSUES")
-            return (0, "", "")
+            return BackendResult(0, "", "")
 
-        run_pi = MagicMock(side_effect=fake_run_pi)
+        backend = MagicMock()
+        backend.invoke_safe.side_effect = fake_invoke
 
         with (
             patch(
@@ -642,10 +642,10 @@ class TestRunContextualReview:
                 return_value=(0, "abc123\n", ""),
             ),
         ):
-            manager.run_contextual_review(iteration=1, run_pi_callback=run_pi)
+            manager.run_contextual_review(iteration=1, backend=backend)
 
-        assert run_pi.called
-        prompt = run_pi.call_args.args[-1]
+        assert backend.invoke_safe.called
+        prompt = backend.invoke_safe.call_args.args[0].prompt
         assert "branch" in prompt.lower()
         assert "main" in prompt
         assert "feature.py" in prompt
@@ -653,7 +653,7 @@ class TestRunContextualReview:
     def test_full_scope_delegates_to_full_codebase_review(self, tmp_path: Path) -> None:
         """FULL scope delegates to run_full_codebase_review."""
         manager = self._make_manager(tmp_path)
-        run_pi = MagicMock(return_value=(0, "", ""))
+        backend = MagicMock()
 
         with (
             patch(
@@ -662,16 +662,17 @@ class TestRunContextualReview:
             ),
             patch.object(manager, "run_full_codebase_review") as mock_full,
         ):
-            manager.run_contextual_review(iteration=1, run_pi_callback=run_pi)
+            manager.run_contextual_review(iteration=1, backend=backend)
 
-        mock_full.assert_called_once_with(1, run_pi)
-        # run_pi should NOT be called directly — full review handles that
-        assert not run_pi.called
+        mock_full.assert_called_once_with(1, backend)
+        # backend should NOT be invoked directly — full review handles that
+        assert not backend.invoke_safe.called
 
     def test_pi_failure_writes_no_issues(self, tmp_path: Path) -> None:
         """When pi fails, NO_ISSUES is written."""
         manager = self._make_manager(tmp_path)
-        run_pi = MagicMock(return_value=(1, "", "boom"))
+        backend = MagicMock()
+        backend.invoke_safe.return_value = BackendResult(1, "", "boom")
 
         with (
             patch(
@@ -683,7 +684,7 @@ class TestRunContextualReview:
                 return_value=(0, "fake diff\n", ""),
             ),
         ):
-            manager.run_contextual_review(iteration=1, run_pi_callback=run_pi)
+            manager.run_contextual_review(iteration=1, backend=backend)
 
         assert manager.paths.review_current_file.read_text() == "NO_ISSUES"
         assert manager.paths.review_file.read_text().strip() == "NO_ISSUES"

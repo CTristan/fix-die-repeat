@@ -690,130 +690,10 @@ class TestFormatPrThreads:
         assert "thread2" in result
 
 
-class TestBuildReviewPrompt:
-    """Tests for build_review_prompt method."""
-
-    def test_build_review_prompt_pull_mode(self, tmp_path: Path) -> None:
-        """Test building review prompt in pull mode."""
-        settings = MagicMock()
-        settings.auto_attach_threshold = 100000
-        paths = MagicMock()
-        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
-        paths.fdr_dir = tmp_path
-        paths.pi_log = tmp_path / "pi.log"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.logger = MagicMock()
-
-        pi_args: list[str] = []
-        result = runner.build_review_prompt(200000, pi_args)
-
-        assert "too large to attach" in result
-        assert "MUST use the 'read' tool" in result
-        assert len(pi_args) == 0  # Should not append diff file
-
-    def test_build_review_prompt_push_mode(self, tmp_path: Path) -> None:
-        """Test building review prompt in push mode."""
-        settings = MagicMock()
-        settings.auto_attach_threshold = 200000
-        paths = MagicMock()
-        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
-        paths.fdr_dir = tmp_path
-        paths.pi_log = tmp_path / "pi.log"
-
-        # Create actual diff file
-        diff_file = tmp_path / "changes.diff"
-        paths.diff_file = diff_file
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.logger = MagicMock()
-
-        pi_args: list[str] = []
-        result = runner.build_review_prompt(100000, pi_args)
-
-        assert "changes.diff" in result
-        assert len(pi_args) == 1
-        assert "changes.diff" in pi_args[0]
-
-
-class TestRunPiReview:
-    """Tests for run_pi_review method."""
-
-    def test_run_pi_review_push_mode(self, tmp_path: Path) -> None:
-        """Test running pi review in push mode."""
-        settings = MagicMock()
-        settings.auto_attach_threshold = 200000
-        paths = MagicMock()
-        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
-        paths.fdr_dir = tmp_path
-        paths.pi_log = tmp_path / "pi.log"
-        paths.review_file = tmp_path / "review.md"
-        paths.diff_file = tmp_path / "changes.diff"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.logger = MagicMock()
-        runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
-
-        # Create diff file
-        paths.diff_file.write_text("diff content")
-
-        runner.run_pi_review(100000, runner.run_pi_safe)  # type: ignore[arg-type]
-
-        # Check that run_pi_safe was called
-        assert runner.run_pi_safe.called
-
-    def test_run_pi_review_pull_mode(self, tmp_path: Path) -> None:
-        """Test running pi review in pull mode."""
-        settings = MagicMock()
-        settings.auto_attach_threshold = 100000
-        paths = MagicMock()
-        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
-        paths.fdr_dir = tmp_path
-        paths.pi_log = tmp_path / "pi.log"
-        paths.review_file = tmp_path / "review.md"
-        paths.diff_file = tmp_path / "changes.diff"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.logger = MagicMock()
-        runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
-
-        runner.run_pi_review(200000, runner.run_pi_safe)  # type: ignore[arg-type]
-
-        # Check that run_pi_safe was called
-        assert runner.run_pi_safe.called
-
-    def test_run_pi_review_with_history(self, tmp_path: Path) -> None:
-        """Test running pi review with existing history."""
-        settings = MagicMock()
-        settings.auto_attach_threshold = 200000
-        paths = MagicMock()
-        paths.template_context.return_value = _FAKE_TEMPLATE_CONTEXT
-        paths.fdr_dir = tmp_path
-        paths.pi_log = tmp_path / "pi.log"
-        paths.review_file = tmp_path / "review.md"
-        paths.diff_file = tmp_path / "changes.diff"
-
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.logger = MagicMock()
-        runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
-
-        # Create review history
-        paths.review_file.write_text("# Previous review\n\nIssues found.")
-
-        runner.run_pi_review(100000, runner.run_pi_safe)  # type: ignore[arg-type]
-
-        # Check that run_pi_safe was called
-        assert runner.run_pi_safe.called
+# TestBuildReviewPrompt and TestRunPiReview were removed along with the
+# PiRunner delegation methods build_review_prompt / run_pi_review.
+# Coverage now lives in tests/test_runner_managers.py (build_review_prompt)
+# and tests/test_runner_review.py (run_pi_review through the Backend).
 
 
 class TestGetBranchName:
@@ -1685,7 +1565,7 @@ class TestRunFullCodebaseReviewOnce:
         runner.session_log = tmp_path / "session.log"
         runner.artifact_manager = MagicMock()
         runner.review_manager = review_manager
-        runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
+        runner.backend = MagicMock()  # type: ignore[assignment]
         return runner, review_manager, logger
 
     def test_runs_exactly_one_pass_and_prints_findings(
@@ -1785,7 +1665,7 @@ class TestRunContextualReviewOnce:
         runner.session_log = tmp_path / "session.log"
         runner.artifact_manager = MagicMock()
         runner.review_manager = review_manager
-        runner.run_pi_safe = MagicMock(return_value=(0, "", ""))  # type: ignore[method-assign]
+        runner.backend = MagicMock()  # type: ignore[assignment]
         return runner, review_manager, logger
 
     def test_runs_exactly_one_pass_and_prints_findings(

@@ -7,10 +7,10 @@ This module handles the local code review phase including:
 """
 
 import logging
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from fix_die_repeat.backends import Backend, BackendRequest
 from fix_die_repeat.config import Paths, Settings
 from fix_die_repeat.lang import filter_supported_languages, resolve_languages
 from fix_die_repeat.prompts import render_prompt
@@ -27,6 +27,8 @@ from fix_die_repeat.utils import (
     is_excluded_file,
     run_command,
 )
+
+REVIEW_TOOLS: tuple[str, ...] = ("read", "write", "grep", "find", "ls")
 
 
 class RuffConfigValidationError(RuntimeError):
@@ -164,24 +166,24 @@ class ReviewManager:
     def run_pi_review(
         self,
         diff_size: int,
-        run_pi_callback: Callable[..., tuple[int, str, str]],
+        backend: Backend,
         changed_files: list[str] | None = None,
     ) -> None:
-        """Run pi to review changes.
+        """Run the agent backend to review changes.
 
         Args:
             diff_size: Size of the diff in bytes
-            run_pi_callback: Function to run pi (from PiRunner)
+            backend: Agent backend (e.g. ``PiBackend``)
             changed_files: List of changed files for language detection (optional)
 
         """
         self.logger.info("[Step 5] Running pi to review files...")
 
-        pi_args = ["-p", "--tools", "read,write,grep,find,ls"]
-        review_prompt_prefix = self.build_review_prompt(diff_size, pi_args)
+        attachments: list[Path] = []
+        review_prompt_prefix = self.build_review_prompt(diff_size, attachments)
 
         if self.paths.review_file.exists():
-            pi_args.append(f"@{self.paths.review_file}")
+            attachments.append(self.paths.review_file)
 
         # Detect languages for language-specific checks
         if changed_files is None:
@@ -196,20 +198,32 @@ class ReviewManager:
             **self.paths.template_context(),
         )
 
-        returncode, _, _ = run_pi_callback(*pi_args, review_prompt)
+        result = backend.invoke_safe(
+            BackendRequest(
+                prompt=review_prompt,
+                tools=REVIEW_TOOLS,
+                attachments=tuple(attachments),
+            ),
+        )
 
-        if returncode != 0:
+        if result.returncode != 0:
             self.logger.info("pi review failed. Treating as no issues found.")
             self.paths.review_current_file.write_text("NO_ISSUES")
 
     def build_review_prompt(
-        self, diff_size: int, pi_args: list[str], *, file_list_attached: bool = False
+        self,
+        diff_size: int,
+        attachments: list[Path],
+        *,
+        file_list_attached: bool = False,
     ) -> str:
         """Build review prompt based on diff size.
 
         Args:
             diff_size: Size of the diff in bytes
-            pi_args: List to append diff file to if within threshold
+            attachments: List to append the diff file to if within threshold.
+                Mutated in-place so the caller can aggregate it with its own
+                attachments before constructing the backend request.
             file_list_attached: If True, caller is providing a scoped file list
                 separately (e.g. contextual review), so empty-diff should
                 instruct pi to review those files directly rather than force
@@ -249,7 +263,7 @@ class ReviewManager:
             "Review diff size (%s bytes) is within limits. Attaching changes.diff.",
             diff_size,
         )
-        pi_args.append(f"@{self.paths.diff_file}")
+        attachments.append(self.paths.diff_file)
         return (
             f"I have attached '{self.paths.diff_file}' which contains the changes "
             "made in this session.\n"
@@ -312,14 +326,14 @@ class ReviewManager:
         self,
         iteration: int,
         start_sha: str,
-        run_pi_callback: Callable[..., tuple[int, str, str]],
+        backend: Backend,
     ) -> None:
         """Run local file review.
 
         Args:
             iteration: Current iteration number
             start_sha: Starting git commit SHA
-            run_pi_callback: Function to run pi (from PiRunner)
+            backend: Agent backend (e.g. ``PiBackend``)
 
         """
         self.logger.info("[Step 4] Collecting changed and staged files...")
@@ -348,7 +362,7 @@ class ReviewManager:
         self.logger.info("Generated review diff size: %s bytes", diff_size)
 
         # Run pi review
-        self.run_pi_review(diff_size, run_pi_callback, changed_files)
+        self.run_pi_review(diff_size, backend, changed_files)
 
         # Append review entry
         self.append_review_entry(iteration)
@@ -356,7 +370,7 @@ class ReviewManager:
     def run_full_codebase_review(
         self,
         iteration: int,
-        run_pi_callback: Callable[..., tuple[int, str, str]],
+        backend: Backend,
     ) -> None:
         """Run a single report-only review pass over the entire tracked codebase.
 
@@ -367,7 +381,7 @@ class ReviewManager:
         Args:
             iteration: Current iteration number (unused in single-pass mode,
                 kept for interface parity with ``run_local_review``).
-            run_pi_callback: Function to run pi (from PiRunner)
+            backend: Agent backend (e.g. ``PiBackend``)
 
         """
         del iteration
@@ -386,8 +400,6 @@ class ReviewManager:
         languages = resolve_languages(tracked_files, self.settings.languages)
         languages = filter_supported_languages(languages)
 
-        pi_args = ["-p", "--tools", "read,write,grep,find,ls"]
-
         review_prompt = render_prompt(
             "full_codebase_review.j2",
             languages=sorted(languages),
@@ -395,9 +407,11 @@ class ReviewManager:
         )
 
         self.logger.info("[Step 5] Running pi to audit full codebase...")
-        returncode, _, _ = run_pi_callback(*pi_args, review_prompt)
+        result = backend.invoke_safe(
+            BackendRequest(prompt=review_prompt, tools=REVIEW_TOOLS),
+        )
 
-        if returncode != 0:
+        if result.returncode != 0:
             self.logger.info("pi review failed. Treating as no issues found.")
             self.paths.review_current_file.write_text("NO_ISSUES")
 
@@ -414,7 +428,7 @@ class ReviewManager:
     def run_contextual_review(
         self,
         iteration: int,
-        run_pi_callback: Callable[..., tuple[int, str, str]],
+        backend: Backend,
     ) -> None:
         """Run a contextual review scoped to changed files.
 
@@ -425,13 +439,13 @@ class ReviewManager:
 
         Args:
             iteration: Current iteration number
-            run_pi_callback: Function to run pi (from PiRunner)
+            backend: Agent backend (e.g. ``PiBackend``)
 
         """
         scope, files = determine_review_scope(self.project_root)
 
         if scope == ReviewScope.FULL:
-            self.run_full_codebase_review(iteration, run_pi_callback)
+            self.run_full_codebase_review(iteration, backend)
             return
 
         self.logger.info(
@@ -473,9 +487,12 @@ class ReviewManager:
         languages = resolve_languages(files, self.settings.languages)
         languages = filter_supported_languages(languages)
 
-        # Build pi args and diff context
-        pi_args = ["-p", "--tools", "read,write,grep,find,ls"]
-        diff_context = self.build_review_prompt(diff_size, pi_args, file_list_attached=True)
+        attachments: list[Path] = []
+        diff_context = self.build_review_prompt(
+            diff_size,
+            attachments,
+            file_list_attached=True,
+        )
 
         review_prompt = render_prompt(
             "contextual_review.j2",
@@ -488,9 +505,15 @@ class ReviewManager:
         )
 
         self.logger.info("[Step 5] Running pi to review scoped changes...")
-        returncode, _, _ = run_pi_callback(*pi_args, review_prompt)
+        result = backend.invoke_safe(
+            BackendRequest(
+                prompt=review_prompt,
+                tools=REVIEW_TOOLS,
+                attachments=tuple(attachments),
+            ),
+        )
 
-        if returncode != 0:
+        if result.returncode != 0:
             self.logger.info("pi review failed. Treating as no issues found.")
             self.paths.review_current_file.write_text("NO_ISSUES")
 
