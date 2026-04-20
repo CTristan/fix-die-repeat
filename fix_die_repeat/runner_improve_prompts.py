@@ -102,6 +102,8 @@ class ImprovePromptsManager:
         templates_dir = get_user_templates_dir()
         templates_dir.mkdir(parents=True, exist_ok=True)
         template_paths = self._ensure_user_templates(templates_dir)
+        template_snapshot = self._snapshot_templates(template_paths)
+        pending_before = self._count_pending_entries(introspection_file)
 
         archive_file = get_introspection_archive_file_path()
         prompt = render_prompt(
@@ -132,6 +134,11 @@ class ImprovePromptsManager:
                 returncode,
             )
             return returncode
+
+        pending_after = self._count_pending_entries(introspection_file)
+        changes = self._compute_template_changes(template_paths, template_snapshot)
+        entries_consumed = max(0, pending_before - pending_after)
+        self._emit_summary(changes, entries_consumed)
 
         self.logger.info(
             "[ImprovePrompts] Done. User templates at %s now take precedence.",
@@ -288,6 +295,89 @@ class ImprovePromptsManager:
             )
             return False
         return any(isinstance(doc, dict) and doc.get("status") == "pending" for doc in documents)
+
+    @staticmethod
+    def _snapshot_templates(template_paths: dict[str, Path]) -> dict[str, str]:
+        """Read each template's current content so we can diff post-pi."""
+        snapshot: dict[str, str] = {}
+        for name, path in template_paths.items():
+            try:
+                snapshot[name] = path.read_text() if path.exists() else ""
+            except OSError:
+                snapshot[name] = ""
+        return snapshot
+
+    def _count_pending_entries(self, introspection_file: Path) -> int:
+        """Count ``status: pending`` documents in the introspection YAML."""
+        if not introspection_file.exists():
+            return 0
+        try:
+            content = introspection_file.read_text()
+        except OSError:
+            return 0
+        if not content.strip():
+            return 0
+        try:
+            documents = list(yaml.safe_load_all(content))
+        except yaml.YAMLError:
+            return 0
+        return sum(
+            1 for doc in documents if isinstance(doc, dict) and doc.get("status") == "pending"
+        )
+
+    @staticmethod
+    def _compute_template_changes(
+        template_paths: dict[str, Path],
+        snapshot: dict[str, str],
+    ) -> list[tuple[str, int]]:
+        """Return (name, line_delta) for every template pi modified."""
+        changes: list[tuple[str, int]] = []
+        for name, path in template_paths.items():
+            pre = snapshot.get(name, "")
+            try:
+                post = path.read_text() if path.exists() else ""
+            except OSError:
+                continue
+            if pre == post:
+                continue
+            line_delta = post.count("\n") - pre.count("\n")
+            changes.append((name, line_delta))
+        return changes
+
+    def _emit_summary(
+        self,
+        changes: list[tuple[str, int]],
+        entries_consumed: int,
+    ) -> None:
+        """Log a human-readable summary of template edits and entries consumed."""
+        entries_word = "entry" if entries_consumed == 1 else "entries"
+        if not changes:
+            self.logger.info(
+                "[ImprovePrompts] Summary: no template edits made; %d introspection %s consumed.",
+                entries_consumed,
+                entries_word,
+            )
+            return
+        templates_word = "template" if len(changes) == 1 else "templates"
+        self.logger.info(
+            "[ImprovePrompts] Summary: %d %s modified, %d introspection %s consumed.",
+            len(changes),
+            templates_word,
+            entries_consumed,
+            entries_word,
+        )
+        for name, line_delta in changes:
+            if line_delta > 0:
+                delta_str = f"+{line_delta}"
+            elif line_delta < 0:
+                delta_str = str(line_delta)
+            else:
+                delta_str = "+0"
+            self.logger.info(
+                "[ImprovePrompts]   %s (%s lines)",
+                name,
+                delta_str,
+            )
 
     def _ensure_user_templates(self, templates_dir: Path) -> dict[str, Path]:
         """Ensure the editable templates exist under ``templates_dir``.
