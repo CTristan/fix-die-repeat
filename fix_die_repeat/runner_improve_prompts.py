@@ -7,6 +7,7 @@ pick up the improvements. Nothing inside the installed package is ever
 mutated.
 """
 
+import difflib
 import logging
 import shutil
 from collections.abc import Callable
@@ -24,6 +25,9 @@ from fix_die_repeat.config import (
 )
 from fix_die_repeat.prompts import clear_prompt_cache, render_prompt
 from fix_die_repeat.runner_introspection import _FileLock
+
+_SUMMARY_OPEN = "<IMPROVE_PROMPTS_SUMMARY>"
+_SUMMARY_CLOSE = "</IMPROVE_PROMPTS_SUMMARY>"
 
 # Templates exposed to pi for editing. Kept intentionally narrow: the
 # four top-level language-agnostic prompts that steer every run, plus the
@@ -54,6 +58,7 @@ class _RunPiResult:
     returncode: int
     pending_before: int
     pending_after: int
+    stdout: str
 
 
 class ImprovePromptsManager:
@@ -146,7 +151,7 @@ class ImprovePromptsManager:
 
         changes = self._compute_template_changes(template_paths, template_snapshot)
         entries_consumed = max(0, result.pending_before - result.pending_after)
-        self._emit_summary(changes, entries_consumed)
+        self._emit_summary(changes, entries_consumed, result.stdout)
 
         self.logger.info(
             "[ImprovePrompts] Done. User templates at %s now take precedence.",
@@ -181,7 +186,7 @@ class ImprovePromptsManager:
                 "[ImprovePrompts] Failed to open introspection file %s for locking",
                 introspection_file,
             )
-            return _RunPiResult(_ROLLBACK_EXIT_CODE, 0, 0)
+            return _RunPiResult(_ROLLBACK_EXIT_CODE, 0, 0, "")
 
         with lock_handle, _FileLock(lock_handle):
             pending_before = self._count_pending_entries(introspection_file)
@@ -190,7 +195,7 @@ class ImprovePromptsManager:
             archive_backup = self._create_backup(archive_file) if archive_existed else None
 
             try:
-                returncode, _stdout, _stderr = run_pi_callback(
+                returncode, stdout, _stderr = run_pi_callback(
                     "-p",
                     "--tools",
                     "read,write,edit",
@@ -221,7 +226,7 @@ class ImprovePromptsManager:
                     pending_after = pending_before
                 else:
                     pending_after = self._count_pending_entries(introspection_file)
-                return _RunPiResult(returncode, pending_before, pending_after)
+                return _RunPiResult(returncode, pending_before, pending_after, stdout)
             finally:
                 if main_backup is not None and main_backup.exists():
                     main_backup.unlink()
@@ -343,9 +348,14 @@ class ImprovePromptsManager:
     def _compute_template_changes(
         template_paths: dict[str, Path],
         snapshot: dict[str, str],
-    ) -> list[tuple[str, int]]:
-        """Return (name, line_delta) for every template pi modified."""
-        changes: list[tuple[str, int]] = []
+    ) -> list[tuple[str, int, int]]:
+        """Return (name, added, removed) for every template pi modified.
+
+        Uses unified-diff counts so an in-place rewrite that preserves line
+        count still surfaces as non-zero edits (e.g. ``+7 -7``), unlike a
+        bare net delta which would collapse to ``0``.
+        """
+        changes: list[tuple[str, int, int]] = []
         for name, path in template_paths.items():
             pre = snapshot.get(name, "")
             try:
@@ -354,16 +364,49 @@ class ImprovePromptsManager:
                 continue
             if pre == post:
                 continue
-            line_delta = len(post.splitlines()) - len(pre.splitlines())
-            changes.append((name, line_delta))
+            added = 0
+            removed = 0
+            for line in difflib.unified_diff(
+                pre.splitlines(),
+                post.splitlines(),
+                lineterm="",
+            ):
+                if line.startswith(("+++", "---")):
+                    continue
+                if line.startswith("+"):
+                    added += 1
+                elif line.startswith("-"):
+                    removed += 1
+            changes.append((name, added, removed))
         return changes
+
+    @staticmethod
+    def _extract_pi_summary(stdout: str) -> list[str] | None:
+        """Return the non-empty lines inside pi's summary markers, or ``None``.
+
+        ``None`` signals the marker contract was violated (open missing, close
+        missing, or close before open) so callers can warn once rather than
+        dump raw stdout.
+        """
+        if not stdout:
+            return None
+        open_idx = stdout.find(_SUMMARY_OPEN)
+        if open_idx == -1:
+            return None
+        inner_start = open_idx + len(_SUMMARY_OPEN)
+        close_idx = stdout.find(_SUMMARY_CLOSE, inner_start)
+        if close_idx == -1:
+            return None
+        block = stdout[inner_start:close_idx]
+        return [line.strip() for line in block.splitlines() if line.strip()]
 
     def _emit_summary(
         self,
-        changes: list[tuple[str, int]],
+        changes: list[tuple[str, int, int]],
         entries_consumed: int,
+        pi_stdout: str,
     ) -> None:
-        """Log a human-readable summary of template edits and entries consumed."""
+        """Log a human-readable summary of template edits, counts, and pi's rationale."""
         entries_word = "entry" if entries_consumed == 1 else "entries"
         if not changes:
             self.logger.info(
@@ -371,6 +414,7 @@ class ImprovePromptsManager:
                 entries_consumed,
                 entries_word,
             )
+            self._emit_pi_rationale(pi_stdout)
             return
         templates_word = "template" if len(changes) == 1 else "templates"
         self.logger.info(
@@ -380,18 +424,26 @@ class ImprovePromptsManager:
             entries_consumed,
             entries_word,
         )
-        for name, line_delta in changes:
-            if line_delta > 0:
-                delta_str = f"+{line_delta}"
-            elif line_delta < 0:
-                delta_str = str(line_delta)
-            else:
-                delta_str = "+0"
+        for name, added, removed in changes:
             self.logger.info(
-                "[ImprovePrompts]   %s (%s lines)",
+                "[ImprovePrompts]   %s (+%d -%d lines)",
                 name,
-                delta_str,
+                added,
+                removed,
             )
+        self._emit_pi_rationale(pi_stdout)
+
+    def _emit_pi_rationale(self, pi_stdout: str) -> None:
+        """Echo pi's markered summary block, or warn once if markers are absent."""
+        rationale = self._extract_pi_summary(pi_stdout)
+        if rationale is None:
+            self.logger.warning(
+                "[ImprovePrompts] pi did not wrap its summary in the expected markers; "
+                "skipping rationale echo. See pi.log for the raw output.",
+            )
+            return
+        for line in rationale:
+            self.logger.info("[ImprovePrompts]   pi: %s", line)
 
     def _ensure_user_templates(self, templates_dir: Path) -> dict[str, Path]:
         """Ensure the editable templates exist under ``templates_dir``.

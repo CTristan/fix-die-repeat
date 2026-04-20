@@ -98,10 +98,18 @@ class TestSummary:
             rc = manager.run_improve_prompts(spy)
 
         assert rc == 0
-        messages = " ".join(r.message for r in caplog.records).lower()
-        assert "summary" in messages
-        assert "no" in messages
-        assert any(keyword in messages for keyword in ("edit", "change", "modif"))
+        summary_messages = [r.message for r in caplog.records if "Summary" in r.message]
+        assert summary_messages, "expected at least one [ImprovePrompts] Summary log record"
+        joined = " ".join(summary_messages).lower()
+        assert any(
+            phrase in joined
+            for phrase in (
+                "no template edits",
+                "no edits made",
+                "no changes made",
+                "no templates modified",
+            )
+        )
 
     def test_summary_reports_introspection_entries_consumed(
         self,
@@ -166,3 +174,107 @@ class TestSummary:
         post_summary = " ".join(r.message for r in caplog.records[summary_index:])
         assert "fix_checks.j2" in post_summary
         assert "+3" in post_summary or "3 line" in post_summary
+
+    def test_summary_reports_inline_rewrite_with_same_line_count(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """An in-place rewrite preserving line count must report non-zero +/- counts.
+
+        Regression: the old net-delta metric reported ``(+0 lines)`` when pi
+        reworded every line but kept the line count stable — indistinguishable
+        from "no edit" in the log output.
+        """
+        _write_introspection(_PENDING_ENTRY)
+        templates_dir = get_user_templates_dir()
+
+        def rewriting_pi(*_args: str) -> tuple[int, str, str]:
+            target = templates_dir / "partials/_critical_checklist.j2"
+            original = target.read_text().splitlines()
+            rewritten = [f"ZZZ rewritten line {i}" for i in range(len(original))]
+            target.write_text("\n".join(rewritten) + "\n")
+            return (0, "", "")
+
+        manager = _manager()
+        with caplog.at_level(logging.INFO, logger="test-improve-prompts-summary"):
+            rc = manager.run_improve_prompts(rewriting_pi)
+
+        assert rc == 0
+        summary_index = next(
+            (i for i, r in enumerate(caplog.records) if "Summary" in r.message),
+            None,
+        )
+        assert summary_index is not None, "expected a [ImprovePrompts] Summary log record"
+        post_summary = " ".join(r.message for r in caplog.records[summary_index:])
+        assert "_critical_checklist.j2" in post_summary
+        assert "(+0 lines)" not in post_summary, (
+            "a rewrite touching every line must not report the misleading old '+0 lines' format"
+        )
+        # The new format encodes both sides explicitly, e.g. "(+7 -7 lines)".
+        # Require that the counts surfaced are non-zero on at least one side.
+        assert "+0 -0" not in post_summary
+        assert any(f"+{n}" in post_summary for n in range(1, 200))
+        assert any(f"-{n}" in post_summary for n in range(1, 200))
+
+    def test_summary_includes_pi_rationale(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Pi's markered summary block must be extracted and echoed in the log."""
+        _write_introspection(_PENDING_ENTRY)
+        templates_dir = get_user_templates_dir()
+
+        def rationale_pi(*_args: str) -> tuple[int, str, str]:
+            (templates_dir / "fix_checks.j2").write_text("edited by pi\n")
+            stdout = (
+                "preamble noise that must not be echoed\n"
+                "some tool-use chatter\n"
+                "<IMPROVE_PROMPTS_SUMMARY>\n"
+                "- fix_checks.j2 - added retry guidance\n"
+                "- Entries reviewed: 1\n"
+                "- Compaction: skipped\n"
+                "</IMPROVE_PROMPTS_SUMMARY>\n"
+                "trailing noise that must not be echoed\n"
+            )
+            return (0, stdout, "")
+
+        manager = _manager()
+        with caplog.at_level(logging.INFO, logger="test-improve-prompts-summary"):
+            rc = manager.run_improve_prompts(rationale_pi)
+
+        assert rc == 0
+        pi_prefixed = [r.message for r in caplog.records if "pi:" in r.message]
+        joined = "\n".join(pi_prefixed)
+        assert "added retry guidance" in joined
+        assert "Entries reviewed: 1" in joined
+        assert "Compaction: skipped" in joined
+        all_messages = " ".join(r.message for r in caplog.records)
+        assert "preamble noise" not in all_messages
+        assert "trailing noise" not in all_messages
+        assert "tool-use chatter" not in all_messages
+
+    def test_summary_tolerates_missing_markers(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """If pi ignores the marker contract, the runner warns once and moves on."""
+        _write_introspection(_PENDING_ENTRY)
+        templates_dir = get_user_templates_dir()
+
+        def noncompliant_pi(*_args: str) -> tuple[int, str, str]:
+            (templates_dir / "fix_checks.j2").write_text("edited by pi\n")
+            return (0, "pi produced output but forgot the markers entirely", "")
+
+        manager = _manager()
+        with caplog.at_level(logging.INFO, logger="test-improve-prompts-summary"):
+            rc = manager.run_improve_prompts(noncompliant_pi)
+
+        assert rc == 0
+        warnings = [
+            r.message
+            for r in caplog.records
+            if r.levelno >= logging.WARNING and "summary" in r.message.lower()
+        ]
+        assert len(warnings) == 1, "expected exactly one warning about the missing summary markers"
+        pi_prefixed = [r.message for r in caplog.records if "pi:" in r.message]
+        assert not pi_prefixed, "no rationale should be echoed when markers are missing"

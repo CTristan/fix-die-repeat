@@ -38,10 +38,20 @@ These are the language-agnostic prompt templates (and their shared partials) who
    - Keep the 50 most recent `reviewed` entries in the main file, sorted by `date` descending.
    - Move `reviewed` entries older than 6 months to `{{ archive_file_path }}` (create the file if needed, prepend `---` between documents).
    - If the archive would be empty after the move, do not create it; if it already exists and would become empty, delete it.
-7. Print a short summary of:
-   - Which template files you edited and a one-line rationale per edit.
-   - How many introspection entries you marked as `reviewed`.
-   - Whether compaction ran and how many entries it moved.
+7. Print a short summary wrapped in these **exact** markers so the runner can
+   extract and surface it:
+
+   ```
+   <IMPROVE_PROMPTS_SUMMARY>
+   - <template path> — <one-line rationale>
+   - Entries reviewed: <N>
+   - Compaction: <skipped | moved N entries>
+   </IMPROVE_PROMPTS_SUMMARY>
+   ```
+
+   One `- <template path> — <rationale>` line per edited template. Put nothing
+   else between the open and close markers. Content outside the markers will be
+   ignored.
 
 # Guidelines
 
