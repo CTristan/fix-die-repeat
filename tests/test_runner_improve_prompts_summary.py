@@ -216,11 +216,51 @@ class TestSummary:
         assert any(f"+{n}" in post_summary for n in range(1, 200))
         assert any(f"-{n}" in post_summary for n in range(1, 200))
 
+    def test_summary_reports_trailing_newline_edit_with_non_zero_counts(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        r"""A trailing-newline-only edit must surface as non-zero +/- counts.
+
+        Regression: ``splitlines()`` without ``keepends=True`` drops trailing
+        terminators, so if pi only strips or adds a final ``\n`` the diff loop
+        sees identical line lists and reports ``+0 -0`` — even though the
+        ``pre != post`` guard already fired. The summary then contradicts
+        itself: "this file changed ... (+0 -0 lines)".
+        """
+        _write_introspection(_PENDING_ENTRY)
+        templates_dir = get_user_templates_dir()
+
+        def strip_trailing_newline_pi(*_args: str) -> tuple[int, str, str]:
+            target = templates_dir / "fix_checks.j2"
+            base = target.read_text()
+            if base.endswith("\n"):
+                target.write_text(base.rstrip("\n"))
+            else:
+                target.write_text(base + "\n")
+            return (0, "", "")
+
+        manager = _manager()
+        with caplog.at_level(logging.INFO, logger="test-improve-prompts-summary"):
+            rc = manager.run_improve_prompts(strip_trailing_newline_pi)
+
+        assert rc == 0
+        summary_index = next(
+            (i for i, r in enumerate(caplog.records) if "Summary" in r.message),
+            None,
+        )
+        assert summary_index is not None, "expected a [ImprovePrompts] Summary log record"
+        post_summary = " ".join(r.message for r in caplog.records[summary_index:])
+        assert "fix_checks.j2" in post_summary
+        assert "+0 -0" not in post_summary, (
+            "a trailing-newline edit must not report '+0 -0' once pre != post has already fired"
+        )
+
     def test_summary_includes_pi_rationale(
         self,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Pi's markered summary block must be extracted and echoed in the log."""
+        """Pi's marked summary block must be extracted and echoed in the log."""
         _write_introspection(_PENDING_ENTRY)
         templates_dir = get_user_templates_dir()
 

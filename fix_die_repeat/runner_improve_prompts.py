@@ -354,6 +354,11 @@ class ImprovePromptsManager:
         Uses unified-diff counts so an in-place rewrite that preserves line
         count still surfaces as non-zero edits (e.g. ``+7 -7``), unlike a
         bare net delta which would collapse to ``0``.
+
+        ``splitlines(keepends=True)`` preserves line terminators so that
+        newline-only edits (CRLF/LF normalization or a flipped trailing
+        newline) report as non-zero +/- counts instead of a misleading
+        ``+0 -0`` after the ``pre != post`` guard has already passed.
         """
         changes: list[tuple[str, int, int]] = []
         for name, path in template_paths.items():
@@ -367,8 +372,8 @@ class ImprovePromptsManager:
             added = 0
             removed = 0
             for line in difflib.unified_diff(
-                pre.splitlines(),
-                post.splitlines(),
+                pre.splitlines(keepends=True),
+                post.splitlines(keepends=True),
                 lineterm="",
             ):
                 if line.startswith(("+++", "---")):
@@ -434,7 +439,7 @@ class ImprovePromptsManager:
         self._emit_pi_rationale(pi_stdout)
 
     def _emit_pi_rationale(self, pi_stdout: str) -> None:
-        """Echo pi's markered summary block, or warn once if markers are absent."""
+        """Echo pi's marked summary block, or warn once if markers are absent."""
         rationale = self._extract_pi_summary(pi_stdout)
         if rationale is None:
             self.logger.warning(
