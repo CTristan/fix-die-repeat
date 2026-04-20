@@ -389,9 +389,9 @@ class ImprovePromptsManager:
     def _extract_pi_summary(stdout: str) -> list[str] | None:
         """Return the non-empty lines inside pi's summary markers, or ``None``.
 
-        ``None`` signals the marker contract was violated (open missing, close
-        missing, or close before open) so callers can warn once rather than
-        dump raw stdout.
+        ``None`` signals either that ``stdout`` was empty or that the marker
+        contract was violated (open missing, close missing, or close before
+        open) so callers can warn once rather than dump raw stdout.
         """
         if not stdout:
             return None
