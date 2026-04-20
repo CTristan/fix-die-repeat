@@ -376,7 +376,7 @@ class ImprovePromptsManager:
                 post.splitlines(keepends=True),
                 lineterm="",
             ):
-                if line.startswith(("+++", "---")):
+                if line.startswith(("+++ ", "--- ")):
                     continue
                 if line.startswith("+"):
                     added += 1

@@ -319,6 +319,43 @@ class TestSummary:
         pi_prefixed = [r.message for r in caplog.records if "pi:" in r.message]
         assert not pi_prefixed, "no rationale should be echoed when markers are missing"
 
+    def test_summary_counts_added_lines_whose_content_starts_with_plus_plus_plus(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Added lines whose raw content begins with ``+++`` must be counted.
+
+        Regression: the old header-skip check ``startswith(("+++", "---"))``
+        also matched real added lines whose content starts with ``+++`` (since
+        the diff line becomes ``++++...``), causing an undercount and a
+        misleading ``+0 -0`` when every changed line happened to share that
+        prefix.
+        """
+        _write_introspection(_PENDING_ENTRY)
+        templates_dir = get_user_templates_dir()
+
+        def plus_prefix_pi(*_args: str) -> tuple[int, str, str]:
+            target = templates_dir / "fix_checks.j2"
+            target.write_text("+++marker line one\n+++marker line two\n")
+            return (0, "", "")
+
+        manager = _manager()
+        with caplog.at_level(logging.INFO, logger="test-improve-prompts-summary"):
+            rc = manager.run_improve_prompts(plus_prefix_pi)
+
+        assert rc == 0
+        summary_index = next(
+            (i for i, r in enumerate(caplog.records) if "Summary" in r.message),
+            None,
+        )
+        assert summary_index is not None, "expected a [ImprovePrompts] Summary log record"
+        post_summary = " ".join(r.message for r in caplog.records[summary_index:])
+        assert "fix_checks.j2" in post_summary
+        assert "+2" in post_summary, (
+            "two added lines starting with '+++' must both be counted as additions, "
+            "not mistaken for diff headers"
+        )
+
     def test_summary_silent_when_pi_stdout_is_empty(
         self,
         caplog: pytest.LogCaptureFixture,
