@@ -439,7 +439,14 @@ class ImprovePromptsManager:
         self._emit_pi_rationale(pi_stdout)
 
     def _emit_pi_rationale(self, pi_stdout: str) -> None:
-        """Echo pi's marked summary block, or warn once if markers are absent."""
+        """Echo pi's marked summary block, or warn once if markers are absent.
+
+        Empty/whitespace-only stdout is treated as "no rationale provided" and
+        skipped silently — the marker-contract WARNING is reserved for cases
+        where pi emitted output but failed to wrap it in the expected markers.
+        """
+        if not pi_stdout or not pi_stdout.strip():
+            return
         rationale = self._extract_pi_summary(pi_stdout)
         if rationale is None:
             self.logger.warning(

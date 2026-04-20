@@ -318,3 +318,36 @@ class TestSummary:
         assert len(warnings) == 1, "expected exactly one warning about the missing summary markers"
         pi_prefixed = [r.message for r in caplog.records if "pi:" in r.message]
         assert not pi_prefixed, "no rationale should be echoed when markers are missing"
+
+    def test_summary_silent_when_pi_stdout_is_empty(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Empty/whitespace-only pi stdout is benign and must not trigger a marker warning.
+
+        Regression: previously ``_emit_pi_rationale`` logged a WARNING pointing
+        users to ``pi.log`` whenever stdout was empty, conflating "no rationale
+        produced" with "marker contract violated."
+        """
+        _write_introspection(_PENDING_ENTRY)
+        templates_dir = get_user_templates_dir()
+
+        def silent_pi(*_args: str) -> tuple[int, str, str]:
+            (templates_dir / "fix_checks.j2").write_text("edited by pi\n")
+            return (0, "   \n\t\n", "")
+
+        manager = _manager()
+        with caplog.at_level(logging.INFO, logger="test-improve-prompts-summary"):
+            rc = manager.run_improve_prompts(silent_pi)
+
+        assert rc == 0
+        marker_warnings = [
+            r.message
+            for r in caplog.records
+            if r.levelno >= logging.WARNING and "markers" in r.message.lower()
+        ]
+        assert not marker_warnings, (
+            "empty/whitespace-only pi stdout should not emit a marker-contract warning"
+        )
+        pi_prefixed = [r.message for r in caplog.records if "pi:" in r.message]
+        assert not pi_prefixed, "no rationale lines should be echoed when stdout is empty"
