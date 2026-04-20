@@ -1,5 +1,6 @@
 """Shared pytest fixtures for fix-die-repeat tests."""
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
@@ -25,6 +26,12 @@ def _isolated_fdr_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     fdr_home = tmp_path / "fdr_home"
     monkeypatch.setenv("FDR_HOME", str(fdr_home))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    # Pre-commit injects GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE into the hook env.
+    # Tests that `git init` a tmp dir or construct `Paths()` must not inherit that
+    # context or git operates on the parent repo instead of the test's sandbox.
+    for key in list(os.environ):
+        if key.startswith("GIT_"):
+            monkeypatch.delenv(key, raising=False)
     return fdr_home
 
 
