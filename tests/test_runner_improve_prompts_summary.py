@@ -1,6 +1,6 @@
 """Tests for the post-run summary emitted by ``--improve-prompts``.
 
-Kept in a sibling file from ``test_runner_improve_prompts.py`` purely to keep
+Kept in a sibling file of ``test_runner_improve_prompts.py`` purely to keep
 the summary-specific cases grouped; pytest collects both files the same way.
 """
 

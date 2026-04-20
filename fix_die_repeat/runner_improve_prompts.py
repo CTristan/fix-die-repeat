@@ -10,6 +10,7 @@ mutated.
 import logging
 import shutil
 from collections.abc import Callable
+from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
@@ -44,6 +45,15 @@ EDITABLE_TEMPLATES = (
 # Non-zero exit code returned when pi succeeds but leaves the introspection
 # or archive file unparseable, so the user notices the rollback.
 _ROLLBACK_EXIT_CODE = 1
+
+
+@dataclass(frozen=True)
+class _RunPiResult:
+    """Outcome of ``_run_pi_with_rollback``, with counts captured under the file lock."""
+
+    returncode: int
+    pending_before: int
+    pending_after: int
 
 
 class ImprovePromptsManager:
@@ -103,7 +113,6 @@ class ImprovePromptsManager:
         templates_dir.mkdir(parents=True, exist_ok=True)
         template_paths = self._ensure_user_templates(templates_dir)
         template_snapshot = self._snapshot_templates(template_paths)
-        pending_before = self._count_pending_entries(introspection_file)
 
         archive_file = get_introspection_archive_file_path()
         prompt = render_prompt(
@@ -117,7 +126,7 @@ class ImprovePromptsManager:
         self.logger.info(
             "[ImprovePrompts] Asking pi to review introspection data and update user templates...",
         )
-        returncode = self._run_pi_with_rollback(
+        result = self._run_pi_with_rollback(
             introspection_file=introspection_file,
             archive_file=archive_file,
             run_pi_callback=run_pi_callback,
@@ -128,16 +137,15 @@ class ImprovePromptsManager:
         # even if the same process goes on to use templates (tests do this).
         clear_prompt_cache()
 
-        if returncode != 0:
+        if result.returncode != 0:
             self.logger.warning(
                 "[ImprovePrompts] pi exited with code %s; user templates may be partially updated.",
-                returncode,
+                result.returncode,
             )
-            return returncode
+            return result.returncode
 
-        pending_after = self._count_pending_entries(introspection_file)
         changes = self._compute_template_changes(template_paths, template_snapshot)
-        entries_consumed = max(0, pending_before - pending_after)
+        entries_consumed = max(0, result.pending_before - result.pending_after)
         self._emit_summary(changes, entries_consumed)
 
         self.logger.info(
@@ -153,13 +161,15 @@ class ImprovePromptsManager:
         archive_file: Path,
         run_pi_callback: Callable[..., tuple[int, str, str]],
         prompt: str,
-    ) -> int:
+    ) -> _RunPiResult:
         """Hold an exclusive lock on the introspection file for the pi call.
 
         Acquires ``_FileLock`` on ``introspection.yaml`` so a concurrent FDR
         process appending introspection entries serializes with us. Takes a
         backup of both the main and archive files before invoking pi, and
-        rolls back if pi leaves either file unparseable.
+        rolls back if pi leaves either file unparseable. Returns the
+        before/after pending counts captured inside the lock so the summary
+        reflects this invocation's exact state rather than an interleaved view.
         """
         # Open in r+ so we can hold an exclusive flock without truncating pi's
         # edits. pi rewrites the file in place via its own open(...) calls; our
@@ -171,9 +181,10 @@ class ImprovePromptsManager:
                 "[ImprovePrompts] Failed to open introspection file %s for locking",
                 introspection_file,
             )
-            return _ROLLBACK_EXIT_CODE
+            return _RunPiResult(_ROLLBACK_EXIT_CODE, 0, 0)
 
         with lock_handle, _FileLock(lock_handle):
+            pending_before = self._count_pending_entries(introspection_file)
             main_backup = self._create_backup(introspection_file)
             archive_existed = archive_file.exists()
             archive_backup = self._create_backup(archive_file) if archive_existed else None
@@ -207,7 +218,10 @@ class ImprovePromptsManager:
                     )
                     if returncode == 0:
                         returncode = _ROLLBACK_EXIT_CODE
-                return returncode
+                    pending_after = pending_before
+                else:
+                    pending_after = self._count_pending_entries(introspection_file)
+                return _RunPiResult(returncode, pending_before, pending_after)
             finally:
                 if main_backup is not None and main_backup.exists():
                     main_backup.unlink()
@@ -340,7 +354,7 @@ class ImprovePromptsManager:
                 continue
             if pre == post:
                 continue
-            line_delta = post.count("\n") - pre.count("\n")
+            line_delta = len(post.splitlines()) - len(pre.splitlines())
             changes.append((name, line_delta))
         return changes
 
