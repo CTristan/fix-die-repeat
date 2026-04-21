@@ -10,6 +10,12 @@ from fix_die_repeat.pi_bridge import PiBridge, PiBridgeError
 from fix_die_repeat.runner import PiRunner
 from fix_die_repeat.utils import get_git_revision_hash
 
+# Sample timeout overrides for the settings-plumbing test. Deliberately distinct
+# from the production defaults (120s / 3600s) so a failure clearly points at
+# the forwarding logic rather than the defaults.
+SAMPLE_IDLE_TIMEOUT_S = 42.0
+SAMPLE_HARD_TIMEOUT_S = 900.0
+
 
 class TestRunPi:
     """Tests for run_pi and run_pi_safe routed through the pi-bridge."""
@@ -66,6 +72,51 @@ class TestRunPi:
         bridge.prompt.assert_called_once()
         _args, kwargs = bridge.prompt.call_args
         assert kwargs["tools"] == ["read", "grep", "ls"]
+
+    def test_run_pi_forwards_idle_and_hard_timeouts_from_settings(self, tmp_path: Path) -> None:
+        """Settings' idle/hard timeouts are threaded through to PiBridge.prompt."""
+        runner, bridge = self._build_runner(tmp_path)
+        runner.settings.pi_prompt_idle_timeout_s = SAMPLE_IDLE_TIMEOUT_S
+        runner.settings.pi_prompt_hard_timeout_s = SAMPLE_HARD_TIMEOUT_S
+        bridge.prompt.return_value = (0, "", "")
+
+        runner.run_pi("-p", "hello")
+
+        _args, kwargs = bridge.prompt.call_args
+        assert kwargs["idle_timeout_s"] == SAMPLE_IDLE_TIMEOUT_S
+        assert kwargs["hard_timeout_s"] == SAMPLE_HARD_TIMEOUT_S
+
+    def test_run_pi_forwards_progress_callback(self, tmp_path: Path) -> None:
+        """run_pi supplies an on_event callback so bridge progress can be logged."""
+        runner, bridge = self._build_runner(tmp_path)
+        bridge.prompt.return_value = (0, "", "")
+
+        runner.run_pi("-p", "hello")
+
+        _args, kwargs = bridge.prompt.call_args
+        assert callable(kwargs["on_event"])
+
+    def test_log_bridge_event_logs_tool_execution_start_only(self, tmp_path: Path) -> None:
+        """Progress log fires on tool_execution_start, not on deltas or end events."""
+        runner, _bridge = self._build_runner(tmp_path)
+        runner.logger = MagicMock()
+
+        runner._log_bridge_event(
+            {
+                "type": "tool_execution_start",
+                "toolName": "read",
+                "args": {"filePath": "fix_die_repeat/runner.py"},
+            }
+        )
+        runner._log_bridge_event({"type": "tool_execution_end", "toolName": "read"})
+        runner._log_bridge_event({"type": "text_delta", "delta": "hi"})
+        runner._log_bridge_event({"type": "thinking_delta", "delta": "pondering"})
+
+        info_calls = runner.logger.info.call_args_list  # type: ignore[attr-defined]
+        assert len(info_calls) == 1
+        rendered = info_calls[0].args[0] % info_calls[0].args[1:]
+        assert "pi: read" in rendered
+        assert "fix_die_repeat/runner.py" in rendered
 
     def test_run_pi_embeds_at_file_contents(self, tmp_path: Path) -> None:
         """run_pi inlines @file contents so pi's CLI @-syntax is preserved."""

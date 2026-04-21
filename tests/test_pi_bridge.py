@@ -12,6 +12,7 @@ import json
 import logging
 import subprocess
 import threading
+import time
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -21,6 +22,7 @@ from fix_die_repeat.pi_bridge import (
     PiBridge,
     PiBridgeConfig,
     PiBridgeError,
+    _AwaitParams,
 )
 
 if TYPE_CHECKING:
@@ -83,6 +85,15 @@ class _BlockingIterable:
 
 def _event(obj: object) -> str:
     return json.dumps(obj) + "\n"
+
+
+# Sample timeout values used in plumbing tests. Picked to be obviously not the
+# production defaults (120s idle / 3600s hard) so assertion failures are easy
+# to read: if the test breaks, it's clear that the plumbing didn't forward
+# these specific numbers.
+SAMPLE_IDLE_S = 60.0
+SAMPLE_HARD_S = 1800.0
+SAMPLE_HARD_MS = int(SAMPLE_HARD_S * 1000)
 
 
 def _logger() -> logging.Logger:
@@ -301,3 +312,166 @@ class TestPiBridgeControlCommands:
 
         lines = [json.loads(ln) for ln in fake.stdin.getvalue().strip().splitlines()]
         assert any(cmd.get("type") == "abort" for cmd in lines)
+
+
+class TestPiBridgeIdleTimeout:
+    """Idle-timeout semantics and hard-cap safety net.
+
+    The old wall-clock ``timeout_s`` killed long-running prompts (large
+    contextual reviews) that were actively emitting tool-execution events. The
+    bridge now resets the deadline on every received event and relies on a
+    separate ``hard_timeout_s`` safety net to bound runaway event storms.
+    """
+
+    def _make_bridge(self, tmp_path: Path) -> PiBridge:
+        """Build a PiBridge without spawning a subprocess.
+
+        ``_await_event`` only reads from ``self._events`` and touches
+        ``self._proc`` on EOF, so tests that push events directly onto the
+        queue don't need the full lifecycle.
+        """
+        bridge_script = tmp_path / "bridge.js"
+        bridge_script.write_text("// fake\n")
+        return PiBridge(
+            PiBridgeConfig(working_dir=tmp_path),
+            bridge_script=bridge_script,
+            logger=_logger(),
+        )
+
+    def test_idle_timeout_fires_when_no_events(self, tmp_path: Path) -> None:
+        """_await_event raises if no event arrives within idle_timeout_s."""
+        bridge = self._make_bridge(tmp_path)
+        start = time.monotonic()
+        with pytest.raises(PiBridgeError, match=r"idle|timed out"):
+            bridge._await_event(
+                _AwaitParams(
+                    expected_types=frozenset({"agent_end"}),
+                    error_types=frozenset({"error"}),
+                    idle_timeout_s=0.15,
+                    context="prompt",
+                    drain_intermediate=True,
+                )
+            )
+        elapsed = time.monotonic() - start
+        assert elapsed < 1.0, f"idle timeout fired too late: {elapsed:.2f}s"
+
+    def test_continuous_events_keep_idle_timer_alive(self, tmp_path: Path) -> None:
+        """Events received within idle_timeout_s reset the deadline.
+
+        Regression test: the old 300s wall-clock timeout killed contextual
+        reviews that were actively emitting tool-execution events every few
+        seconds. This test runs longer than idle_timeout_s but no gap between
+        events ever exceeds it, so the prompt must succeed.
+        """
+        bridge = self._make_bridge(tmp_path)
+
+        def pusher() -> None:
+            """Emit 20 intermediate events spaced 0.05s apart, then agent_end."""
+            for _ in range(20):
+                time.sleep(0.05)
+                bridge._events.put({"type": "tool_execution_start", "toolName": "read"})
+            bridge._events.put({"type": "agent_end", "finalText": "done"})
+
+        t = threading.Thread(target=pusher, daemon=True)
+        t.start()
+
+        event = bridge._await_event(
+            _AwaitParams(
+                expected_types=frozenset({"agent_end"}),
+                error_types=frozenset({"error"}),
+                idle_timeout_s=0.2,
+                context="prompt",
+                drain_intermediate=True,
+            )
+        )
+        t.join(timeout=3.0)
+
+        assert event["type"] == "agent_end"
+        assert event.get("finalText") == "done"
+
+    def test_hard_timeout_fires_despite_continuous_events(self, tmp_path: Path) -> None:
+        """hard_timeout_s bounds total wall-clock even when events stream.
+
+        Safety net against a pathological bridge that keeps the idle timer
+        alive forever by spamming events but never emits ``agent_end``.
+        """
+        bridge = self._make_bridge(tmp_path)
+        stop = threading.Event()
+
+        def pusher() -> None:
+            while not stop.is_set():
+                bridge._events.put({"type": "text_delta", "delta": "."})
+                time.sleep(0.02)
+
+        t = threading.Thread(target=pusher, daemon=True)
+        t.start()
+        try:
+            with pytest.raises(PiBridgeError, match=r"hard|timed out"):
+                bridge._await_event(
+                    _AwaitParams(
+                        expected_types=frozenset({"agent_end"}),
+                        error_types=frozenset({"error"}),
+                        idle_timeout_s=5.0,
+                        hard_timeout_s=0.3,
+                        context="prompt",
+                        drain_intermediate=True,
+                    )
+                )
+        finally:
+            stop.set()
+            t.join(timeout=2.0)
+
+    def test_on_event_callback_invoked_for_each_intermediate(self, tmp_path: Path) -> None:
+        """``on_event`` fires for every drained intermediate, not for terminal events."""
+        bridge = self._make_bridge(tmp_path)
+        seen: list[str] = []
+
+        bridge._events.put({"type": "tool_execution_start", "toolName": "read"})
+        bridge._events.put({"type": "tool_execution_end", "toolName": "read"})
+        bridge._events.put({"type": "agent_end", "finalText": ""})
+
+        bridge._await_event(
+            _AwaitParams(
+                expected_types=frozenset({"agent_end"}),
+                error_types=frozenset({"error"}),
+                idle_timeout_s=1.0,
+                context="prompt",
+                drain_intermediate=True,
+                on_event=lambda ev: seen.append(str(ev.get("type", ""))),
+            )
+        )
+
+        assert seen == ["tool_execution_start", "tool_execution_end"]
+
+
+class TestPiBridgePromptTimeoutPlumbing:
+    """Prompt-level timeout parameters travel to the right places."""
+
+    def test_prompt_sends_hard_timeout_as_bridge_timeout_ms(self, tmp_path: Path) -> None:
+        """``hard_timeout_s * 1000`` becomes ``timeoutMs`` in the bridge command.
+
+        The bridge-side timeout is the absolute cap on the agent's turn — it
+        needs to outlive the Python idle timer so that a genuinely hung pi
+        session gets cleaned up at the source, not just in Python.
+        """
+        script, fake = _prepare_bridge(
+            tmp_path,
+            [{"type": "agent_end", "finalText": ""}],
+        )
+        with patch("fix_die_repeat.pi_bridge.subprocess.Popen", return_value=fake):
+            with PiBridge(
+                PiBridgeConfig(working_dir=tmp_path),
+                bridge_script=script,
+                logger=_logger(),
+            ) as bridge:
+                bridge.prompt(
+                    "hello",
+                    idle_timeout_s=SAMPLE_IDLE_S,
+                    hard_timeout_s=SAMPLE_HARD_S,
+                )
+                fake.stdout.close()
+                fake.stderr.close()
+
+        lines = [json.loads(ln) for ln in fake.stdin.getvalue().strip().splitlines()]
+        prompt_cmd = next(cmd for cmd in lines if cmd.get("type") == "prompt")
+        assert prompt_cmd["timeoutMs"] == SAMPLE_HARD_MS

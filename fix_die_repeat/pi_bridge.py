@@ -25,9 +25,16 @@ from typing import TYPE_CHECKING, Self
 
 if TYPE_CHECKING:
     import logging
+    from collections.abc import Callable
     from types import TracebackType
 
-DEFAULT_PROMPT_TIMEOUT_MS = 300_000
+# Idle timeout: a pi turn that emits no events for this long is considered hung.
+# Pi normally emits tool_execution_start/end and text_delta every few seconds
+# while working; 120s is comfortably above any realistic single-step gap.
+DEFAULT_IDLE_TIMEOUT_S = 120.0
+# Hard cap: bounds wall-clock even if pi keeps the idle timer alive with a
+# pathological event storm. 60 min matches long-form review turns on big diffs.
+DEFAULT_HARD_TIMEOUT_S = 3600.0
 DEFAULT_INIT_TIMEOUT_S = 15.0
 DEFAULT_SHUTDOWN_TIMEOUT_S = 5.0
 _READER_JOIN_TIMEOUT_S = 2.0
@@ -35,6 +42,73 @@ _READER_JOIN_TIMEOUT_S = 2.0
 
 class PiBridgeError(RuntimeError):
     """Raised when the bridge subprocess can't be started or driven."""
+
+
+@dataclass(frozen=True)
+class _AwaitParams:
+    """Grouped parameters for ``PiBridge._await_event``.
+
+    Split into a dataclass so the underlying routine doesn't violate PLR0913
+    (it needs both a timing model and a classification model for incoming
+    events, which is intrinsically more than 5 unrelated arguments).
+    """
+
+    expected_types: frozenset[str]
+    error_types: frozenset[str]
+    idle_timeout_s: float
+    context: str
+    drain_intermediate: bool = False
+    hard_timeout_s: float | None = None
+    on_event: Callable[[dict[str, object]], None] | None = None
+
+
+class _AwaitDeadline:
+    """Idle + hard deadline bookkeeping for a single ``_await_event`` call.
+
+    The idle deadline resets on every received event so long but active pi
+    turns stay alive; the optional hard deadline caps total wall clock and
+    only exists as a safety net for pathological event storms.
+    """
+
+    def __init__(self, idle_timeout_s: float, hard_timeout_s: float | None) -> None:
+        """Start both deadlines from now."""
+        now = time.monotonic()
+        self._idle_timeout_s = idle_timeout_s
+        self._hard_timeout_s = hard_timeout_s
+        self._idle_deadline = now + idle_timeout_s
+        self._hard_deadline = now + hard_timeout_s if hard_timeout_s is not None else None
+
+    def reset_idle(self) -> None:
+        """Move the idle deadline forward; hard deadline stays fixed."""
+        self._idle_deadline = time.monotonic() + self._idle_timeout_s
+
+    def next_wait(self, context: str) -> float:
+        """Return how long to wait for the next event, raising if a deadline passed."""
+        now = time.monotonic()
+        if self._hard_deadline is not None and now >= self._hard_deadline:
+            raise PiBridgeError(self._hard_message(context))
+        wait = self._idle_deadline - now
+        if self._hard_deadline is not None:
+            wait = min(wait, self._hard_deadline - now)
+        if wait <= 0:
+            raise PiBridgeError(self._idle_message(context))
+        return wait
+
+    def classify_empty(self, context: str) -> PiBridgeError:
+        """Pick the right error message when ``queue.get`` times out."""
+        if self._hard_deadline is not None and time.monotonic() >= self._hard_deadline:
+            return PiBridgeError(self._hard_message(context))
+        return PiBridgeError(self._idle_message(context))
+
+    def _idle_message(self, context: str) -> str:
+        return f"pi-bridge {context} idle for more than {self._idle_timeout_s:.1f}s"
+
+    def _hard_message(self, context: str) -> str:
+        # hard_timeout_s is guaranteed non-None when this is called, but keep
+        # the format defensive — tests that construct deadlines with None
+        # shouldn't blow up on message rendering.
+        hard = 0.0 if self._hard_timeout_s is None else self._hard_timeout_s
+        return f"pi-bridge {context} exceeded hard timeout ({hard:.1f}s)"
 
 
 @dataclass
@@ -114,10 +188,12 @@ class PiBridge:
         self._spawn()
         self._send(self._config.to_init_command())
         self._await_event(
-            expected_types={"ready"},
-            error_types={"error"},
-            timeout_s=DEFAULT_INIT_TIMEOUT_S,
-            context="init",
+            _AwaitParams(
+                expected_types=frozenset({"ready"}),
+                error_types=frozenset({"error"}),
+                idle_timeout_s=DEFAULT_INIT_TIMEOUT_S,
+                context="init",
+            )
         )
         self._logger.debug(
             "pi-bridge initialized (provider=%s model=%s)",
@@ -140,29 +216,50 @@ class PiBridge:
     def prompt(
         self,
         message: str,
-        timeout_ms: int | None = None,
+        *,
+        idle_timeout_s: float | None = None,
+        hard_timeout_s: float | None = None,
         tools: list[str] | None = None,
+        on_event: Callable[[dict[str, object]], None] | None = None,
     ) -> tuple[int, str, str]:
         """Run one agent turn with ``message``.
 
         Returns ``(returncode, stdout, stderr)`` where ``stdout`` is the agent's
         final assistant text, ``stderr`` is the bridge diagnostics for this
         turn, and ``returncode`` is 0 on ``agent_end``, 1 on ``error`` or timeout.
+
+        Timeouts:
+          * ``idle_timeout_s`` — fail if no event arrives for this long (hung pi).
+          * ``hard_timeout_s`` — wall-clock cap on the whole turn; also forwarded
+            to the bridge as ``timeoutMs`` so a genuinely runaway agent session
+            is cleaned up at its source, not just in Python.
+
         Pass ``tools`` to override the init-time tool set for this turn only.
+        Pass ``on_event`` to observe intermediate events (tool_execution_*,
+        text_delta, thinking_delta) as they arrive — useful for progress UI.
         """
-        timeout_ms = timeout_ms if timeout_ms is not None else DEFAULT_PROMPT_TIMEOUT_MS
+        idle_timeout_s = idle_timeout_s if idle_timeout_s is not None else DEFAULT_IDLE_TIMEOUT_S
+        hard_timeout_s = hard_timeout_s if hard_timeout_s is not None else DEFAULT_HARD_TIMEOUT_S
         self._reset_stderr_capture()
-        command: dict[str, object] = {"type": "prompt", "message": message, "timeoutMs": timeout_ms}
+        command: dict[str, object] = {
+            "type": "prompt",
+            "message": message,
+            "timeoutMs": int(hard_timeout_s * 1000),
+        }
         if tools is not None:
             command["tools"] = list(tools)
         self._send(command)
         try:
             event = self._await_event(
-                expected_types={"agent_end"},
-                error_types={"error"},
-                timeout_s=(timeout_ms / 1000) + 10.0,
-                context="prompt",
-                drain_intermediate=True,
+                _AwaitParams(
+                    expected_types=frozenset({"agent_end"}),
+                    error_types=frozenset({"error"}),
+                    idle_timeout_s=idle_timeout_s,
+                    hard_timeout_s=hard_timeout_s + 10.0,
+                    context="prompt",
+                    drain_intermediate=True,
+                    on_event=on_event,
+                )
             )
         except PiBridgeError as err:
             return (1, "", self._drain_stderr() + f"\n{err}")
@@ -174,10 +271,12 @@ class PiBridge:
         """Swap the model used by subsequent prompts."""
         self._send({"type": "set_model", "provider": provider, "modelId": model_id})
         self._await_event(
-            expected_types={"ready"},
-            error_types={"error"},
-            timeout_s=DEFAULT_INIT_TIMEOUT_S,
-            context="set_model",
+            _AwaitParams(
+                expected_types=frozenset({"ready"}),
+                error_types=frozenset({"error"}),
+                idle_timeout_s=DEFAULT_INIT_TIMEOUT_S,
+                context="set_model",
+            )
         )
         self._config.provider = provider
         self._config.model = model_id
@@ -191,10 +290,12 @@ class PiBridge:
         """
         self._send({"type": "compact"})
         self._await_event(
-            expected_types={"ready"},
-            error_types={"error"},
-            timeout_s=DEFAULT_INIT_TIMEOUT_S,
-            context="compact",
+            _AwaitParams(
+                expected_types=frozenset({"ready"}),
+                error_types=frozenset({"error"}),
+                idle_timeout_s=DEFAULT_INIT_TIMEOUT_S,
+                context="compact",
+            )
         )
 
     def abort(self) -> None:
@@ -313,50 +414,54 @@ class PiBridge:
             msg = f"pi-bridge stdin closed unexpectedly: {err}"
             raise PiBridgeError(msg) from err
 
-    def _await_event(
-        self,
-        *,
-        expected_types: set[str],
-        error_types: set[str],
-        timeout_s: float,
-        context: str,
-        drain_intermediate: bool = False,
-    ) -> dict[str, object]:
-        """Block until an event of ``expected_types`` arrives.
+    def _await_event(self, params: _AwaitParams) -> dict[str, object]:
+        """Block until an event of ``params.expected_types`` arrives.
 
-        Raises :class:`PiBridgeError` on ``error_types``, timeout, or EOF.
-        When ``drain_intermediate`` is True, non-matching events are logged
-        and discarded (used for ``prompt`` where we don't consume deltas).
+        See :class:`_AwaitParams` for the full shape. The timing model lives
+        in :class:`_AwaitDeadline`; this method is just the classifier
+        dispatch around ``self._events.get``.
         """
-        deadline = time.monotonic() + timeout_s
+        deadline = _AwaitDeadline(params.idle_timeout_s, params.hard_timeout_s)
         while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                msg = f"pi-bridge {context} timed out after {timeout_s:.1f}s"
-                raise PiBridgeError(msg)
             try:
-                event = self._events.get(timeout=remaining)
+                event = self._events.get(timeout=deadline.next_wait(params.context))
             except queue.Empty as err:
-                msg = f"pi-bridge {context} timed out after {timeout_s:.1f}s"
-                raise PiBridgeError(msg) from err
+                raise deadline.classify_empty(params.context) from err
             if event is None:
                 exit_code = self._proc.poll() if self._proc else "?"
-                msg = f"pi-bridge closed stdout during {context} (exit code {exit_code})"
+                msg = f"pi-bridge closed stdout during {params.context} (exit code {exit_code})"
                 raise PiBridgeError(msg)
-            event_type = event.get("type")
-            if event_type in expected_types:
+            deadline.reset_idle()
+            event_type = str(event.get("type", ""))
+            if event_type in params.expected_types:
                 return event
-            if event_type in error_types:
+            if event_type in params.error_types:
                 reason = event.get("reason", "unknown")
                 detail = event.get("detail")
-                msg = f"pi-bridge {context} failed: {reason} ({detail})"
+                msg = f"pi-bridge {params.context} failed: {reason} ({detail})"
                 raise PiBridgeError(msg)
-            if drain_intermediate:
-                # intermediate events (text_delta, tool_execution_*, thinking_delta, etc.)
-                # could be surfaced for live logging; for Phase 0 we just trace them.
-                self._logger.debug("pi-bridge event during %s: %s", context, event_type)
+            if params.drain_intermediate:
+                self._handle_intermediate_event(event, event_type, params)
                 continue
-            self._logger.warning("pi-bridge unexpected event during %s: %s", context, event_type)
+            self._logger.warning(
+                "pi-bridge unexpected event during %s: %s", params.context, event_type
+            )
+
+    def _handle_intermediate_event(
+        self,
+        event: dict[str, object],
+        event_type: str,
+        params: _AwaitParams,
+    ) -> None:
+        """Trace an intermediate event and forward it to the optional observer."""
+        self._logger.debug("pi-bridge event during %s: %s", params.context, event_type)
+        if params.on_event is None:
+            return
+        try:
+            params.on_event(event)
+        except Exception:
+            # A misbehaving observer must not abort the prompt.
+            self._logger.exception("pi-bridge on_event callback raised during %s", params.context)
 
     # --- stderr capture around one prompt ---
 

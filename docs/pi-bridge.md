@@ -141,7 +141,8 @@ Phase 0 is verified on macOS and Linux. Windows is unverified — pi itself runs
 | Bridge fails to spawn (Node missing at runtime, corrupted install) | `subprocess.Popen` raises / exits immediately | `PiBridge.__enter__` raises a wrapped `BridgeError` with stderr diagnostics; `PiRunner` treats as a fatal config error. |
 | Bridge crashes mid-prompt | `Popen.poll()` non-None during event loop | `prompt()` returns `(1, "", stderr_buffer)`; `run_pi_safe` retries via `bridge.abort()` + new `prompt()`. |
 | Malformed JSONL line | `json.loads` raises | Logged as warning via `self.logger`; read loop continues. Bridge shouldn't emit these, but we don't die on one. |
-| No `agent_end` within timeout | Monotonic timer in reader thread | `prompt()` returns `(1, partial_text_buffer, "timeout")`; caller decides retry. |
+| Pi goes silent mid-prompt | No event arrives within `FDR_PI_IDLE_TIMEOUT_S` (default 120s) | `prompt()` returns `(1, "", "…idle for more than Ns")`; `run_pi_safe` retries once. Any bridge event (tool call, text delta, thinking delta) resets the idle timer, so long but active turns don't trip it. |
+| Runaway event storm | `FDR_PI_HARD_TIMEOUT_S` (default 3600s) wall-clock cap | `prompt()` returns `(1, "", "…exceeded hard timeout")`; safety net for a bridge that keeps the idle timer alive but never emits `agent_end`. |
 | Credential missing | pi SDK error surfaced as `error` event during `init` | `PiBridge.__enter__` raises with actionable text: *"pi reports missing credentials for provider X. Run `pi` interactively once to complete auth."* |
 | Orphan bridge on fdr crash | pi bridge detects stdin EOF | `bridge.js` wires `process.stdin.on("close", () => process.exit(0))`; Python side sends `shutdown` in `__exit__`. Belt-and-suspenders. |
 

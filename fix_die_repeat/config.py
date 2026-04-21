@@ -158,6 +158,23 @@ class Settings(BaseSettings):
         description="Minimum delay between sequential pi invocations",
     )
 
+    # Bridge prompt timeouts. The bridge surfaces every pi event (tool calls,
+    # text deltas) so the Python side can tell "working" apart from "hung"; the
+    # idle timeout fires only on true silence, and the hard cap bounds runaway
+    # event storms. Override either via FDR_PI_IDLE_TIMEOUT_S /
+    # FDR_PI_HARD_TIMEOUT_S for hostile networks or extreme-scale reviews.
+    pi_prompt_idle_timeout_s: float = pyd.Field(
+        default=120.0,
+        alias="FDR_PI_IDLE_TIMEOUT_S",
+        description="Fail a pi prompt if no bridge event arrives for this long",
+    )
+
+    pi_prompt_hard_timeout_s: float = pyd.Field(
+        default=3600.0,
+        alias="FDR_PI_HARD_TIMEOUT_S",
+        description="Absolute wall-clock cap on a single pi prompt (safety net)",
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_prefix="FDR_",

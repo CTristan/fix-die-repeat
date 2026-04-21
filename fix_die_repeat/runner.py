@@ -30,7 +30,6 @@ from fix_die_repeat.messages import (
     oscillation_warning,
 )
 from fix_die_repeat.pi_bridge import (
-    DEFAULT_PROMPT_TIMEOUT_MS,
     PiBridge,
     PiBridgeConfig,
     PiBridgeError,
@@ -130,6 +129,28 @@ def _safe_relative(path: Path, project_root: Path) -> str:
         return str(path.relative_to(project_root))
     except ValueError:
         return str(path)
+
+
+_TOOL_ARG_SUMMARY_MAX = 80
+
+
+def _summarize_tool_args(args: object) -> str:
+    """Render a compact single-line summary of a tool_execution_start args payload.
+
+    Pi emits tool args as a dict with tool-specific shape (``filePath`` for
+    read, ``command`` for bash, ``pattern`` for grep, etc.). We don't know the
+    shape ahead of time, so we pick the first string-valued field and truncate
+    it — good enough for a progress line, never large enough to dominate logs.
+    """
+    if not isinstance(args, dict):
+        return ""
+    for value in args.values():
+        if isinstance(value, str) and value:
+            collapsed = " ".join(value.split())
+            if len(collapsed) > _TOOL_ARG_SUMMARY_MAX:
+                return collapsed[: _TOOL_ARG_SUMMARY_MAX - 1] + "…"
+            return collapsed
+    return ""
 
 
 class PiRunner:
@@ -345,12 +366,31 @@ class PiRunner:
         try:
             return self._bridge.prompt(
                 message,
-                timeout_ms=DEFAULT_PROMPT_TIMEOUT_MS,
+                idle_timeout_s=self.settings.pi_prompt_idle_timeout_s,
+                hard_timeout_s=self.settings.pi_prompt_hard_timeout_s,
                 tools=list(tools) if tools else None,
+                on_event=self._log_bridge_event,
             )
         except PiBridgeError as err:
             self.logger.error("pi-bridge prompt raised: %s", err)
             return (1, "", str(err))
+
+    def _log_bridge_event(self, event: dict[str, object]) -> None:
+        """Log a one-liner per tool call so long pi turns are visible live.
+
+        text_delta / thinking_delta fire every few tokens and would drown the
+        log; tool_execution_start is the rarer, more useful cadence — it
+        corresponds to actions a user can picture ("pi: read runner.py").
+        """
+        if event.get("type") != "tool_execution_start":
+            return
+        tool_name = str(event.get("toolName", "?"))
+        args = event.get("args")
+        summary = _summarize_tool_args(args)
+        if summary:
+            self.logger.info("pi: %s %s", tool_name, summary)
+        else:
+            self.logger.info("pi: %s", tool_name)
 
     def _log_pi_invocation(self, cmd_args: list[str], result: tuple[int, str, str]) -> None:
         """Append a one-call audit trail to ``paths.pi_log`` and raise on failure."""
