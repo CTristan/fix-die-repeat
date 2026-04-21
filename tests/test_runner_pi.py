@@ -83,6 +83,22 @@ class TestRunPi:
         assert "Attached:" in message
         assert message.endswith("review this")
 
+    def test_run_pi_embeds_non_utf8_attachment(self, tmp_path: Path) -> None:
+        """Binary/non-UTF8 attachments become replacement chars, not a crash."""
+        runner, bridge = self._build_runner(tmp_path)
+        runner.paths.project_root = tmp_path
+        attached = tmp_path / "binary.bin"
+        attached.write_bytes(b"valid ascii \xff\xfe invalid utf8")
+        bridge.prompt.return_value = (0, "", "")
+
+        runner.run_pi("-p", f"@{attached}", "review this")
+
+        args, _kwargs = bridge.prompt.call_args
+        message = args[0]
+        assert "valid ascii" in message
+        assert "Attached:" in message
+        assert message.endswith("review this")
+
     def test_run_pi_slash_command_is_skipped(self, tmp_path: Path) -> None:
         """Legacy pi slash-commands (e.g. /model-skip) no-op through the bridge."""
         runner, bridge = self._build_runner(tmp_path)
@@ -159,6 +175,34 @@ class TestRunPi:
 
         assert returncode == 0
         runner.emergency_compact.assert_called_once()
+
+
+class TestSplitSettingsModel:
+    """Tests for _split_settings_model argument validation."""
+
+    def test_none_returns_none_pair(self) -> None:
+        """Unset model leaves pi's SDK to pick defaults."""
+        assert PiRunner._split_settings_model(None) == (None, None)
+        assert PiRunner._split_settings_model("") == (None, None)
+
+    def test_provider_slash_model_splits(self) -> None:
+        """Well-formed provider/model-id is split on the first slash."""
+        assert PiRunner._split_settings_model("anthropic/claude-sonnet-4-5") == (
+            "anthropic",
+            "claude-sonnet-4-5",
+        )
+
+    def test_bare_model_id_raises(self) -> None:
+        """Bare model ids must be rejected — bridge requires both fields."""
+        with pytest.raises(ValueError, match="provider/model-id"):
+            PiRunner._split_settings_model("claude-sonnet-4-5")
+
+    def test_slash_with_missing_side_raises(self) -> None:
+        """Leading/trailing slash is not a valid provider/model pair."""
+        with pytest.raises(ValueError, match="provider/model-id"):
+            PiRunner._split_settings_model("/claude-sonnet-4-5")
+        with pytest.raises(ValueError, match="provider/model-id"):
+            PiRunner._split_settings_model("anthropic/")
 
 
 class TestModelAndSetup:

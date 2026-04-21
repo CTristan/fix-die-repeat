@@ -91,6 +91,38 @@ def _logger() -> logging.Logger:
     return lg
 
 
+class TestPiBridgeConfigInitPayload:
+    """Invariants for ``PiBridgeConfig.to_init_command``."""
+
+    def test_both_unset_emits_no_provider_or_model(self, tmp_path: Path) -> None:
+        """Pi's SDK picks defaults when neither field is sent."""
+        payload = PiBridgeConfig(working_dir=tmp_path).to_init_command()
+        assert "provider" not in payload
+        assert "model" not in payload
+
+    def test_both_set_emits_both_fields(self, tmp_path: Path) -> None:
+        """Matched provider/model pair is forwarded verbatim."""
+        payload = PiBridgeConfig(
+            provider="anthropic",
+            model="claude-sonnet-4-5",
+            working_dir=tmp_path,
+        ).to_init_command()
+        assert payload["provider"] == "anthropic"
+        assert payload["model"] == "claude-sonnet-4-5"
+
+    def test_provider_only_raises(self, tmp_path: Path) -> None:
+        """Asymmetric config is caught at serialize time, not at bridge init."""
+        config = PiBridgeConfig(provider="anthropic", model=None, working_dir=tmp_path)
+        with pytest.raises(PiBridgeError, match="together"):
+            config.to_init_command()
+
+    def test_model_only_raises(self, tmp_path: Path) -> None:
+        """Asymmetric config is caught at serialize time, not at bridge init."""
+        config = PiBridgeConfig(provider=None, model="claude-sonnet-4-5", working_dir=tmp_path)
+        with pytest.raises(PiBridgeError, match="together"):
+            config.to_init_command()
+
+
 class TestPiBridgeLifecycle:
     """Context-manager lifecycle tests."""
 

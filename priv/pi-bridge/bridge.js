@@ -7,7 +7,7 @@
  * Protocol (one JSON object per line):
  *
  *   Python → Bridge (stdin):
- *     {"type": "init", "model": "...", "provider": "...", "systemPrompt": "...",
+ *     {"type": "init", "model": "...", "provider": "...",
  *      "tools": ["read","bash","edit","write","grep","find","ls"],
  *      "workingDir": "/path", "thinking": "medium"}
  *     {"type": "prompt", "message": "...", "timeoutMs": 300000}
@@ -105,7 +105,7 @@ async function handleInit(cmd) {
     emitError("already_initialized", "init was called twice");
     return;
   }
-  const { model, provider, systemPrompt, tools, workingDir, thinking } = cmd;
+  const { model, provider, tools, workingDir, thinking } = cmd;
   // model and provider are optional — pi picks from settings when both are absent.
   if ((model && !provider) || (!model && provider)) {
     emitError("init_missing_fields", "init requires both model and provider, or neither");
@@ -114,7 +114,6 @@ async function handleInit(cmd) {
   config = {
     model: model ?? null,
     provider: provider ?? null,
-    systemPrompt: systemPrompt ?? "",
     tools: Array.isArray(tools) && tools.length > 0 ? tools : ["read", "bash", "edit", "write"],
     workingDir: workingDir ?? process.cwd(),
     thinking: thinking ?? "medium",

@@ -114,7 +114,7 @@ def _embed_attached_files(
         if not path.is_absolute():
             path = (project_root / ref).resolve()
         try:
-            content = path.read_text()
+            content = path.read_text(encoding="utf-8", errors="replace")
         except OSError as err:
             chunks.append(f"--- Attached (unavailable): {ref} — {err} ---\n")
             continue
@@ -273,14 +273,25 @@ class PiRunner:
 
     @staticmethod
     def _split_settings_model(model: str | None) -> tuple[str | None, str | None]:
-        """Split a ``provider/model-id`` string; return (None, None) when unset."""
+        """Split a ``provider/model-id`` string; return (None, None) when unset.
+
+        The bridge protocol requires provider and model to travel together (or
+        both be absent so pi's SDK picks defaults). A bare model id would
+        otherwise be quietly routed as ``(None, model)`` and rejected at bridge
+        init with a cryptic ``init_missing_fields`` error — surface that as a
+        clear ValueError here instead.
+        """
         if not model:
             return (None, None)
         if "/" in model:
             provider, _, model_id = model.partition("/")
-            return (provider or None, model_id or None)
-        # Bare model id — let pi pick the provider from its settings.
-        return (None, model)
+            if provider and model_id:
+                return (provider, model_id)
+        msg = (
+            "Invalid model value. Use 'provider/model-id' format, for example "
+            "'anthropic/claude-sonnet-4-5'."
+        )
+        raise ValueError(msg)
 
     def before_pi_call(self) -> None:
         """Add delay between sequential pi calls to reduce lock contention."""

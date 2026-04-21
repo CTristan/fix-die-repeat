@@ -49,7 +49,7 @@ JSON objects, one per line, UTF-8, `\n`-terminated. Unknown fields are ignored o
 
 | Command | Shape | Purpose |
 |---|---|---|
-| `init` | `{type, model, provider, systemPrompt, tools, workingDir, thinking?}` | Initial handshake; bridge constructs an `AgentSession`. Bridge replies with `ready` when the session is ready. Sent once per bridge lifetime. |
+| `init` | `{type, model, provider, tools, workingDir, thinking?}` | Initial handshake; bridge constructs an `AgentSession`. Bridge replies with `ready` when the session is ready. Sent once per bridge lifetime. |
 | `prompt` | `{type, message, timeoutMs?}` | Run one agent turn in a fresh session. Bridge emits events during the run and `agent_end` at the end with the final assistant text. |
 | `set_model` | `{type, provider, modelId}` | Swap model mid-run (capacity-fallback path, currently `pi -p /model-skip`). |
 | `compact` | `{type}` | Emergency context compaction (currently `PiRunner.emergency_compact`). |
@@ -111,7 +111,7 @@ This pinning philosophy matches Containment Loop (they're on `0.64.0`, deliberat
 
 ## Install story
 
-The bridge's `node_modules/` is **not** bundled in the Python wheel. The wheel ships only `bridge.js` + `package.json` + `package-lock.json` under `priv/pi-bridge/`. On first run, `PiRunner.__init__` calls `ensure_bridge_installed()`, which:
+The bridge's `node_modules/` is **not** bundled in the Python wheel. The wheel ships only `bridge.js` + `package.json` + `package-lock.json` under `priv/pi-bridge/`. When the runner enters its context manager, `PiRunner.__enter__` calls `ensure_bridge_installed()`, which:
 
 1. Checks for `priv/pi-bridge/node_modules/.install-marker` (a sentinel file with the package version). If present and matches the expected version, returns immediately.
 2. If missing: runs `npm ci` in `priv/pi-bridge/`. Requires `node` and `npm` on PATH. `npm ci` uses the checked-in lockfile for deterministic resolution; first-run cost is the npm download (~seconds on a warm network).
@@ -120,7 +120,7 @@ The bridge's `node_modules/` is **not** bundled in the Python wheel. The wheel s
 
 The marker-file approach keeps the wheel small, avoids bundling platform-specific binaries (pi has native dependencies), and makes the install step legible (one `npm ci`, documented in README).
 
-For development, `FDR_BRIDGE_SCRIPT_PATH` can override the bridge location — pointing at a local-checkout bridge so developers can iterate on `bridge.js` without rebuilding the wheel.
+For development, `FDR_BRIDGE_DIR` can override the bridge location — pointing at a local-checkout bridge so developers can iterate on `bridge.js` without rebuilding the wheel.
 
 ## Cross-platform
 

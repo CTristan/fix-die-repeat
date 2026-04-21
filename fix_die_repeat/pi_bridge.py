@@ -43,21 +43,26 @@ class PiBridgeConfig:
 
     Mirrors the ``init`` command payload. When ``provider`` and ``model`` are
     both ``None``, the bridge lets pi's SDK pick the default from the user's
-    pi settings (``~/.pi/``).
+    pi settings (``~/.pi/``). ``provider`` and ``model`` must be set together
+    or both left unset — the bridge rejects the asymmetric case.
     """
 
     provider: str | None = None
     model: str | None = None
-    system_prompt: str = ""
     tools: tuple[str, ...] = ("read", "bash", "edit", "write")
     working_dir: Path = field(default_factory=Path.cwd)
     thinking: str = "medium"
 
     def to_init_command(self) -> dict[str, object]:
         """Serialize this config into the bridge's ``init`` JSON payload."""
+        if (self.provider is None) != (self.model is None):
+            msg = (
+                "PiBridgeConfig requires provider and model to be set together "
+                f"or both left unset (got provider={self.provider!r}, model={self.model!r})."
+            )
+            raise PiBridgeError(msg)
         cmd: dict[str, object] = {
             "type": "init",
-            "systemPrompt": self.system_prompt,
             "tools": list(self.tools),
             "workingDir": str(self.working_dir),
             "thinking": self.thinking,
