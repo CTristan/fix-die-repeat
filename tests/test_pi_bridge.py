@@ -475,3 +475,35 @@ class TestPiBridgePromptTimeoutPlumbing:
         lines = [json.loads(ln) for ln in fake.stdin.getvalue().strip().splitlines()]
         prompt_cmd = next(cmd for cmd in lines if cmd.get("type") == "prompt")
         assert prompt_cmd["timeoutMs"] == SAMPLE_HARD_MS
+
+    def test_prompt_coerces_non_positive_hard_timeout_to_default(self, tmp_path: Path) -> None:
+        """A zero/negative hard_timeout_s must become the Python default, not 0ms.
+
+        The Node bridge treats non-positive timeoutMs as "use 300_000ms
+        default". If Python forwarded a non-positive value verbatim, the two
+        sides would disagree: Python's _await_event would fire after its own
+        (tiny) deadline while Node was still on the 300s default. Coerce at
+        the Python boundary so both sides share a clock.
+        """
+        script, fake = _prepare_bridge(
+            tmp_path,
+            [{"type": "agent_end", "finalText": ""}],
+        )
+        with patch("fix_die_repeat.pi_bridge.subprocess.Popen", return_value=fake):
+            with PiBridge(
+                PiBridgeConfig(working_dir=tmp_path),
+                bridge_script=script,
+                logger=_logger(),
+            ) as bridge:
+                bridge.prompt(
+                    "hello",
+                    idle_timeout_s=-5.0,
+                    hard_timeout_s=0.0,
+                )
+                fake.stdout.close()
+                fake.stderr.close()
+
+        lines = [json.loads(ln) for ln in fake.stdin.getvalue().strip().splitlines()]
+        prompt_cmd = next(cmd for cmd in lines if cmd.get("type") == "prompt")
+        # Positive, nonzero milliseconds — coercion fell back to the default.
+        assert prompt_cmd["timeoutMs"] > 0

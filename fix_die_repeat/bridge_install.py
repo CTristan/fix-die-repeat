@@ -1,8 +1,15 @@
 """Idempotent installer for the pi-bridge Node.js dependencies.
 
-Runs ``npm ci`` (or ``npm install`` if no lockfile) in ``priv/pi-bridge/``
-on first use, writes a marker file on success, and short-circuits on
-subsequent runs when the marker exists and matches the expected version.
+Stages the shipped bridge files (``bridge.js``, ``package.json``,
+``package-lock.json``) from a **source** directory into a writable **runtime**
+directory, runs ``npm ci`` (or ``npm install`` if no lockfile) there on first
+use, writes a marker file on success, and short-circuits on subsequent runs
+when the marker exists and matches the expected version.
+
+The separation matters because the default source dir lives inside the
+installed wheel/site-packages, which is often read-only — writing
+``node_modules/`` there would break first-run on system Python installs even
+when ``FDR_HOME`` is writable. The runtime dir is always under ``FDR_HOME``.
 """
 
 from __future__ import annotations
@@ -18,6 +25,7 @@ if TYPE_CHECKING:
 
 INSTALL_MARKER = ".install-marker"
 _INSTALL_TIMEOUT_SECONDS = 600  # npm ci can be slow on cold caches
+_STAGED_FILES = ("bridge.js", "package.json", "package-lock.json")
 
 
 class BridgeInstallError(RuntimeError):
@@ -58,37 +66,63 @@ def _missing_dependency_error(tool: str) -> BridgeInstallError:
     return BridgeInstallError(msg)
 
 
+def _stage_files(source_dir: Path, runtime_dir: Path) -> None:
+    """Copy shipped bridge files from ``source_dir`` into ``runtime_dir``.
+
+    Skips files absent in source (e.g. ``package-lock.json`` in repos that
+    don't commit a lockfile). Overwrites the runtime copies unconditionally
+    so a source-side bump reliably propagates on the next install.
+    """
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    for name in _STAGED_FILES:
+        src = source_dir / name
+        if not src.exists():
+            continue
+        shutil.copy2(src, runtime_dir / name)
+
+
 def ensure_bridge_installed(
-    bridge_dir: Path,
+    source_dir: Path,
+    runtime_dir: Path,
     *,
     logger: logging.Logger,
     pi_package: str = "@mariozechner/pi-coding-agent",
 ) -> Path:
-    """Install pi-bridge dependencies if needed; return the bridge.js path.
+    """Stage + install the pi-bridge; return the runtime ``bridge.js`` path.
 
-    Raises :class:`BridgeInstallError` if ``node`` or ``npm`` are missing,
-    if the install fails, or if the bridge directory is malformed.
+    ``source_dir`` is where the shipped files live (inside the installed
+    wheel by default, or an ``FDR_BRIDGE_DIR`` override for dev checkouts).
+    ``runtime_dir`` is where ``node_modules/`` gets installed and where Node
+    will launch from — it must be writable. ``source_dir == runtime_dir`` is
+    supported and skips the copy step.
+
+    Raises :class:`BridgeInstallError` if ``node``/``npm`` are missing, if the
+    install fails, or if the source directory is malformed.
     """
-    bridge_script = bridge_dir / "bridge.js"
-    package_json = bridge_dir / "package.json"
-    node_modules = bridge_dir / "node_modules"
-    marker = node_modules / INSTALL_MARKER
-    lockfile = bridge_dir / "package-lock.json"
+    source_bridge_script = source_dir / "bridge.js"
+    source_package_json = source_dir / "package.json"
 
-    if not bridge_script.exists():
-        msg = f"pi-bridge script missing: {bridge_script}"
+    if not source_bridge_script.exists():
+        msg = f"pi-bridge script missing: {source_bridge_script}"
         raise BridgeInstallError(msg)
-    if not package_json.exists():
-        msg = f"pi-bridge manifest missing: {package_json}"
+    if not source_package_json.exists():
+        msg = f"pi-bridge manifest missing: {source_package_json}"
         raise BridgeInstallError(msg)
 
-    expected_version = _read_package_version(package_json, pi_package)
+    expected_version = _read_package_version(source_package_json, pi_package)
 
-    if _marker_matches(marker, expected_version):
+    runtime_marker = runtime_dir / "node_modules" / INSTALL_MARKER
+    runtime_bridge_script = runtime_dir / "bridge.js"
+
+    # Short-circuit: runtime already has matching deps installed.
+    if runtime_bridge_script.exists() and _marker_matches(runtime_marker, expected_version):
         logger.debug(
-            "pi-bridge already installed (%s=%s); skipping npm ci", pi_package, expected_version
+            "pi-bridge already installed in %s (%s=%s); skipping npm ci",
+            runtime_dir,
+            pi_package,
+            expected_version,
         )
-        return bridge_script
+        return runtime_bridge_script
 
     if shutil.which("node") is None:
         err_node = _missing_dependency_error("Node.js")
@@ -97,15 +131,20 @@ def ensure_bridge_installed(
         err_npm = _missing_dependency_error("npm")
         raise err_npm
 
-    install_cmd = ["npm", "ci"] if lockfile.exists() else ["npm", "install"]
+    # Stage shipped files into runtime_dir (no-op when source == runtime).
+    if source_dir.resolve() != runtime_dir.resolve():
+        _stage_files(source_dir, runtime_dir)
+
+    runtime_lockfile = runtime_dir / "package-lock.json"
+    install_cmd = ["npm", "ci"] if runtime_lockfile.exists() else ["npm", "install"]
     logger.info(
-        "Installing pi-bridge dependencies (%s) in %s...", " ".join(install_cmd), bridge_dir
+        "Installing pi-bridge dependencies (%s) in %s...", " ".join(install_cmd), runtime_dir
     )
 
     try:
         result = subprocess.run(  # noqa: S603 — trusted npm binary
             install_cmd,
-            cwd=bridge_dir,
+            cwd=runtime_dir,
             capture_output=True,
             text=True,
             timeout=_INSTALL_TIMEOUT_SECONDS,
@@ -125,7 +164,8 @@ def ensure_bridge_installed(
         )
         raise BridgeInstallError(msg)
 
-    node_modules.mkdir(parents=True, exist_ok=True)
-    marker.write_text(expected_version)
+    runtime_node_modules = runtime_dir / "node_modules"
+    runtime_node_modules.mkdir(parents=True, exist_ok=True)
+    runtime_marker.write_text(expected_version)
     logger.info("pi-bridge dependencies installed (%s=%s)", pi_package, expected_version)
-    return bridge_script
+    return runtime_bridge_script

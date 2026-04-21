@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import math
 import queue
 import shutil
 import subprocess
@@ -38,6 +39,26 @@ DEFAULT_HARD_TIMEOUT_S = 3600.0
 DEFAULT_INIT_TIMEOUT_S = 15.0
 DEFAULT_SHUTDOWN_TIMEOUT_S = 5.0
 _READER_JOIN_TIMEOUT_S = 2.0
+
+
+def _coerce_positive_timeout(value: float | None, default: float) -> float:
+    """Return ``value`` if positive and finite; otherwise fall back to ``default``.
+
+    The Node bridge treats non-positive ``timeoutMs`` as "use 300_000ms default",
+    so passing through a zero/negative/NaN value would let the two sides
+    disagree about when to give up — the Python ``_await_event`` hard deadline
+    would fire before the Node watchdog. Coerce at the boundary so the two
+    sides share the same clock.
+    """
+    if value is None:
+        return default
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return default
+    if numeric <= 0.0 or math.isnan(numeric):
+        return default
+    return numeric
 
 
 class PiBridgeError(RuntimeError):
@@ -238,8 +259,8 @@ class PiBridge:
         Pass ``on_event`` to observe intermediate events (tool_execution_*,
         text_delta, thinking_delta) as they arrive — useful for progress UI.
         """
-        idle_timeout_s = idle_timeout_s if idle_timeout_s is not None else DEFAULT_IDLE_TIMEOUT_S
-        hard_timeout_s = hard_timeout_s if hard_timeout_s is not None else DEFAULT_HARD_TIMEOUT_S
+        idle_timeout_s = _coerce_positive_timeout(idle_timeout_s, DEFAULT_IDLE_TIMEOUT_S)
+        hard_timeout_s = _coerce_positive_timeout(hard_timeout_s, DEFAULT_HARD_TIMEOUT_S)
         self._reset_stderr_capture()
         command: dict[str, object] = {
             "type": "prompt",

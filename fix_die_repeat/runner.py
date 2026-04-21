@@ -57,6 +57,8 @@ from fix_die_repeat.utils import (
     send_ntfy_notification,
 )
 
+_ARGV_MISSING_VALUE = object()
+
 
 def _parse_pi_argv(
     args: tuple[str, ...],
@@ -69,6 +71,11 @@ def _parse_pi_argv(
     * ``tools`` — tuple of tool names parsed from ``--tools a,b,c`` (empty for default)
     * ``model`` — value of ``--model X`` if present, else ``None``
     * ``file_args`` — paths extracted from ``@path`` tokens (order preserved)
+
+    Raises :class:`ValueError` when a value-taking flag (``--tools``, ``--model``)
+    is at the end of argv or otherwise missing its value. The legacy pi CLI
+    fails fast in this case; silently returning empty values would route a
+    malformed command to the bridge and hide the user error.
     """
     tools: tuple[str, ...] = ()
     model: str | None = None
@@ -80,11 +87,18 @@ def _parse_pi_argv(
         if arg == "-p":
             continue
         if arg == "--tools":
-            value = next(it, "")
-            tools = tuple(s.strip() for s in value.split(",") if s.strip())
+            value = next(it, _ARGV_MISSING_VALUE)
+            if value is _ARGV_MISSING_VALUE:
+                msg = "--tools requires a comma-separated tool list"
+                raise ValueError(msg)
+            tools = tuple(s.strip() for s in str(value).split(",") if s.strip())
             continue
         if arg == "--model":
-            model = next(it, None)
+            value = next(it, _ARGV_MISSING_VALUE)
+            if value is _ARGV_MISSING_VALUE:
+                msg = "--model requires a 'provider/model-id' value"
+                raise ValueError(msg)
+            model = str(value)
             continue
         if arg.startswith("@"):
             file_args.append(arg[1:])
@@ -267,14 +281,21 @@ class PiRunner:
     def _start_bridge(self) -> None:
         if self._bridge is not None:
             return
-        bridge_dir = self.paths.bridge_dir
         try:
-            bridge_script = ensure_bridge_installed(bridge_dir, logger=self.logger)
+            bridge_script = ensure_bridge_installed(
+                self.paths.bridge_source_dir,
+                self.paths.bridge_runtime_dir,
+                logger=self.logger,
+            )
         except Exception as err:
             self.logger.error("pi-bridge install failed: %s", err)
             raise
 
-        provider, model_id = self._split_settings_model(self.settings.model)
+        try:
+            provider, model_id = self._split_settings_model(self.settings.model)
+        except ValueError as err:
+            self.logger.error("pi-bridge startup rejected model value: %s", err)
+            raise PiBridgeError(str(err)) from err
         config = PiBridgeConfig(
             provider=provider,
             model=model_id,
@@ -326,25 +347,44 @@ class PiRunner:
         Translates the historical ``run_pi("-p", "--tools", "read,edit,...",
         "@file", prompt)`` shape into a bridge ``prompt`` command. Returns
         ``(returncode, stdout, stderr)`` with the same semantics as the old
-        subprocess path so call sites don't need to change.
+        subprocess path so call sites don't need to change. Argv/model
+        validation errors become ``(1, "", <msg>)`` rather than propagating —
+        the legacy pi subprocess would have exited non-zero in the same cases.
         """
         self.before_pi_call()
-
-        message, tools_override, model_override, file_args = _parse_pi_argv(args)
         cmd_args = ["pi", *args]  # for logging fidelity
+
+        try:
+            message, tools_override, model_override, file_args = _parse_pi_argv(args)
+        except ValueError as err:
+            self.logger.error("pi invocation rejected: %s", err)
+            result = (1, "", str(err))
+            self._log_pi_invocation(cmd_args, result)
+            return result
 
         if message.strip().startswith("/"):
             return self._handle_pi_slash_command(message.strip(), cmd_args)
 
         full_message = _embed_attached_files(message, file_args, self.paths.project_root)
-        self._apply_model_override(model_override)
+        try:
+            self._apply_model_override(model_override)
+        except ValueError as err:
+            self.logger.error("pi invocation rejected: %s", err)
+            result = (1, "", str(err))
+            self._log_pi_invocation(cmd_args, result)
+            return result
 
         result = self._invoke_bridge_prompt(full_message, tools_override)
         self._log_pi_invocation(cmd_args, result)
         return result
 
     def _apply_model_override(self, model_override: str | None) -> None:
-        """Swap bridge model when a ``--model X`` flag was present in argv."""
+        """Swap bridge model when a ``--model X`` flag was present in argv.
+
+        Raises :class:`ValueError` if ``model_override`` is present but not a
+        valid ``provider/model-id`` pair; callers in :meth:`run_pi` translate
+        that into the legacy ``(1, "", msg)`` result tuple.
+        """
         if model_override is None or self._bridge is None:
             return
         provider, model_id = self._split_settings_model(model_override)
@@ -393,7 +433,7 @@ class PiRunner:
             self.logger.info("pi: %s", tool_name)
 
     def _log_pi_invocation(self, cmd_args: list[str], result: tuple[int, str, str]) -> None:
-        """Append a one-call audit trail to ``paths.pi_log`` and raise on failure."""
+        """Append a one-call audit trail to ``paths.pi_log`` and log failures."""
         returncode, stdout, stderr = result
         if self.paths.pi_log:
             with self.paths.pi_log.open("a", encoding="utf-8") as f:
@@ -477,20 +517,17 @@ class PiRunner:
         )
         self.logger.info("Running simple write test to verify model can use pi's tools...")
 
-        # Create test prompt
-        self.before_pi_call()
-        returncode, _stdout, _stderr = run_command(
-            [
-                "pi",
-                "-p",
-                "--model",
-                self.settings.test_model,
-                (
-                    f"Write 'MODEL TEST OK' to file {test_file}. "
-                    "Do NOT use any other tools or generate pseudo-code."
-                ),
-            ],
-            cwd=self.paths.project_root,
+        # Route through the bridge so --test-model exercises the same code path
+        # as real runs; direct `pi` subprocess invocation would reintroduce a
+        # hard dependency on the pi CLI and bypass bridge tool-event plumbing.
+        returncode, _stdout, _stderr = self.run_pi(
+            "-p",
+            "--model",
+            self.settings.test_model,
+            (
+                f"Write 'MODEL TEST OK' to file {test_file}. "
+                "Do NOT use any other tools or generate pseudo-code."
+            ),
         )
 
         if returncode != 0:

@@ -45,7 +45,6 @@ import { createInterface } from "node:readline";
 
 let config = null;
 let activeSession = null;
-let activeAbortController = null;
 
 // --- Tool factory registry ---
 
@@ -179,7 +178,6 @@ async function handlePrompt(cmd) {
   }
 
   activeSession = session;
-  activeAbortController = new AbortController();
 
   const finalTextFragments = [];
   const turnMessages = [];
@@ -235,7 +233,6 @@ async function handlePrompt(cmd) {
     clearTimeout(timer);
     unsubscribe();
     activeSession = null;
-    activeAbortController = null;
 
     if (timedOut) {
       emitError("timeout", `prompt exceeded ${timeout}ms`);
@@ -253,7 +250,6 @@ async function handlePrompt(cmd) {
     clearTimeout(timer);
     unsubscribe();
     activeSession = null;
-    activeAbortController = null;
     emitError("prompt_failed", err?.message ?? String(err));
   }
 }

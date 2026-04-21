@@ -228,6 +228,110 @@ class TestRunPi:
         runner.emergency_compact.assert_called_once()
 
 
+class TestParsePiArgvFailFast:
+    """Malformed argv for value-taking flags must match legacy pi fail-fast."""
+
+    def test_tools_without_value_fails(self, tmp_path: Path) -> None:
+        """run_pi returns (1, '', ...) when --tools is at argv end with no value."""
+        settings = MagicMock()
+        paths = MagicMock()
+        paths.project_root = tmp_path
+        paths.pi_log = tmp_path / "pi.log"
+
+        runner = PiRunner.__new__(PiRunner)
+        runner.settings = settings
+        runner.paths = paths
+        runner.logger = MagicMock()
+        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
+        bridge = MagicMock(spec=PiBridge)
+        runner._bridge = bridge
+
+        returncode, stdout, stderr = runner.run_pi("-p", "--tools")
+
+        assert returncode == 1
+        assert stdout == ""
+        assert "--tools" in stderr
+        bridge.prompt.assert_not_called()
+
+    def test_model_without_value_fails(self, tmp_path: Path) -> None:
+        """run_pi returns (1, '', ...) when --model is at argv end with no value."""
+        settings = MagicMock()
+        paths = MagicMock()
+        paths.project_root = tmp_path
+        paths.pi_log = tmp_path / "pi.log"
+
+        runner = PiRunner.__new__(PiRunner)
+        runner.settings = settings
+        runner.paths = paths
+        runner.logger = MagicMock()
+        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
+        bridge = MagicMock(spec=PiBridge)
+        runner._bridge = bridge
+
+        returncode, stdout, stderr = runner.run_pi("-p", "--model")
+
+        assert returncode == 1
+        assert stdout == ""
+        assert "--model" in stderr
+        bridge.prompt.assert_not_called()
+
+
+class TestApplyModelOverrideErrorHandling:
+    """Invalid --model values must not crash the run."""
+
+    def test_invalid_model_override_returns_error_tuple(self, tmp_path: Path) -> None:
+        """A bare model id in --model must not propagate ValueError out of run_pi."""
+        settings = MagicMock()
+        paths = MagicMock()
+        paths.project_root = tmp_path
+        paths.pi_log = tmp_path / "pi.log"
+
+        runner = PiRunner.__new__(PiRunner)
+        runner.settings = settings
+        runner.paths = paths
+        runner.logger = MagicMock()
+        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
+        bridge = MagicMock(spec=PiBridge)
+        runner._bridge = bridge
+
+        returncode, stdout, stderr = runner.run_pi("-p", "--model", "bare-model", "hello")
+
+        assert returncode == 1
+        assert stdout == ""
+        assert "provider/model-id" in stderr
+        bridge.prompt.assert_not_called()
+
+    def test_start_bridge_translates_invalid_model_to_bridge_error(self, tmp_path: Path) -> None:
+        """Settings with a bare model id must surface a typed bridge error, not ValueError.
+
+        The legacy pi subprocess path would have returned a non-zero tuple at
+        call time. The bridge validates the model up front in ``_start_bridge``;
+        we want a clear typed error (PiBridgeError) there rather than an
+        uncaught ValueError traceback.
+        """
+        settings = MagicMock()
+        settings.model = "bare-model"  # missing provider/ prefix
+        paths = MagicMock()
+        paths.project_root = tmp_path
+        paths.bridge_source_dir = tmp_path / "bridge-src"
+        paths.bridge_runtime_dir = tmp_path / "bridge-runtime"
+
+        runner = PiRunner.__new__(PiRunner)
+        runner.settings = settings
+        runner.paths = paths
+        runner.logger = MagicMock()
+        runner._bridge = None
+
+        with (
+            patch(
+                "fix_die_repeat.runner.ensure_bridge_installed",
+                return_value=tmp_path / "bridge.js",
+            ),
+            pytest.raises(PiBridgeError, match="provider/model-id"),
+        ):
+            runner._start_bridge()
+
+
 class TestSplitSettingsModel:
     """Tests for _split_settings_model argument validation."""
 
@@ -275,18 +379,20 @@ class TestModelAndSetup:
 
         test_file = tmp_path / ".model_test_result.txt"
 
-        def fake_run_command(*_args: str, **_kwargs: object) -> tuple[int, str, str]:
+        def fake_run_pi(*_args: str) -> tuple[int, str, str]:
             test_file.write_text("MODEL TEST OK")
             return (0, "", "")
 
-        with (
-            patch("fix_die_repeat.runner.run_command", side_effect=fake_run_command),
-            pytest.raises(SystemExit) as excinfo,
-        ):
+        runner.run_pi = MagicMock(side_effect=fake_run_pi)  # type: ignore[method-assign]
+
+        with pytest.raises(SystemExit) as excinfo:
             runner.test_model()
 
         assert excinfo.value.code == 0
         assert not test_file.exists()
+        # The test model must be forwarded as a --model override so the bridge
+        # exercises the model under test, not the settings default.
+        assert runner.run_pi.call_args.args[:3] == ("-p", "--model", "test-model")
 
     def test_test_model_pseudocode_failure(self, tmp_path: Path) -> None:
         """Test test_model warns on pseudo-code and exits with failure."""
@@ -304,14 +410,13 @@ class TestModelAndSetup:
 
         test_file = tmp_path / ".model_test_result.txt"
 
-        def fake_run_command(*_args: str, **_kwargs: object) -> tuple[int, str, str]:
+        def fake_run_pi(*_args: str) -> tuple[int, str, str]:
             test_file.write_text("File.write('oops')")
             return (0, "", "")
 
-        with (
-            patch("fix_die_repeat.runner.run_command", side_effect=fake_run_command),
-            pytest.raises(SystemExit) as excinfo,
-        ):
+        runner.run_pi = MagicMock(side_effect=fake_run_pi)  # type: ignore[method-assign]
+
+        with pytest.raises(SystemExit) as excinfo:
             runner.test_model()
 
         assert excinfo.value.code == 1

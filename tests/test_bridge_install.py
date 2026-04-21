@@ -27,8 +27,9 @@ def _make_bridge_dir(
     *,
     version: str = "0.67.68",
     with_lockfile: bool = True,
+    name: str = "pi-bridge",
 ) -> Path:
-    bridge_dir = tmp_path / "pi-bridge"
+    bridge_dir = tmp_path / name
     bridge_dir.mkdir()
     (bridge_dir / "bridge.js").write_text("// fake\n")
     (bridge_dir / "package.json").write_text(json.dumps({"dependencies": {PI_PACKAGE: version}}))
@@ -50,10 +51,65 @@ class TestEnsureBridgeInstalled:
         (bridge_dir / "node_modules" / INSTALL_MARKER).write_text("0.67.68")
 
         with patch("fix_die_repeat.bridge_install.subprocess.run") as mock_run:
-            script = ensure_bridge_installed(bridge_dir, logger=_logger())
+            script = ensure_bridge_installed(bridge_dir, bridge_dir, logger=_logger())
 
         assert script == bridge_dir / "bridge.js"
         mock_run.assert_not_called()
+
+
+class TestEnsureBridgeInstalledSeparateRuntime:
+    """When source and runtime dirs differ, install lands in the writable runtime.
+
+    Rationale: in an installed wheel, ``source_dir`` points inside site-packages
+    and may be read-only. Writing ``node_modules/`` there would fail first-run
+    even though ``FDR_HOME`` is writable. The installer must copy the shipped
+    files into the runtime dir and install there.
+    """
+
+    def test_copies_shipped_files_into_runtime_before_install(self, tmp_path: Path) -> None:
+        source_dir = _make_bridge_dir(tmp_path, name="source")
+        runtime_dir = tmp_path / "runtime"
+        # runtime_dir does not exist yet — installer must create it.
+
+        fake_result = MagicMock(returncode=0, stdout="", stderr="")
+        with (
+            patch("fix_die_repeat.bridge_install.shutil.which", return_value="/usr/local/bin/node"),
+            patch(
+                "fix_die_repeat.bridge_install.subprocess.run", return_value=fake_result
+            ) as mock_run,
+        ):
+            script = ensure_bridge_installed(source_dir, runtime_dir, logger=_logger())
+
+        # npm ci runs in runtime_dir, not source_dir
+        assert mock_run.call_args.kwargs["cwd"] == runtime_dir
+        # Shipped files are staged in runtime_dir
+        assert (runtime_dir / "bridge.js").exists()
+        assert (runtime_dir / "package.json").exists()
+        assert (runtime_dir / "package-lock.json").exists()
+        # Marker lives in runtime_dir's node_modules, never in source_dir
+        assert (runtime_dir / "node_modules" / INSTALL_MARKER).exists()
+        assert not (source_dir / "node_modules").exists()
+        # Returned script points at the runtime copy so Node's module resolution
+        # finds node_modules next to it.
+        assert script == runtime_dir / "bridge.js"
+
+    def test_marker_in_runtime_short_circuits_install(self, tmp_path: Path) -> None:
+        source_dir = _make_bridge_dir(tmp_path, name="source")
+        runtime_dir = tmp_path / "runtime"
+        runtime_dir.mkdir()
+        # Pre-stage files + marker matching source's version
+        (runtime_dir / "bridge.js").write_text("// fake\n")
+        (runtime_dir / "package.json").write_text(
+            json.dumps({"dependencies": {PI_PACKAGE: "0.67.68"}})
+        )
+        (runtime_dir / "node_modules").mkdir()
+        (runtime_dir / "node_modules" / INSTALL_MARKER).write_text("0.67.68")
+
+        with patch("fix_die_repeat.bridge_install.subprocess.run") as mock_run:
+            script = ensure_bridge_installed(source_dir, runtime_dir, logger=_logger())
+
+        mock_run.assert_not_called()
+        assert script == runtime_dir / "bridge.js"
 
     def test_installs_when_marker_missing(self, tmp_path: Path) -> None:
         bridge_dir = _make_bridge_dir(tmp_path)
@@ -65,7 +121,7 @@ class TestEnsureBridgeInstalled:
                 "fix_die_repeat.bridge_install.subprocess.run", return_value=fake_result
             ) as mock_run,
         ):
-            ensure_bridge_installed(bridge_dir, logger=_logger())
+            ensure_bridge_installed(bridge_dir, bridge_dir, logger=_logger())
 
         # npm ci invoked (lockfile present)
         called_cmd = mock_run.call_args.args[0]
@@ -85,7 +141,7 @@ class TestEnsureBridgeInstalled:
                 "fix_die_repeat.bridge_install.subprocess.run", return_value=fake_result
             ) as mock_run,
         ):
-            ensure_bridge_installed(bridge_dir, logger=_logger())
+            ensure_bridge_installed(bridge_dir, bridge_dir, logger=_logger())
 
         assert mock_run.call_args.args[0] == ["npm", "install"]
 
@@ -93,7 +149,7 @@ class TestEnsureBridgeInstalled:
         bridge_dir = _make_bridge_dir(tmp_path)
         with patch("fix_die_repeat.bridge_install.shutil.which", return_value=None):
             with pytest.raises(BridgeInstallError, match=r"Node\.js"):
-                ensure_bridge_installed(bridge_dir, logger=_logger())
+                ensure_bridge_installed(bridge_dir, bridge_dir, logger=_logger())
 
     def test_raises_when_npm_missing(self, tmp_path: Path) -> None:
         bridge_dir = _make_bridge_dir(tmp_path)
@@ -103,7 +159,7 @@ class TestEnsureBridgeInstalled:
 
         with patch("fix_die_repeat.bridge_install.shutil.which", side_effect=which_side_effect):
             with pytest.raises(BridgeInstallError, match="npm"):
-                ensure_bridge_installed(bridge_dir, logger=_logger())
+                ensure_bridge_installed(bridge_dir, bridge_dir, logger=_logger())
 
     def test_raises_when_install_fails(self, tmp_path: Path) -> None:
         bridge_dir = _make_bridge_dir(tmp_path)
@@ -114,7 +170,7 @@ class TestEnsureBridgeInstalled:
             patch("fix_die_repeat.bridge_install.subprocess.run", return_value=fake_result),
         ):
             with pytest.raises(BridgeInstallError, match="install failed"):
-                ensure_bridge_installed(bridge_dir, logger=_logger())
+                ensure_bridge_installed(bridge_dir, bridge_dir, logger=_logger())
 
         # Marker should NOT be written on failure
         assert not (bridge_dir / "node_modules" / INSTALL_MARKER).exists()
@@ -130,7 +186,7 @@ class TestEnsureBridgeInstalled:
             ),
         ):
             with pytest.raises(BridgeInstallError, match="timed out"):
-                ensure_bridge_installed(bridge_dir, logger=_logger())
+                ensure_bridge_installed(bridge_dir, bridge_dir, logger=_logger())
 
     def test_raises_when_bridge_script_missing(self, tmp_path: Path) -> None:
         bridge_dir = tmp_path / "pi-bridge"
@@ -140,7 +196,7 @@ class TestEnsureBridgeInstalled:
             json.dumps({"dependencies": {PI_PACKAGE: "0.67.68"}})
         )
         with pytest.raises(BridgeInstallError, match="script missing"):
-            ensure_bridge_installed(bridge_dir, logger=_logger())
+            ensure_bridge_installed(bridge_dir, bridge_dir, logger=_logger())
 
     def test_reinstalls_when_version_changes(self, tmp_path: Path) -> None:
         bridge_dir = _make_bridge_dir(tmp_path, version="0.68.0")
@@ -155,7 +211,7 @@ class TestEnsureBridgeInstalled:
                 "fix_die_repeat.bridge_install.subprocess.run", return_value=fake_result
             ) as mock_run,
         ):
-            ensure_bridge_installed(bridge_dir, logger=_logger())
+            ensure_bridge_installed(bridge_dir, bridge_dir, logger=_logger())
 
         mock_run.assert_called_once()
         assert (bridge_dir / "node_modules" / INSTALL_MARKER).read_text() == "0.68.0"

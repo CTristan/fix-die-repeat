@@ -111,16 +111,17 @@ This pinning philosophy matches Containment Loop (they're on `0.64.0`, deliberat
 
 ## Install story
 
-The bridge's `node_modules/` is **not** bundled in the Python wheel. The wheel ships only `bridge.js` + `package.json` + `package-lock.json` under `priv/pi-bridge/`. When the runner enters its context manager, `PiRunner.__enter__` calls `ensure_bridge_installed()`, which:
+The bridge's `node_modules/` is **not** bundled in the Python wheel. The wheel ships only `bridge.js` + `package.json` + `package-lock.json` under `priv/pi-bridge/` — that's the **source** directory. When the runner enters its context manager, `PiRunner.__enter__` calls `ensure_bridge_installed()`, which:
 
-1. Checks for `priv/pi-bridge/node_modules/.install-marker` (a sentinel file with the package version). If present and matches the expected version, returns immediately.
-2. If missing: runs `npm ci` in `priv/pi-bridge/`. Requires `node` and `npm` on PATH. `npm ci` uses the checked-in lockfile for deterministic resolution; first-run cost is the npm download (~seconds on a warm network).
-3. On success, writes `.install-marker` with the current package version. Subsequent runs skip the install.
-4. On failure — `node` or `npm` missing — raises `BridgeInstallError` with actionable text: *"fix-die-repeat requires Node.js ≥20 for the pi bridge. Install Node.js (via Homebrew, nvm, or https://nodejs.org) and re-run."*
+1. Resolves the **runtime** directory (`<FDR_HOME>/bridge/`, shared across all repos) — this is where `node_modules/` gets installed and where Node will launch from. Keeping runtime separate from source matters because `priv/pi-bridge/` inside an installed wheel can live in a read-only site-packages tree; writing `node_modules/` there would break first-run for pip-installed users.
+2. Checks for `<runtime>/node_modules/.install-marker` (a sentinel file with the package version). If present and matches the expected version, returns immediately.
+3. If missing: copies `bridge.js` + `package.json` + `package-lock.json` from the source directory into the runtime directory, then runs `npm ci` there. Requires `node` and `npm` on PATH. `npm ci` uses the checked-in lockfile for deterministic resolution; first-run cost is the npm download (~seconds on a warm network).
+4. On success, writes `.install-marker` with the current package version. Subsequent runs skip the install.
+5. On failure — `node` or `npm` missing — raises `BridgeInstallError` with actionable text: *"fix-die-repeat requires Node.js ≥20 for the pi bridge. Install Node.js (via Homebrew, nvm, or https://nodejs.org) and re-run."*
 
 The marker-file approach keeps the wheel small, avoids bundling platform-specific binaries (pi has native dependencies), and makes the install step legible (one `npm ci`, documented in README).
 
-For development, `FDR_BRIDGE_DIR` can override the bridge location — pointing at a local-checkout bridge so developers can iterate on `bridge.js` without rebuilding the wheel.
+For development, `FDR_BRIDGE_DIR` overrides **both** source and runtime to the same path — pointing at a local-checkout bridge so developers can iterate on `bridge.js` without rebuilding the wheel (and without the staging copy getting in the way).
 
 ## Cross-platform
 
