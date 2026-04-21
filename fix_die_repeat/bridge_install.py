@@ -14,6 +14,7 @@ when ``FDR_HOME`` is writable. The runtime dir is always under ``FDR_HOME``.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -46,15 +47,37 @@ def _read_package_version(package_json: Path, dep_name: str) -> str:
     return version
 
 
-def _marker_matches(marker: Path, expected_version: str) -> bool:
-    """Return True when the install marker records ``expected_version``."""
+def _marker_matches(marker: Path, expected_token: str) -> bool:
+    """Return True when the install marker records ``expected_token``."""
     if not marker.exists():
         return False
     try:
         content = marker.read_text().strip()
     except OSError:
         return False
-    return content == expected_version
+    return content == expected_token
+
+
+def _compute_install_hash(source_dir: Path) -> str:
+    """Return a SHA-256 digest over the shipped bridge files in ``source_dir``.
+
+    Hashing every staged file (``bridge.js``, ``package.json``,
+    ``package-lock.json``) — including whether each one is present — means
+    any shipped change forces a reinstall/restage. A version bump of
+    ``@mariozechner/pi-ai``, a refresh of the lockfile, or an edit to
+    ``bridge.js`` all change this digest even when the
+    ``@mariozechner/pi-coding-agent`` pin is unchanged.
+    """
+    digest = hashlib.sha256()
+    for name in _STAGED_FILES:
+        src = source_dir / name
+        digest.update(name.encode("utf-8"))
+        if src.exists():
+            digest.update(b"\x00present\x00")
+            digest.update(src.read_bytes())
+        else:
+            digest.update(b"\x00absent\x00")
+    return digest.hexdigest()
 
 
 def _missing_dependency_error(tool: str) -> BridgeInstallError:
@@ -67,18 +90,22 @@ def _missing_dependency_error(tool: str) -> BridgeInstallError:
 
 
 def _stage_files(source_dir: Path, runtime_dir: Path) -> None:
-    """Copy shipped bridge files from ``source_dir`` into ``runtime_dir``.
+    """Sync shipped bridge files from ``source_dir`` into ``runtime_dir``.
 
-    Skips files absent in source (e.g. ``package-lock.json`` in repos that
-    don't commit a lockfile). Overwrites the runtime copies unconditionally
-    so a source-side bump reliably propagates on the next install.
+    Files present in source are copied unconditionally so a source-side bump
+    reliably propagates on the next install. Files absent in source are also
+    removed from runtime so stale staged artifacts (for example an old
+    ``package-lock.json``) cannot affect later install behavior.
     """
     runtime_dir.mkdir(parents=True, exist_ok=True)
     for name in _STAGED_FILES:
         src = source_dir / name
+        dest = runtime_dir / name
         if not src.exists():
+            if dest.exists() or dest.is_symlink():
+                dest.unlink()
             continue
-        shutil.copy2(src, runtime_dir / name)
+        shutil.copy2(src, dest)
 
 
 def ensure_bridge_installed(
@@ -110,12 +137,13 @@ def ensure_bridge_installed(
         raise BridgeInstallError(msg)
 
     expected_version = _read_package_version(source_package_json, pi_package)
+    expected_hash = _compute_install_hash(source_dir)
 
     runtime_marker = runtime_dir / "node_modules" / INSTALL_MARKER
     runtime_bridge_script = runtime_dir / "bridge.js"
 
     # Short-circuit: runtime already has matching deps installed.
-    if runtime_bridge_script.exists() and _marker_matches(runtime_marker, expected_version):
+    if runtime_bridge_script.exists() and _marker_matches(runtime_marker, expected_hash):
         logger.debug(
             "pi-bridge already installed in %s (%s=%s); skipping npm ci",
             runtime_dir,
@@ -166,6 +194,6 @@ def ensure_bridge_installed(
 
     runtime_node_modules = runtime_dir / "node_modules"
     runtime_node_modules.mkdir(parents=True, exist_ok=True)
-    runtime_marker.write_text(expected_version)
+    runtime_marker.write_text(expected_hash)
     logger.info("pi-bridge dependencies installed (%s=%s)", pi_package, expected_version)
     return runtime_bridge_script

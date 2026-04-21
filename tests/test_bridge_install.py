@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 from fix_die_repeat.bridge_install import (
     INSTALL_MARKER,
     BridgeInstallError,
+    _compute_install_hash,
     ensure_bridge_installed,
 )
 
@@ -48,7 +49,7 @@ class TestEnsureBridgeInstalled:
     def test_marker_short_circuits(self, tmp_path: Path) -> None:
         bridge_dir = _make_bridge_dir(tmp_path)
         (bridge_dir / "node_modules").mkdir()
-        (bridge_dir / "node_modules" / INSTALL_MARKER).write_text("0.67.68")
+        (bridge_dir / "node_modules" / INSTALL_MARKER).write_text(_compute_install_hash(bridge_dir))
 
         with patch("fix_die_repeat.bridge_install.subprocess.run") as mock_run:
             script = ensure_bridge_installed(bridge_dir, bridge_dir, logger=_logger())
@@ -97,13 +98,15 @@ class TestEnsureBridgeInstalledSeparateRuntime:
         source_dir = _make_bridge_dir(tmp_path, name="source")
         runtime_dir = tmp_path / "runtime"
         runtime_dir.mkdir()
-        # Pre-stage files + marker matching source's version
+        # Pre-stage files + marker matching the source's computed hash
         (runtime_dir / "bridge.js").write_text("// fake\n")
         (runtime_dir / "package.json").write_text(
             json.dumps({"dependencies": {PI_PACKAGE: "0.67.68"}})
         )
         (runtime_dir / "node_modules").mkdir()
-        (runtime_dir / "node_modules" / INSTALL_MARKER).write_text("0.67.68")
+        (runtime_dir / "node_modules" / INSTALL_MARKER).write_text(
+            _compute_install_hash(source_dir)
+        )
 
         with patch("fix_die_repeat.bridge_install.subprocess.run") as mock_run:
             script = ensure_bridge_installed(source_dir, runtime_dir, logger=_logger())
@@ -129,7 +132,7 @@ class TestEnsureBridgeInstalledSeparateRuntime:
 
         marker = bridge_dir / "node_modules" / INSTALL_MARKER
         assert marker.exists()
-        assert marker.read_text() == "0.67.68"
+        assert marker.read_text() == _compute_install_hash(bridge_dir)
 
     def test_uses_npm_install_when_no_lockfile(self, tmp_path: Path) -> None:
         bridge_dir = _make_bridge_dir(tmp_path, with_lockfile=False)
@@ -201,8 +204,8 @@ class TestEnsureBridgeInstalledSeparateRuntime:
     def test_reinstalls_when_version_changes(self, tmp_path: Path) -> None:
         bridge_dir = _make_bridge_dir(tmp_path, version="0.68.0")
         (bridge_dir / "node_modules").mkdir()
-        # Old marker from a previous version
-        (bridge_dir / "node_modules" / INSTALL_MARKER).write_text("0.67.68")
+        # Stale marker (could be from a previous version or any other pre-install state)
+        (bridge_dir / "node_modules" / INSTALL_MARKER).write_text("stale-marker")
 
         fake_result = MagicMock(returncode=0, stdout="", stderr="")
         with (
@@ -214,4 +217,63 @@ class TestEnsureBridgeInstalledSeparateRuntime:
             ensure_bridge_installed(bridge_dir, bridge_dir, logger=_logger())
 
         mock_run.assert_called_once()
-        assert (bridge_dir / "node_modules" / INSTALL_MARKER).read_text() == "0.68.0"
+        assert (bridge_dir / "node_modules" / INSTALL_MARKER).read_text() == _compute_install_hash(
+            bridge_dir
+        )
+
+    def test_reinstalls_when_bridge_js_changes_but_pi_version_does_not(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression: hash-based marker catches non-version shipped changes.
+
+        A marker keyed only to the pi-coding-agent version missed shipped
+        changes that didn't bump that one field (e.g. a new ``bridge.js``
+        or a refreshed ``package-lock.json``). The hash catches them.
+        """
+        bridge_dir = _make_bridge_dir(tmp_path)
+        (bridge_dir / "node_modules").mkdir()
+        # Simulate a prior install whose marker matched the old bridge.js contents.
+        (bridge_dir / "node_modules" / INSTALL_MARKER).write_text(_compute_install_hash(bridge_dir))
+        # Ship a new bridge.js while keeping the pi-coding-agent pin identical.
+        (bridge_dir / "bridge.js").write_text("// updated bridge\n")
+
+        fake_result = MagicMock(returncode=0, stdout="", stderr="")
+        with (
+            patch("fix_die_repeat.bridge_install.shutil.which", return_value="/usr/local/bin/node"),
+            patch(
+                "fix_die_repeat.bridge_install.subprocess.run", return_value=fake_result
+            ) as mock_run,
+        ):
+            ensure_bridge_installed(bridge_dir, bridge_dir, logger=_logger())
+
+        mock_run.assert_called_once()
+        assert (bridge_dir / "node_modules" / INSTALL_MARKER).read_text() == _compute_install_hash(
+            bridge_dir
+        )
+
+    def test_stage_removes_stale_runtime_files_when_source_lacks_them(self, tmp_path: Path) -> None:
+        """Regression: staging deletes runtime files missing from source.
+
+        When the source no longer ships a ``package-lock.json``, the staged
+        copy must go too, so ``npm ci`` / ``npm install`` selection is driven
+        by the current source, not a leftover staged lockfile.
+        """
+        source_dir = _make_bridge_dir(tmp_path, name="source", with_lockfile=False)
+        runtime_dir = tmp_path / "runtime"
+        runtime_dir.mkdir()
+        # A lockfile left behind from a previous source that shipped one.
+        stale_lockfile = runtime_dir / "package-lock.json"
+        stale_lockfile.write_text("{}")
+
+        fake_result = MagicMock(returncode=0, stdout="", stderr="")
+        with (
+            patch("fix_die_repeat.bridge_install.shutil.which", return_value="/usr/local/bin/node"),
+            patch(
+                "fix_die_repeat.bridge_install.subprocess.run", return_value=fake_result
+            ) as mock_run,
+        ):
+            ensure_bridge_installed(source_dir, runtime_dir, logger=_logger())
+
+        # Stale lockfile removed; npm install (not npm ci) runs because there's no lockfile now.
+        assert not stale_lockfile.exists()
+        assert mock_run.call_args.args[0] == ["npm", "install"]

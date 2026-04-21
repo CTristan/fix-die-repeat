@@ -39,7 +39,7 @@ fix-die-repeat (Python)                        pi-bridge (Node.js)
         emergency_compact → bridge.*
 ```
 
-One bridge process spans the entire `fix-die-repeat` run. Each pi invocation is a fresh session — we send `new_session` between prompts so reviews / fixes / introspection runs don't accumulate context from one another. This matches how the CLI path works today (each `pi` invocation is a new process, therefore a new session).
+One bridge process spans the entire `fix-die-repeat` run. Each pi invocation is still a fresh session, but that freshness is created internally by the bridge for each `prompt`, so reviews / fixes / introspection runs don't accumulate context from one another. This matches how the CLI path works today (each `pi` invocation is a new process, therefore a new session).
 
 ## Protocol
 
@@ -51,10 +51,10 @@ JSON objects, one per line, UTF-8, `\n`-terminated. Unknown fields are ignored o
 |---|---|---|
 | `init` | `{type, model, provider, tools, workingDir, thinking?}` | Initial handshake; bridge constructs an `AgentSession`. Bridge replies with `ready` when the session is ready. Sent once per bridge lifetime. |
 | `prompt` | `{type, message, timeoutMs?}` | Run one agent turn in a fresh session. Bridge emits events during the run and `agent_end` at the end with the final assistant text. |
-| `set_model` | `{type, provider, modelId}` | Swap model mid-run (capacity-fallback path, currently `pi -p /model-skip`). |
+| `set_model` | `{type, provider, modelId}` | Swap model mid-run when Python applies a `--model` override. Phase 0 does not cycle models automatically on capacity errors (503); see the `/model-skip` row below. |
 | `compact` | `{type}` | Emergency context compaction (currently `PiRunner.emergency_compact`). |
-| `abort` | `{type}` | Cancel the current agent turn. Bridge emits `error` with `reason: "aborted"`. |
-| `shutdown` | `{type}` | Graceful stop. Bridge finishes any in-flight turn, then exits with code 0. |
+| `abort` | `{type}` | Cancel the current agent turn by requesting abort on the active session. This does not currently guarantee a distinct `error` event with `reason: "aborted"`; callers should not rely on a specific `error.reason` after cancellation. |
+| `shutdown` | `{type}` | Stop the bridge. If an agent turn is in flight, the bridge aborts it and then exits with code 0. |
 
 ### Events (bridge → Python, stdout)
 
@@ -84,10 +84,10 @@ Every current pi invocation has a structured equivalent:
 | Today | Tomorrow |
 |---|---|
 | `run_pi("-p", prompt)` | `bridge.prompt(prompt)` |
-| `run_pi("-p", "/model-skip")` | `bridge.set_model(provider, modelId)` — the Python side picks the next fallback from `Settings` and passes both fields explicitly. |
+| `run_pi("-p", "/model-skip")` | `bridge.set_model(provider, modelId)` — when Python decides to switch models, it passes the target provider/model explicitly; Phase 0 does not do automatic fallback-list cycling. |
 | `emergency_compact()` | `bridge.compact()` |
 | `run_pi("-p", "/abort")` (unused today) | `bridge.abort()` |
-| any argv-based tool flag (`--tools read,edit,...`) | set at `init` once; no per-prompt override for Phase 0. |
+| any argv-based tool flag (`--tools read,edit,...`) | passed as bridge defaults at `init`, with per-prompt overrides supported via `prompt.tools` in Phase 0. |
 
 `PiBridge.prompt()` returns `(returncode, stdout, stderr)` to match the existing `run_pi` contract — `stdout` is `agent_end.finalText`, `stderr` is bridge diagnostics for the run, `returncode` is 0 on `agent_end` and 1 on `error` or timeout. Call sites in the runner / managers keep their existing signatures; only `PiRunner.run_pi` itself knows the transport changed.
 
@@ -99,10 +99,9 @@ This is a deliberate simplification versus Containment Loop, which maintains its
 
 ## Version pinning
 
-`priv/pi-bridge/package.json` pins exact versions of the three pi packages:
+`priv/pi-bridge/package.json` pins exact versions of the two direct pi packages it declares:
 
 - `@mariozechner/pi-coding-agent`
-- `@mariozechner/pi-agent-core`
 - `@mariozechner/pi-ai`
 
 Initial pin: the latest stable version verified against `fix-die-repeat`'s existing test suite at implementation time. Today that's `0.67.68` (what the globally-installed pi reports). Update cadence is manual: when `pi` releases a version with features `fix-die-repeat` wants, bump the pin deliberately, re-run the full test suite, and note the bump in `CHANGELOG.md`. No automatic tracking.

@@ -43,7 +43,7 @@ It's Groundhog Day, but for CI.
 - Git
 - (Optional) GitHub CLI (`gh`) for [PR review mode](docs/guide.md#pr-review-mode)
 
-On the **first run** fix-die-repeat installs the bridge's Node dependencies into `priv/pi-bridge/node_modules/` via `npm ci` (takes a few seconds on a warm cache, longer cold). Subsequent runs skip the install.
+On the **first run** fix-die-repeat uses `npm ci` to install the bridge's Node dependencies into the writable runtime cache at `<FDR_HOME>/bridge/node_modules/` (the bridge source itself is shipped in `priv/pi-bridge/`; install takes a few seconds on a warm cache, longer cold). Subsequent runs skip the install.
 
 ### Install
 
