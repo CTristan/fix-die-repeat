@@ -1,14 +1,20 @@
 """Main runner for fix-die-repeat."""
 
+from __future__ import annotations
+
 import json
 import re
 import shlex
 import sys
 import time
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, Self
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+from fix_die_repeat.bridge_install import ensure_bridge_installed
 from fix_die_repeat.config import (
     Paths,
     Settings,
@@ -22,6 +28,12 @@ from fix_die_repeat.messages import (
     git_diff_instructions,
     model_recommendations_full,
     oscillation_warning,
+)
+from fix_die_repeat.pi_bridge import (
+    DEFAULT_PROMPT_TIMEOUT_MS,
+    PiBridge,
+    PiBridgeConfig,
+    PiBridgeError,
 )
 from fix_die_repeat.prompts import render_prompt
 from fix_die_repeat.runner_artifacts import ArtifactManager
@@ -47,8 +59,85 @@ from fix_die_repeat.utils import (
 )
 
 
+def _parse_pi_argv(
+    args: tuple[str, ...],
+) -> tuple[str, tuple[str, ...], str | None, tuple[str, ...]]:
+    """Translate a legacy pi CLI argv into bridge-shaped parameters.
+
+    Returns ``(message, tools, model, file_args)``:
+
+    * ``message`` — the final prompt text (last positional non-flag arg)
+    * ``tools`` — tuple of tool names parsed from ``--tools a,b,c`` (empty for default)
+    * ``model`` — value of ``--model X`` if present, else ``None``
+    * ``file_args`` — paths extracted from ``@path`` tokens (order preserved)
+    """
+    tools: tuple[str, ...] = ()
+    model: str | None = None
+    file_args: list[str] = []
+    positional: list[str] = []
+
+    it = iter(args)
+    for arg in it:
+        if arg == "-p":
+            continue
+        if arg == "--tools":
+            value = next(it, "")
+            tools = tuple(s.strip() for s in value.split(",") if s.strip())
+            continue
+        if arg == "--model":
+            model = next(it, None)
+            continue
+        if arg.startswith("@"):
+            file_args.append(arg[1:])
+            continue
+        positional.append(arg)
+
+    message = positional[-1] if positional else ""
+    return (message, tools, model, tuple(file_args))
+
+
+def _embed_attached_files(
+    message: str,
+    file_args: Iterable[str],
+    project_root: Path,
+) -> str:
+    """Prepend ``@file`` contents to ``message`` for bridge prompts.
+
+    Pi CLI loaded these files into the initial prompt implicitly. The bridge
+    passes a single message string, so we inline the file contents with a
+    simple framing. Missing/unreadable files surface as an inline note so the
+    agent sees the failure instead of silently losing context.
+    """
+    chunks: list[str] = []
+    for ref in file_args:
+        path = Path(ref)
+        if not path.is_absolute():
+            path = (project_root / ref).resolve()
+        try:
+            content = path.read_text()
+        except OSError as err:
+            chunks.append(f"--- Attached (unavailable): {ref} — {err} ---\n")
+            continue
+        rel = _safe_relative(path, project_root)
+        chunks.append(f"--- Attached: {rel} ---\n{content}\n")
+    if not chunks:
+        return message
+    return "\n".join(chunks) + "\n" + message
+
+
+def _safe_relative(path: Path, project_root: Path) -> str:
+    try:
+        return str(path.relative_to(project_root))
+    except ValueError:
+        return str(path)
+
+
 class PiRunner:
     """Runner that orchestrates the fix-die-repeat loop."""
+
+    # Class-level default so tests that build runners via ``__new__`` (bypassing
+    # ``__init__``) can still reach ``self._bridge`` without AttributeError.
+    _bridge: PiBridge | None = None
 
     def __init__(self, settings: Settings, paths: Paths) -> None:
         """Initialize the runner.
@@ -99,6 +188,12 @@ class PiRunner:
         )
         self.improve_prompts_manager = ImprovePromptsManager(self.settings, self.logger)
 
+        # Bridge lifecycle is deferred to __enter__ so that tests which build
+        # PiRunner without a context manager (or via __new__) don't trigger
+        # `npm ci` or subprocess spawning. Callers going through the CLI use
+        # ``with PiRunner(...) as runner:``.
+        self._bridge: PiBridge | None = None
+
     def _get_artifact_manager(self) -> ArtifactManager | None:
         """Return the artifact manager when initialized."""
         manager = self.__dict__.get("artifact_manager")
@@ -134,6 +229,59 @@ class PiRunner:
             return manager
         return None
 
+    def __enter__(self) -> Self:
+        """Start the pi-bridge subprocess for this runner's lifetime."""
+        self._start_bridge()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: object,
+        exc: object,
+        tb: object,
+    ) -> None:
+        """Shut down the pi-bridge subprocess."""
+        self._stop_bridge()
+
+    def _start_bridge(self) -> None:
+        if self._bridge is not None:
+            return
+        bridge_dir = self.paths.bridge_dir
+        try:
+            bridge_script = ensure_bridge_installed(bridge_dir, logger=self.logger)
+        except Exception as err:
+            self.logger.error("pi-bridge install failed: %s", err)
+            raise
+
+        provider, model_id = self._split_settings_model(self.settings.model)
+        config = PiBridgeConfig(
+            provider=provider,
+            model=model_id,
+            working_dir=self.paths.project_root,
+            tools=("read", "bash", "edit", "write", "grep", "find", "ls"),
+        )
+        self._bridge = PiBridge(config, bridge_script=bridge_script, logger=self.logger)
+        self._bridge.__enter__()
+
+    def _stop_bridge(self) -> None:
+        if self._bridge is None:
+            return
+        try:
+            self._bridge.__exit__(None, None, None)
+        finally:
+            self._bridge = None
+
+    @staticmethod
+    def _split_settings_model(model: str | None) -> tuple[str | None, str | None]:
+        """Split a ``provider/model-id`` string; return (None, None) when unset."""
+        if not model:
+            return (None, None)
+        if "/" in model:
+            provider, _, model_id = model.partition("/")
+            return (provider or None, model_id or None)
+        # Bare model id — let pi pick the provider from its settings.
+        return (None, model)
+
     def before_pi_call(self) -> None:
         """Add delay between sequential pi calls to reduce lock contention."""
         if self.pi_invocation_count > 0:
@@ -141,21 +289,61 @@ class PiRunner:
         self.pi_invocation_count += 1
 
     def run_pi(self, *args: str) -> tuple[int, str, str]:
-        """Run pi command with logging.
+        """Run pi via the sidecar bridge, preserving the legacy argv API.
 
-        Args:
-            *args: Arguments to pass to pi
-
-        Returns:
-            Tuple of (exit_code, stdout, stderr)
-
+        Translates the historical ``run_pi("-p", "--tools", "read,edit,...",
+        "@file", prompt)`` shape into a bridge ``prompt`` command. Returns
+        ``(returncode, stdout, stderr)`` with the same semantics as the old
+        subprocess path so call sites don't need to change.
         """
         self.before_pi_call()
 
-        cmd_args = ["pi", *args]
-        returncode, stdout, stderr = run_command(cmd_args, cwd=self.paths.project_root)
+        message, tools_override, model_override, file_args = _parse_pi_argv(args)
+        cmd_args = ["pi", *args]  # for logging fidelity
 
-        # Log output
+        if message.strip().startswith("/"):
+            return self._handle_pi_slash_command(message.strip(), cmd_args)
+
+        full_message = _embed_attached_files(message, file_args, self.paths.project_root)
+        self._apply_model_override(model_override)
+
+        result = self._invoke_bridge_prompt(full_message, tools_override)
+        self._log_pi_invocation(cmd_args, result)
+        return result
+
+    def _apply_model_override(self, model_override: str | None) -> None:
+        """Swap bridge model when a ``--model X`` flag was present in argv."""
+        if model_override is None or self._bridge is None:
+            return
+        provider, model_id = self._split_settings_model(model_override)
+        if not (provider and model_id):
+            return
+        try:
+            self._bridge.set_model(provider, model_id)
+        except PiBridgeError as err:
+            self.logger.warning("pi-bridge set_model failed: %s", err)
+
+    def _invoke_bridge_prompt(self, message: str, tools: tuple[str, ...]) -> tuple[int, str, str]:
+        """Send ``message`` to the bridge and return the legacy result tuple."""
+        if self._bridge is None:
+            self.logger.error(
+                "pi-bridge is not running; use `with PiRunner(...) as runner:` "
+                "to manage its lifecycle",
+            )
+            return (1, "", "pi-bridge not running")
+        try:
+            return self._bridge.prompt(
+                message,
+                timeout_ms=DEFAULT_PROMPT_TIMEOUT_MS,
+                tools=list(tools) if tools else None,
+            )
+        except PiBridgeError as err:
+            self.logger.error("pi-bridge prompt raised: %s", err)
+            return (1, "", str(err))
+
+    def _log_pi_invocation(self, cmd_args: list[str], result: tuple[int, str, str]) -> None:
+        """Append a one-call audit trail to ``paths.pi_log`` and raise on failure."""
+        returncode, stdout, stderr = result
         if self.paths.pi_log:
             with self.paths.pi_log.open("a", encoding="utf-8") as f:
                 f.write(f"Command: {shlex.join(cmd_args)}\n")
@@ -165,37 +353,53 @@ class PiRunner:
                 if stderr:
                     f.write(f"STDERR:\n{stderr}\n")
                 f.write("\n")
-
         if returncode != 0:
             self.logger.error("pi exited with code %s", returncode)
             if self.paths.pi_log:
                 self.logger.error("pi output logged to: %s", self.paths.pi_log)
 
-        return (returncode, stdout, stderr)
+    def _handle_pi_slash_command(self, message: str, cmd_args: list[str]) -> tuple[int, str, str]:
+        """Handle legacy pi slash commands that don't translate to the bridge.
+
+        ``/model-skip`` and similar internals were pi CLI conveniences; the
+        bridge has no equivalent without explicit fallback-list configuration.
+        Log a warning and succeed so ``run_pi_safe``'s surrounding retry logic
+        doesn't cascade into false failures.
+        """
+        self.logger.warning(
+            "pi slash-command %s has no bridge equivalent; skipping (was: %s)",
+            message,
+            shlex.join(cmd_args),
+        )
+        if self.paths.pi_log:
+            with self.paths.pi_log.open("a", encoding="utf-8") as f:
+                f.write(f"Command: {shlex.join(cmd_args)}\n")
+                f.write("Exit code: 0 (slash-command skipped: no bridge equivalent)\n\n")
+        return (0, "", "")
 
     def run_pi_safe(self, *args: str) -> tuple[int, str, str]:
-        """Run pi with single retry on failure.
+        """Run pi via the bridge with a single retry on failure.
 
-        Args:
-            *args: Arguments to pass to pi
-
-        Returns:
-            Tuple of (exit_code, stdout, stderr)
-
+        The legacy 503 fallback (pi CLI's ``/model-skip``) is no longer
+        automatic — the bridge exposes ``set_model`` but has no fallback list.
+        The 429 fallback still truncates local artifact files before retry,
+        which was the useful part of ``emergency_compact`` anyway.
         """
         returncode, stdout, stderr = self.run_pi(*args)
 
         if returncode == 0:
             return (returncode, stdout, stderr)
 
-        # Detect capacity error (503)
+        # Detect capacity error (503) — log only; no automatic model switch in bridge mode.
         if self.paths.pi_log and self.paths.pi_log.exists():
             content = self.paths.pi_log.read_text()
             if "503" in content or "No capacity" in content:
-                self.logger.info("Detected model capacity error (503). Skipping current model...")
-                self.run_pi("-p", "/model-skip")  # Trigger model skip
+                self.logger.warning(
+                    "Detected model capacity error (503). "
+                    "The bridge has no automatic model-skip; retrying with the same model.",
+                )
 
-        # Detect long context error (429)
+        # Detect long context error (429) — still shrink our local artifacts.
         if self.paths.pi_log and self.paths.pi_log.exists():
             content = self.paths.pi_log.read_text()
             if "429" in content.lower() and "long context" in content.lower():
@@ -880,8 +1084,8 @@ class PiRunner:
         return manager.run_improve_prompts(self.run_pi_safe)
 
     def _fetch_unresolved_pr_threads(
-        self, pr_manager: "PrReviewManager"
-    ) -> "tuple[ReviewPrInfo, list[dict]] | None":
+        self, pr_manager: PrReviewManager
+    ) -> tuple[ReviewPrInfo, list[dict]] | None:
         """Fetch unresolved PR threads for the current branch.
 
         Returns:
@@ -915,8 +1119,8 @@ class PiRunner:
 
     def _write_introspect_only_inputs(
         self,
-        pr_manager: "PrReviewManager",
-        pr_info: "ReviewPrInfo",
+        pr_manager: PrReviewManager,
+        pr_info: ReviewPrInfo,
         unresolved: list[dict],
     ) -> None:
         """Persist the cumulative files that IntrospectionManager reads."""
@@ -2058,7 +2262,7 @@ class PiRunner:
         self,
         iteration: int,
         start_sha: str,
-        pr_info: "IntrospectionPrInfo | None" = None,
+        pr_info: IntrospectionPrInfo | None = None,
     ) -> None:
         """Collect input data for introspection analysis.
 

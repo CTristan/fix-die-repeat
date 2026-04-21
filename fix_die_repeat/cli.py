@@ -358,11 +358,10 @@ def _run_main(options: CliOptions) -> int:
         # Pre-flight validation of resolved check command
         validate_check_cmd_or_exit(settings.check_cmd)
 
-    # Create runner
-    runner = PiRunner(settings, paths)
-
-    # Run the loop
-    return runner.run()
+    # Create runner and run the loop. The context manager owns the pi-bridge
+    # subprocess lifecycle — it spawns node on __enter__ and shuts down on exit.
+    with PiRunner(settings, paths) as runner:
+        return runner.run()
 
 
 if __name__ == "__main__":

@@ -356,6 +356,15 @@ class Paths:
         self.introspection_data_file = self.fdr_dir / ".introspection_data.yaml"
         self.introspection_result_file = self.fdr_dir / ".introspection_result.yaml"
 
+        # Pi-bridge script is shipped inside the installed package at
+        # ``priv/pi-bridge/``. ``FDR_BRIDGE_DIR`` overrides the location during
+        # development so a local bridge checkout can be used without reinstalling.
+        override = os.environ.get("FDR_BRIDGE_DIR")
+        if override:
+            self.bridge_dir = Path(override).expanduser().resolve()
+        else:
+            self.bridge_dir = (Path(__file__).parent.parent / "priv" / "pi-bridge").resolve()
+
     @staticmethod
     def _find_project_root() -> Path:
         """Find project root directory.

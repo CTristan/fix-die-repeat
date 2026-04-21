@@ -6,15 +6,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fix_die_repeat.config import Paths
+from fix_die_repeat.pi_bridge import PiBridge, PiBridgeError
 from fix_die_repeat.runner import PiRunner
 from fix_die_repeat.utils import get_git_revision_hash
 
 
 class TestRunPi:
-    """Tests for run_pi and run_pi_safe."""
+    """Tests for run_pi and run_pi_safe routed through the pi-bridge."""
 
-    def test_run_pi_writes_log(self, tmp_path: Path) -> None:
-        """Test run_pi writes stdout/stderr to pi.log."""
+    def _build_runner(self, tmp_path: Path) -> tuple[PiRunner, MagicMock]:
+        """Construct a PiRunner with a mocked bridge for unit testing."""
         settings = MagicMock()
         paths = MagicMock()
         paths.project_root = tmp_path
@@ -26,39 +27,97 @@ class TestRunPi:
         runner.logger = MagicMock()
         runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
 
-        with patch("fix_die_repeat.runner.run_command") as mock_run:
-            mock_run.return_value = (0, "hello", "warn")
-            returncode, stdout, stderr = runner.run_pi("-p", "hello")
+        bridge = MagicMock(spec=PiBridge)
+        runner._bridge = bridge
+        return runner, bridge
+
+    def test_run_pi_writes_log(self, tmp_path: Path) -> None:
+        """run_pi writes command + stdout/stderr to pi.log via the bridge path."""
+        runner, bridge = self._build_runner(tmp_path)
+        bridge.prompt.return_value = (0, "hello", "warn")
+
+        returncode, stdout, stderr = runner.run_pi("-p", "hello")
 
         assert returncode == 0
         assert stdout == "hello"
         assert stderr == "warn"
-        log_content = paths.pi_log.read_text()
+        log_content = runner.paths.pi_log.read_text()
         assert "Command: pi -p hello" in log_content
         assert "STDOUT:\nhello" in log_content
         assert "STDERR:\nwarn" in log_content
+        bridge.prompt.assert_called_once()
 
     def test_run_pi_logs_error_on_failure(self, tmp_path: Path) -> None:
-        """Test run_pi logs error when pi fails."""
-        settings = MagicMock()
-        paths = MagicMock()
-        paths.project_root = tmp_path
-        paths.pi_log = tmp_path / "pi.log"
+        """run_pi logs an error when the bridge returns a non-zero exit code."""
+        runner, bridge = self._build_runner(tmp_path)
+        bridge.prompt.return_value = (1, "", "boom")
 
-        runner = PiRunner.__new__(PiRunner)
-        runner.settings = settings
-        runner.paths = paths
-        runner.logger = MagicMock()
-        runner.before_pi_call = MagicMock()  # type: ignore[method-assign]
+        runner.run_pi("-p", "boom")
 
-        with patch("fix_die_repeat.runner.run_command") as mock_run:
-            mock_run.return_value = (1, "", "boom")
-            runner.run_pi("-p", "boom")
+        runner.logger.error.assert_any_call("pi exited with code %s", 1)  # type: ignore[attr-defined]
 
-        runner.logger.error.assert_any_call("pi exited with code %s", 1)
+    def test_run_pi_translates_tools_flag(self, tmp_path: Path) -> None:
+        """run_pi extracts --tools csv and forwards it to the bridge."""
+        runner, bridge = self._build_runner(tmp_path)
+        bridge.prompt.return_value = (0, "", "")
 
-    def test_run_pi_safe_capacity_error(self, tmp_path: Path) -> None:
-        """Test run_pi_safe triggers model skip on 503 errors."""
+        runner.run_pi("-p", "--tools", "read,grep,ls", "hello")
+
+        bridge.prompt.assert_called_once()
+        _args, kwargs = bridge.prompt.call_args
+        assert kwargs["tools"] == ["read", "grep", "ls"]
+
+    def test_run_pi_embeds_at_file_contents(self, tmp_path: Path) -> None:
+        """run_pi inlines @file contents so pi's CLI @-syntax is preserved."""
+        runner, bridge = self._build_runner(tmp_path)
+        runner.paths.project_root = tmp_path  # real path for _safe_relative
+        attached = tmp_path / "note.md"
+        attached.write_text("hello from the attached file")
+        bridge.prompt.return_value = (0, "", "")
+
+        runner.run_pi("-p", f"@{attached}", "review this")
+
+        args, _kwargs = bridge.prompt.call_args
+        message = args[0]
+        assert "hello from the attached file" in message
+        assert "Attached:" in message
+        assert message.endswith("review this")
+
+    def test_run_pi_slash_command_is_skipped(self, tmp_path: Path) -> None:
+        """Legacy pi slash-commands (e.g. /model-skip) no-op through the bridge."""
+        runner, bridge = self._build_runner(tmp_path)
+
+        returncode, stdout, stderr = runner.run_pi("-p", "/model-skip")
+
+        assert returncode == 0
+        assert stdout == ""
+        assert stderr == ""
+        bridge.prompt.assert_not_called()
+        runner.logger.warning.assert_called()  # type: ignore[attr-defined]
+
+    def test_run_pi_handles_bridge_error(self, tmp_path: Path) -> None:
+        """run_pi returns a non-zero tuple when the bridge raises."""
+        runner, bridge = self._build_runner(tmp_path)
+        bridge.prompt.side_effect = PiBridgeError("kaboom")
+
+        returncode, stdout, stderr = runner.run_pi("-p", "hello")
+
+        assert returncode == 1
+        assert stdout == ""
+        assert "kaboom" in stderr
+
+    def test_run_pi_without_bridge_fails_gracefully(self, tmp_path: Path) -> None:
+        """run_pi returns (1, '', ...) when called without a live bridge."""
+        runner, _bridge = self._build_runner(tmp_path)
+        runner._bridge = None
+
+        returncode, stdout, _stderr = runner.run_pi("-p", "hello")
+
+        assert returncode == 1
+        assert stdout == ""
+
+    def test_run_pi_safe_capacity_error_warns(self, tmp_path: Path) -> None:
+        """run_pi_safe logs a warning on 503 but no longer auto-skips the model."""
         settings = MagicMock()
         paths = MagicMock()
         paths.pi_log = tmp_path / "pi.log"
@@ -69,16 +128,19 @@ class TestRunPi:
         runner.paths = paths
         runner.logger = MagicMock()
         runner.run_pi = MagicMock(  # type: ignore[method-assign]
-            side_effect=[(1, "", ""), (0, "", ""), (0, "", "")],
+            side_effect=[(1, "", ""), (0, "", "")],
         )
 
         returncode, _stdout, _stderr = runner.run_pi_safe("-p", "fix")
 
         assert returncode == 0
-        assert runner.run_pi.call_args_list[1].args == ("-p", "/model-skip")
+        # Exactly two run_pi calls: original, then one retry (no /model-skip detour).
+        expected_call_count = 2  # initial + one retry
+        assert len(runner.run_pi.call_args_list) == expected_call_count
+        assert runner.logger.warning.called
 
     def test_run_pi_safe_long_context_error(self, tmp_path: Path) -> None:
-        """Test run_pi_safe triggers emergency compaction on 429 errors."""
+        """run_pi_safe still triggers emergency_compact on 429 long-context errors."""
         settings = MagicMock()
         paths = MagicMock()
         paths.pi_log = tmp_path / "pi.log"

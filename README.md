@@ -38,9 +38,12 @@ It's Groundhog Day, but for CI.
 ### Requirements
 
 - Python 3.12+ and [uv](https://docs.astral.sh/uv/)
-- [pi](https://github.com/mariozechner/pi) on your PATH
+- [pi](https://github.com/mariozechner/pi) configured with credentials (run `pi` once interactively to complete provider auth)
+- Node.js 20+ — for the [pi-bridge](docs/pi-bridge.md) sidecar that fix-die-repeat uses to drive pi via its SDK
 - Git
 - (Optional) GitHub CLI (`gh`) for [PR review mode](docs/guide.md#pr-review-mode)
+
+On the **first run** fix-die-repeat installs the bridge's Node dependencies into `priv/pi-bridge/node_modules/` via `npm ci` (takes a few seconds on a warm cache, longer cold). Subsequent runs skip the install.
 
 ### Install
 

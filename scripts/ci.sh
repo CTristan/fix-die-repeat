@@ -36,6 +36,21 @@ fi
 echo "🛡️  Validating ruff rule ignore policy..."
 $VALIDATE_SCRIPT
 
+# Preflight: ensure the pi-bridge Node dependencies are installed. The sidecar
+# bridge at priv/pi-bridge/ is required for any real `fix-die-repeat` run and
+# for the integration test suite. `npm ci` is idempotent when node_modules is
+# already present and matches the lockfile.
+if [[ -d "priv/pi-bridge" ]]; then
+    if command -v npm &> /dev/null; then
+        if [[ ! -d "priv/pi-bridge/node_modules" ]]; then
+            echo "📦 Installing pi-bridge Node dependencies..."
+            (cd priv/pi-bridge && npm ci)
+        fi
+    else
+        echo "⚠️  npm not found on PATH; skipping pi-bridge install (bridge tests will be limited)."
+    fi
+fi
+
 if [[ "$CHECK_ONLY" == "true" ]]; then
     echo "🔍 Running ruff linting (check-only mode)..."
     $RUFF check .

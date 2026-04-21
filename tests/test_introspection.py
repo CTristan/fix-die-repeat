@@ -544,7 +544,7 @@ class TestIntrospectOnlyMode:
             diff_content="",
             introspect_only=True,
         )
-        content = manager._build_introspection_yaml(params)  # noqa: SLF001
+        content = manager._build_introspection_yaml(params)
         assert "outcome: not-attempted" in content
         assert "outcome: fixed" not in content
         assert "outcome: wont-fix" not in content
@@ -560,7 +560,7 @@ class TestIntrospectOnlyMode:
             pr_threads_content="body",
             diff_content="",
         )
-        content = manager._build_introspection_yaml(params)  # noqa: SLF001
+        content = manager._build_introspection_yaml(params)
         assert "outcome: fixed" in content
         assert "outcome: wont-fix" in content
         assert "outcome: not-attempted" not in content
@@ -579,7 +579,7 @@ class TestIntrospectOnlyMode:
             "relevance": "r",
             "lang_check_gap": "n/a",
         }
-        assert manager._validate_thread_outcome(thread, 1) is True  # noqa: SLF001
+        assert manager._validate_thread_outcome(thread, 1) is True
 
     def test_validate_thread_outcome_still_requires_reason_for_wont_fix(
         self, tmp_path: Path
@@ -595,4 +595,4 @@ class TestIntrospectOnlyMode:
             "relevance": "r",
             "lang_check_gap": "n/a",
         }
-        assert manager._validate_thread_outcome(thread, 1) is False  # noqa: SLF001
+        assert manager._validate_thread_outcome(thread, 1) is False

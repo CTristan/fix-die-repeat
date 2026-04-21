@@ -93,7 +93,7 @@ class TestIsRunningInDevMode:
         direct_url_file.write_text('{"dir_info": {"editable": true}, "url_info": {}}')
 
         mock_dist = MagicMock()
-        mock_dist._path = str(dist_path)  # noqa: SLF001
+        mock_dist._path = str(dist_path)
         mock_distribution.return_value = mock_dist
 
         result = is_running_in_dev_mode()
@@ -113,7 +113,7 @@ class TestIsRunningInDevMode:
         direct_url_file.write_text('{"dir_info": {"editable": false}, "url_info": {}}')
 
         mock_dist = MagicMock()
-        mock_dist._path = str(dist_path)  # noqa: SLF001
+        mock_dist._path = str(dist_path)
         mock_distribution.return_value = mock_dist
 
         result = is_running_in_dev_mode()
