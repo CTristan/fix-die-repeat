@@ -49,9 +49,9 @@ JSON objects, one per line, UTF-8, `\n`-terminated. Unknown fields are ignored o
 
 | Command | Shape | Purpose |
 |---|---|---|
-| `init` | `{type, model, provider, tools, workingDir, thinking?}` | Initial handshake; bridge constructs an `AgentSession`. Bridge replies with `ready` when the session is ready. Sent once per bridge lifetime. |
-| `prompt` | `{type, message, timeoutMs?}` | Run one agent turn in a fresh session. Bridge emits events during the run and `agent_end` at the end with the final assistant text. |
-| `set_model` | `{type, provider, modelId}` | Swap model mid-run when Python applies a `--model` override. Phase 0 does not cycle models automatically on capacity errors (503); see the `/model-skip` row below. |
+| `init` | `{type, model, provider, tools, workingDir, thinking?}` | Initial handshake; bridge stores configuration and prepares to accept prompts. Bridge replies with `ready` when initialization completes. Sent once per bridge lifetime. |
+| `prompt` | `{type, message, timeoutMs?, tools?, provider?, modelId?}` | Run one agent turn in a fresh session. `tools` / `provider` / `modelId` are one-shot overrides of init defaults for this turn only; they don't mutate the bridge's configured defaults. Bridge emits events during the run and `agent_end` at the end with the final assistant text. |
+| `set_model` | `{type, provider, modelId}` | Durably swap the bridge's default provider/model for all subsequent prompts. One-shot `--model X` overrides ride on the `prompt` command (above); Phase 0 does not cycle models automatically on capacity errors (503); see the `/model-skip` row below. |
 | `compact` | `{type}` | Emergency context compaction (currently `PiRunner.emergency_compact`). |
 | `abort` | `{type}` | Cancel the current agent turn by requesting abort on the active session. This does not currently guarantee a distinct `error` event with `reason: "aborted"`; callers should not rely on a specific `error.reason` after cancellation. |
 | `shutdown` | `{type}` | Stop the bridge. If an agent turn is in flight, the bridge aborts it and then exits with code 0. |
@@ -131,8 +131,8 @@ Phase 0 is verified on macOS and Linux. Windows is unverified — pi itself runs
 - **Unit tests for `PiBridge`** — `tests/test_pi_bridge.py` mocks the subprocess lifecycle and synthesizes JSONL event streams. Covers: `__enter__`/`__exit__` resource management, `prompt()` returning the right tuple on `agent_end`, `prompt()` returning non-zero on `error`, timeout handling, malformed-JSONL tolerance, `set_model`/`compact`/`abort` command framing.
 - **Unit tests for install** — `tests/test_bridge_install.py` mocks `subprocess.run` and `shutil.which` to cover the three paths: marker present (skip), marker absent (install), node missing (actionable error).
 - **Migration tests** — every existing test that patches `utils.run_command` for pi calls gets retargeted to patch `PiBridge.prompt`. The tuple API preservation means assertion shapes mostly don't change.
-- **Integration test** — `tests/integration/test_bridge_end_to_end.py` spawns a real bridge subprocess and sends a canned prompt. Gated by `shutil.which("node")`; skipped otherwise. Marked with `@pytest.mark.integration` and excluded from default `pytest` runs to keep the unit suite fast and offline.
-- **What's out of scope** — actual model calls. The integration test uses a dummy prompt and doesn't require credentials; real LLM round-trips stay in dev-mode manual verification (`uv run fix-die-repeat --debug`).
+- **Integration test** — `tests/integration/test_bridge_end_to_end.py` spawns a real bridge subprocess and exercises the init → ready → shutdown handshake. Gated by `shutil.which("node")`; skipped otherwise. Marked with `@pytest.mark.integration` and excluded from default `pytest` runs to keep the unit suite fast and offline.
+- **What's out of scope** — actual prompt execution and model calls. The integration suite does not currently cover `prompt()` end-to-end; real LLM round-trips stay in dev-mode manual verification (`uv run fix-die-repeat --debug`).
 
 ## Failure modes and handling
 
@@ -143,7 +143,7 @@ Phase 0 is verified on macOS and Linux. Windows is unverified — pi itself runs
 | Malformed JSONL line | `json.loads` raises | Logged as warning via `self.logger`; read loop continues. Bridge shouldn't emit these, but we don't die on one. |
 | Pi goes silent mid-prompt | No event arrives within `FDR_PI_IDLE_TIMEOUT_S` (default 120s) | `prompt()` returns `(1, "", "…idle for more than Ns")`; `run_pi_safe` retries once. Any bridge event (tool call, text delta, thinking delta) resets the idle timer, so long but active turns don't trip it. |
 | Runaway event storm | `FDR_PI_HARD_TIMEOUT_S` (default 3600s) wall-clock cap | `prompt()` returns `(1, "", "…exceeded hard timeout")`; safety net for a bridge that keeps the idle timer alive but never emits `agent_end`. |
-| Credential missing | pi SDK error surfaced as `error` event during `init` | `PiBridge.__enter__` raises with actionable text: *"pi reports missing credentials for provider X. Run `pi` interactively once to complete auth."* |
+| Credential missing | pi SDK/provider auth error surfaced as an `error` event during `prompt()` / `session.prompt(...)` | `prompt()` returns a failure tuple with actionable error text, e.g. *"pi reports missing credentials for provider X. Run `pi` interactively once to complete auth."* |
 | Orphan bridge on fdr crash | pi bridge detects stdin EOF | `bridge.js` wires `process.stdin.on("close", () => process.exit(0))`; Python side sends `shutdown` in `__exit__`. Belt-and-suspenders. |
 
 ## Future evolution (informational; not Phase 0 scope)

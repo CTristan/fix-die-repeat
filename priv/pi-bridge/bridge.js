@@ -10,7 +10,8 @@
  *     {"type": "init", "model": "...", "provider": "...",
  *      "tools": ["read","bash","edit","write","grep","find","ls"],
  *      "workingDir": "/path", "thinking": "medium"}
- *     {"type": "prompt", "message": "...", "timeoutMs": 300000}
+ *     {"type": "prompt", "message": "...", "timeoutMs": 300000,
+ *      "tools": ["read","edit"], "provider": "...", "modelId": "..."}
  *     {"type": "set_model", "provider": "...", "modelId": "..."}
  *     {"type": "compact"}
  *     {"type": "abort"}
@@ -129,21 +130,33 @@ async function handlePrompt(cmd) {
     emitError("not_initialized", "init must be called before prompt");
     return;
   }
-  const { message, timeoutMs, tools: toolsOverride } = cmd;
+  const { message, timeoutMs, tools: toolsOverride, provider: providerOverride, modelId: modelOverride } = cmd;
   if (typeof message !== "string" || message.length === 0) {
     emitError("prompt_missing_message", "prompt requires a non-empty message");
     return;
   }
 
+  // Per-prompt model override mirrors legacy `pi -p --model X`: one-shot, does
+  // not mutate bridge config. When absent, fall back to init-time defaults.
+  if ((providerOverride && !modelOverride) || (!providerOverride && modelOverride)) {
+    emitError(
+      "prompt_model_override_partial",
+      "prompt requires both provider and modelId, or neither",
+    );
+    return;
+  }
+  const effectiveProvider = providerOverride ?? config.provider;
+  const effectiveModel = modelOverride ?? config.model;
+
   // Resolve model object if configured; otherwise let pi pick from settings.
   let modelObj;
-  if (config.provider && config.model) {
+  if (effectiveProvider && effectiveModel) {
     try {
-      modelObj = getModel(config.provider, config.model);
+      modelObj = getModel(effectiveProvider, effectiveModel);
     } catch (err) {
       emitError(
         "model_resolution_failed",
-        `getModel(${config.provider}, ${config.model}) failed: ${err?.message ?? String(err)}`,
+        `getModel(${effectiveProvider}, ${effectiveModel}) failed: ${err?.message ?? String(err)}`,
       );
       return;
     }

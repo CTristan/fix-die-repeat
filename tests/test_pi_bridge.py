@@ -22,6 +22,7 @@ from fix_die_repeat.pi_bridge import (
     PiBridge,
     PiBridgeConfig,
     PiBridgeError,
+    PromptOverrides,
     _AwaitParams,
 )
 
@@ -254,13 +255,71 @@ class TestPiBridgePrompt:
                 bridge_script=script,
                 logger=_logger(),
             ) as bridge:
-                bridge.prompt("hello", tools=["read", "grep"])
+                bridge.prompt("hello", overrides=PromptOverrides(tools=["read", "grep"]))
                 fake.stdout.close()
                 fake.stderr.close()
 
         lines = [json.loads(ln) for ln in fake.stdin.getvalue().strip().splitlines()]
         prompt_cmd = next(cmd for cmd in lines if cmd.get("type") == "prompt")
         assert prompt_cmd["tools"] == ["read", "grep"]
+
+    def test_prompt_forwards_model_override_as_one_shot(self, tmp_path: Path) -> None:
+        """Per-prompt provider/model is one-shot; bridge config is not mutated for later calls."""
+        script, fake = _prepare_bridge(
+            tmp_path,
+            [
+                {"type": "agent_end", "finalText": ""},
+                {"type": "agent_end", "finalText": ""},
+            ],
+        )
+        initial_config = PiBridgeConfig(working_dir=tmp_path)
+        with patch("fix_die_repeat.pi_bridge.subprocess.Popen", return_value=fake):
+            with PiBridge(
+                initial_config,
+                bridge_script=script,
+                logger=_logger(),
+            ) as bridge:
+                bridge.prompt(
+                    "hello",
+                    overrides=PromptOverrides(
+                        provider="anthropic",
+                        model="claude-sonnet-4-5",
+                    ),
+                )
+                bridge.prompt("follow-up")
+                fake.stdout.close()
+                fake.stderr.close()
+
+        prompts = [
+            json.loads(ln)
+            for ln in fake.stdin.getvalue().strip().splitlines()
+            if json.loads(ln).get("type") == "prompt"
+        ]
+        assert prompts[0]["provider"] == "anthropic"
+        assert prompts[0]["modelId"] == "claude-sonnet-4-5"
+        # Second prompt must not inherit the one-shot override.
+        assert "provider" not in prompts[1]
+        assert "modelId" not in prompts[1]
+        # Bridge config stays untouched — set_model would have, this must not.
+        assert initial_config.provider is None
+        assert initial_config.model is None
+
+    def test_prompt_rejects_partial_model_override(self, tmp_path: Path) -> None:
+        """Provider + model must be set together or both left unset."""
+        script, fake = _prepare_bridge(tmp_path, [])
+        with patch("fix_die_repeat.pi_bridge.subprocess.Popen", return_value=fake):
+            with PiBridge(
+                PiBridgeConfig(working_dir=tmp_path),
+                bridge_script=script,
+                logger=_logger(),
+            ) as bridge:
+                with pytest.raises(PiBridgeError, match="provider and model"):
+                    bridge.prompt(
+                        "hello",
+                        overrides=PromptOverrides(provider="anthropic", model=None),
+                    )
+                fake.stdout.close()
+                fake.stderr.close()
 
 
 class TestPiBridgeControlCommands:

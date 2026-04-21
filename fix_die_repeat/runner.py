@@ -33,6 +33,7 @@ from fix_die_repeat.pi_bridge import (
     PiBridge,
     PiBridgeConfig,
     PiBridgeError,
+    PromptOverrides,
 )
 from fix_die_repeat.prompts import render_prompt
 from fix_die_repeat.runner_artifacts import ArtifactManager
@@ -367,35 +368,45 @@ class PiRunner:
 
         full_message = _embed_attached_files(message, file_args, self.paths.project_root)
         try:
-            self._apply_model_override(model_override)
+            overrides = self._build_prompt_overrides(tools_override, model_override)
         except ValueError as err:
             self.logger.error("pi invocation rejected: %s", err)
             result = (1, "", str(err))
             self._log_pi_invocation(cmd_args, result)
             return result
 
-        result = self._invoke_bridge_prompt(full_message, tools_override)
+        result = self._invoke_bridge_prompt(full_message, overrides)
         self._log_pi_invocation(cmd_args, result)
         return result
 
-    def _apply_model_override(self, model_override: str | None) -> None:
-        """Swap bridge model when a ``--model X`` flag was present in argv.
+    def _build_prompt_overrides(
+        self,
+        tools_override: tuple[str, ...],
+        model_override: str | None,
+    ) -> PromptOverrides | None:
+        """Translate argv-parsed overrides into a :class:`PromptOverrides`.
 
-        Raises :class:`ValueError` if ``model_override`` is present but not a
-        valid ``provider/model-id`` pair; callers in :meth:`run_pi` translate
-        that into the legacy ``(1, "", msg)`` result tuple.
+        ``model_override`` uses per-prompt semantics (mirrors legacy
+        ``pi -p --model X``) — it applies to this single call only and does
+        not mutate the bridge's configured default. Raises :class:`ValueError`
+        if ``model_override`` is present but not a valid ``provider/model-id``
+        pair; callers in :meth:`run_pi` translate that into the legacy
+        ``(1, "", msg)`` result tuple.
         """
-        if model_override is None or self._bridge is None:
-            return
-        provider, model_id = self._split_settings_model(model_override)
-        if not (provider and model_id):
-            return
-        try:
-            self._bridge.set_model(provider, model_id)
-        except PiBridgeError as err:
-            self.logger.warning("pi-bridge set_model failed: %s", err)
+        tools = list(tools_override) if tools_override else None
+        provider: str | None = None
+        model_id: str | None = None
+        if model_override is not None:
+            provider, model_id = self._split_settings_model(model_override)
+        if tools is None and provider is None and model_id is None:
+            return None
+        return PromptOverrides(tools=tools, provider=provider, model=model_id)
 
-    def _invoke_bridge_prompt(self, message: str, tools: tuple[str, ...]) -> tuple[int, str, str]:
+    def _invoke_bridge_prompt(
+        self,
+        message: str,
+        overrides: PromptOverrides | None,
+    ) -> tuple[int, str, str]:
         """Send ``message`` to the bridge and return the legacy result tuple."""
         if self._bridge is None:
             self.logger.error(
@@ -408,7 +419,7 @@ class PiRunner:
                 message,
                 idle_timeout_s=self.settings.pi_prompt_idle_timeout_s,
                 hard_timeout_s=self.settings.pi_prompt_hard_timeout_s,
-                tools=list(tools) if tools else None,
+                overrides=overrides,
                 on_event=self._log_bridge_event,
             )
         except PiBridgeError as err:

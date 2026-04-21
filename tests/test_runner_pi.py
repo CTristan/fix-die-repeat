@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fix_die_repeat.config import Paths
-from fix_die_repeat.pi_bridge import PiBridge, PiBridgeError
+from fix_die_repeat.pi_bridge import PiBridge, PiBridgeError, PromptOverrides
 from fix_die_repeat.runner import PiRunner
 from fix_die_repeat.utils import get_git_revision_hash
 
@@ -63,7 +63,7 @@ class TestRunPi:
         runner.logger.error.assert_any_call("pi exited with code %s", 1)  # type: ignore[attr-defined]
 
     def test_run_pi_translates_tools_flag(self, tmp_path: Path) -> None:
-        """run_pi extracts --tools csv and forwards it to the bridge."""
+        """run_pi extracts --tools csv and forwards it as a per-prompt override."""
         runner, bridge = self._build_runner(tmp_path)
         bridge.prompt.return_value = (0, "", "")
 
@@ -71,7 +71,23 @@ class TestRunPi:
 
         bridge.prompt.assert_called_once()
         _args, kwargs = bridge.prompt.call_args
-        assert kwargs["tools"] == ["read", "grep", "ls"]
+        overrides = kwargs["overrides"]
+        assert isinstance(overrides, PromptOverrides)
+        assert overrides.tools == ["read", "grep", "ls"]
+
+    def test_run_pi_model_override_is_one_shot(self, tmp_path: Path) -> None:
+        """--model translates to a per-prompt override, not a sticky set_model call."""
+        runner, bridge = self._build_runner(tmp_path)
+        bridge.prompt.return_value = (0, "", "")
+
+        runner.run_pi("-p", "--model", "anthropic/claude-sonnet-4-5", "hello")
+
+        bridge.set_model.assert_not_called()
+        _args, kwargs = bridge.prompt.call_args
+        overrides = kwargs["overrides"]
+        assert isinstance(overrides, PromptOverrides)
+        assert overrides.provider == "anthropic"
+        assert overrides.model == "claude-sonnet-4-5"
 
     def test_run_pi_forwards_idle_and_hard_timeouts_from_settings(self, tmp_path: Path) -> None:
         """Settings' idle/hard timeouts are threaded through to PiBridge.prompt."""

@@ -132,6 +132,21 @@ class _AwaitDeadline:
         return f"pi-bridge {context} exceeded hard timeout ({hard:.1f}s)"
 
 
+@dataclass(frozen=True)
+class PromptOverrides:
+    """Per-prompt overrides of bridge init defaults.
+
+    ``tools`` swaps the tool set for a single turn. ``provider`` + ``model``
+    mirror the legacy ``pi -p --model X`` flag — they apply to that one
+    prompt only and do not mutate the bridge's config for subsequent prompts.
+    ``provider`` and ``model`` must be set together or both left unset.
+    """
+
+    tools: list[str] | None = None
+    provider: str | None = None
+    model: str | None = None
+
+
 @dataclass
 class PiBridgeConfig:
     """Configuration for one bridge session.
@@ -240,7 +255,7 @@ class PiBridge:
         *,
         idle_timeout_s: float | None = None,
         hard_timeout_s: float | None = None,
-        tools: list[str] | None = None,
+        overrides: PromptOverrides | None = None,
         on_event: Callable[[dict[str, object]], None] | None = None,
     ) -> tuple[int, str, str]:
         """Run one agent turn with ``message``.
@@ -255,7 +270,9 @@ class PiBridge:
             to the bridge as ``timeoutMs`` so a genuinely runaway agent session
             is cleaned up at its source, not just in Python.
 
-        Pass ``tools`` to override the init-time tool set for this turn only.
+        Pass ``overrides`` to swap init defaults for this turn only (tool set,
+        provider/model). Per-prompt overrides do not mutate the bridge's
+        configured defaults for later prompts — use :meth:`set_model` for that.
         Pass ``on_event`` to observe intermediate events (tool_execution_*,
         text_delta, thinking_delta) as they arrive — useful for progress UI.
         """
@@ -267,8 +284,20 @@ class PiBridge:
             "message": message,
             "timeoutMs": int(hard_timeout_s * 1000),
         }
-        if tools is not None:
-            command["tools"] = list(tools)
+        if overrides is not None:
+            if (overrides.provider is None) != (overrides.model is None):
+                msg = (
+                    "PromptOverrides requires provider and model to be set together "
+                    f"or both left unset (got provider={overrides.provider!r}, "
+                    f"model={overrides.model!r})."
+                )
+                raise PiBridgeError(msg)
+            if overrides.tools is not None:
+                command["tools"] = list(overrides.tools)
+            if overrides.provider is not None:
+                command["provider"] = overrides.provider
+            if overrides.model is not None:
+                command["modelId"] = overrides.model
         self._send(command)
         try:
             event = self._await_event(
