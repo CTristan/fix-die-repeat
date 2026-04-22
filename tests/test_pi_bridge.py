@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import math
 import subprocess
 import threading
 import time
@@ -566,3 +567,42 @@ class TestPiBridgePromptTimeoutPlumbing:
         prompt_cmd = next(cmd for cmd in lines if cmd.get("type") == "prompt")
         # Positive, nonzero milliseconds — coercion fell back to the default.
         assert prompt_cmd["timeoutMs"] > 0
+
+    @pytest.mark.parametrize(
+        "bad_timeout",
+        [math.inf, -math.inf, math.nan],
+        ids=["inf", "neg_inf", "nan"],
+    )
+    def test_prompt_coerces_non_finite_hard_timeout_to_default(
+        self, tmp_path: Path, bad_timeout: float
+    ) -> None:
+        """Non-finite hard_timeout_s values must fall back to the default.
+
+        ``int(math.inf * 1000)`` raises OverflowError, and a leaked NaN makes the
+        Node watchdog disagree with Python's idle deadline. Coerce at the
+        boundary so invalid env/config values can't crash the bridge client.
+        """
+        script, fake = _prepare_bridge(
+            tmp_path,
+            [{"type": "agent_end", "finalText": ""}],
+        )
+        with patch("fix_die_repeat.pi_bridge.subprocess.Popen", return_value=fake):
+            with PiBridge(
+                PiBridgeConfig(working_dir=tmp_path),
+                bridge_script=script,
+                logger=_logger(),
+            ) as bridge:
+                bridge.prompt(
+                    "hello",
+                    idle_timeout_s=120.0,
+                    hard_timeout_s=bad_timeout,
+                )
+                fake.stdout.close()
+                fake.stderr.close()
+
+        lines = [json.loads(ln) for ln in fake.stdin.getvalue().strip().splitlines()]
+        prompt_cmd = next(cmd for cmd in lines if cmd.get("type") == "prompt")
+        timeout_ms = prompt_cmd["timeoutMs"]
+        # Finite, positive milliseconds — coercion rejected the non-finite value.
+        assert isinstance(timeout_ms, int)
+        assert timeout_ms > 0

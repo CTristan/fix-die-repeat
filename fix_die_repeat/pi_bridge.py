@@ -56,7 +56,7 @@ def _coerce_positive_timeout(value: float | None, default: float) -> float:
         numeric = float(value)
     except (TypeError, ValueError):
         return default
-    if numeric <= 0.0 or math.isnan(numeric):
+    if numeric <= 0.0 or not math.isfinite(numeric):
         return default
     return numeric
 

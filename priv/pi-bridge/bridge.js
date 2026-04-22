@@ -263,6 +263,10 @@ async function handlePrompt(cmd) {
     clearTimeout(timer);
     unsubscribe();
     activeSession = null;
+    if (timedOut) {
+      emitError("timeout", `prompt exceeded ${timeout}ms`);
+      return;
+    }
     emitError("prompt_failed", err?.message ?? String(err));
   }
 }

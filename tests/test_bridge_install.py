@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 from fix_die_repeat.bridge_install import (
     INSTALL_MARKER,
     BridgeInstallError,
+    _check_node_version,
     _compute_install_hash,
     ensure_bridge_installed,
 )
@@ -210,6 +211,7 @@ class TestEnsureBridgeInstalledSeparateRuntime:
         fake_result = MagicMock(returncode=0, stdout="", stderr="")
         with (
             patch("fix_die_repeat.bridge_install.shutil.which", return_value="/usr/local/bin/node"),
+            patch("fix_die_repeat.bridge_install._check_node_version"),
             patch(
                 "fix_die_repeat.bridge_install.subprocess.run", return_value=fake_result
             ) as mock_run,
@@ -240,6 +242,7 @@ class TestEnsureBridgeInstalledSeparateRuntime:
         fake_result = MagicMock(returncode=0, stdout="", stderr="")
         with (
             patch("fix_die_repeat.bridge_install.shutil.which", return_value="/usr/local/bin/node"),
+            patch("fix_die_repeat.bridge_install._check_node_version"),
             patch(
                 "fix_die_repeat.bridge_install.subprocess.run", return_value=fake_result
             ) as mock_run,
@@ -277,3 +280,61 @@ class TestEnsureBridgeInstalledSeparateRuntime:
         # Stale lockfile removed; npm install (not npm ci) runs because there's no lockfile now.
         assert not stale_lockfile.exists()
         assert mock_run.call_args.args[0] == ["npm", "install"]
+
+
+class TestCheckNodeVersion:
+    """Covers the Node >=20 version check.
+
+    The bridge's ``package.json`` requires Node 20+; validating at install time
+    surfaces a clear upgrade message instead of letting ``npm ci`` or the
+    runtime fail with a less-actionable error.
+    """
+
+    def test_raises_when_node_is_too_old(self) -> None:
+        fake_result = MagicMock(returncode=0, stdout="v18.17.0\n", stderr="")
+        with patch("fix_die_repeat.bridge_install.subprocess.run", return_value=fake_result):
+            with pytest.raises(BridgeInstallError, match=r"requires Node\.js >=20"):
+                _check_node_version("/usr/local/bin/node", _logger())
+
+    def test_passes_when_node_meets_minimum(self) -> None:
+        fake_result = MagicMock(returncode=0, stdout="v20.11.0\n", stderr="")
+        with patch("fix_die_repeat.bridge_install.subprocess.run", return_value=fake_result):
+            _check_node_version("/usr/local/bin/node", _logger())
+
+    def test_passes_when_node_exceeds_minimum(self) -> None:
+        fake_result = MagicMock(returncode=0, stdout="v22.3.0\n", stderr="")
+        with patch("fix_die_repeat.bridge_install.subprocess.run", return_value=fake_result):
+            _check_node_version("/usr/local/bin/node", _logger())
+
+    def test_skips_gracefully_on_unparseable_output(self) -> None:
+        """Malformed ``node --version`` output falls through to npm/runtime errors.
+
+        We don't want to synthesize a misleading "too old" error when we can't
+        even read the version — npm and the runtime will surface the real issue.
+        """
+        fake_result = MagicMock(returncode=0, stdout="not-a-version\n", stderr="")
+        with patch("fix_die_repeat.bridge_install.subprocess.run", return_value=fake_result):
+            _check_node_version("/usr/local/bin/node", _logger())
+
+    def test_skips_gracefully_on_nonzero_exit(self) -> None:
+        fake_result = MagicMock(returncode=1, stdout="", stderr="some error")
+        with patch("fix_die_repeat.bridge_install.subprocess.run", return_value=fake_result):
+            _check_node_version("/usr/local/bin/node", _logger())
+
+    def test_skips_gracefully_on_invocation_failure(self) -> None:
+        with patch(
+            "fix_die_repeat.bridge_install.subprocess.run",
+            side_effect=OSError("node gone"),
+        ):
+            _check_node_version("/usr/local/bin/node", _logger())
+
+    def test_raises_on_too_old_from_ensure_bridge_installed(self, tmp_path: Path) -> None:
+        """``ensure_bridge_installed`` propagates the version-too-old error."""
+        bridge_dir = _make_bridge_dir(tmp_path)
+        fake_old_node = MagicMock(returncode=0, stdout="v18.17.0\n", stderr="")
+        with (
+            patch("fix_die_repeat.bridge_install.shutil.which", return_value="/usr/local/bin/node"),
+            patch("fix_die_repeat.bridge_install.subprocess.run", return_value=fake_old_node),
+        ):
+            with pytest.raises(BridgeInstallError, match=r"requires Node\.js >=20"):
+                ensure_bridge_installed(bridge_dir, bridge_dir, logger=_logger())

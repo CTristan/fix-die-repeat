@@ -27,6 +27,8 @@ if TYPE_CHECKING:
 INSTALL_MARKER = ".install-marker"
 _INSTALL_TIMEOUT_SECONDS = 600  # npm ci can be slow on cold caches
 _STAGED_FILES = ("bridge.js", "package.json", "package-lock.json")
+_MIN_NODE_MAJOR = 20  # matches package.json `engines.node` for the pi-bridge
+_NODE_VERSION_TIMEOUT_SECONDS = 10
 
 
 class BridgeInstallError(RuntimeError):
@@ -87,6 +89,51 @@ def _missing_dependency_error(tool: str) -> BridgeInstallError:
         "Install Node.js >=20 (via Homebrew, nvm, or https://nodejs.org) and re-run."
     )
     return BridgeInstallError(msg)
+
+
+def _check_node_version(node_path: str, logger: logging.Logger) -> None:
+    """Raise ``BridgeInstallError`` if Node at ``node_path`` is older than 20.
+
+    The bridge's ``package.json`` pins ``engines.node>=20``; on Node 18 the
+    install would fail later during ``npm ci`` or at runtime with a
+    less-actionable message. Failing fast here surfaces the real issue.
+
+    If ``node --version`` output can't be parsed (unexpected format, invocation
+    failure), log a debug note and proceed — letting npm and the runtime
+    surface their own errors rather than synthesizing a misleading one.
+    """
+    try:
+        result = subprocess.run(  # noqa: S603 — trusted node binary from shutil.which
+            [node_path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=_NODE_VERSION_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as err:
+        logger.debug("Could not invoke '%s --version': %s", node_path, err)
+        return
+    if result.returncode != 0:
+        logger.debug(
+            "'%s --version' exited %s; skipping version check",
+            node_path,
+            result.returncode,
+        )
+        return
+    version_str = result.stdout.strip().lstrip("v")
+    major_str, _, _ = version_str.partition(".")
+    try:
+        major = int(major_str)
+    except ValueError:
+        logger.debug("Could not parse Node version from %r; skipping version check", result.stdout)
+        return
+    if major < _MIN_NODE_MAJOR:
+        msg = (
+            f"fix-die-repeat requires Node.js >={_MIN_NODE_MAJOR} for the pi bridge; "
+            f"found Node.js {version_str}. "
+            "Upgrade Node (via Homebrew, nvm, or https://nodejs.org) and re-run."
+        )
+        raise BridgeInstallError(msg)
 
 
 def _stage_files(source_dir: Path, runtime_dir: Path) -> None:
@@ -152,9 +199,11 @@ def ensure_bridge_installed(
         )
         return runtime_bridge_script
 
-    if shutil.which("node") is None:
+    node_path = shutil.which("node")
+    if node_path is None:
         err_node = _missing_dependency_error("Node.js")
         raise err_node
+    _check_node_version(node_path, logger)
     if shutil.which("npm") is None:
         err_npm = _missing_dependency_error("npm")
         raise err_npm
