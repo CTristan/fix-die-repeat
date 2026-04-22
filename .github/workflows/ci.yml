@@ -31,9 +31,5 @@ jobs:
       - name: Install package with dev dependencies
         run: uv pip install -e ".[dev]"
 
-      - name: Install pi-bridge Node dependencies
-        working-directory: priv/pi-bridge
-        run: npm ci
-
       - name: Run CI script
         run: ./scripts/ci.sh --check-only

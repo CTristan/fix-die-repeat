@@ -504,6 +504,105 @@ class TestPiBridgeIdleTimeout:
         assert seen == ["tool_execution_start", "tool_execution_end"]
 
 
+class TestPiBridgeErrorRecovery:
+    """Error paths abort the in-flight turn and drain stale events.
+
+    Regression for a correlation bug: bridge events carry no request ID, so
+    a late ``agent_end``/``error``/``ready`` from a failed prompt / set_model
+    / compact call would otherwise be consumed as the terminal event for the
+    next call. Every public method that awaits a bridge response must reset
+    state on its error path.
+    """
+
+    def _bare_bridge(self, tmp_path: Path) -> PiBridge:
+        """Build a PiBridge without spawning a subprocess.
+
+        Error-recovery tests drive the event queue directly, so they don't
+        need the full ``FakePopen`` lifecycle. ``_send`` is patched out in
+        each test to avoid the ``self._proc is None`` guard.
+        """
+        bridge_script = tmp_path / "bridge.js"
+        bridge_script.write_text("// fake\n")
+        return PiBridge(
+            PiBridgeConfig(working_dir=tmp_path),
+            bridge_script=bridge_script,
+            logger=_logger(),
+        )
+
+    def test_reset_after_error_drains_events_and_aborts(self, tmp_path: Path) -> None:
+        """The shared helper both discards queued events and signals abort."""
+        bridge = self._bare_bridge(tmp_path)
+        bridge._events.put({"type": "agent_end", "finalText": "stale"})
+        bridge._events.put({"type": "ready"})
+        bridge._events.put({"type": "text_delta", "delta": "late"})
+
+        with patch.object(bridge, "abort") as mock_abort:
+            bridge._reset_after_error()
+
+        mock_abort.assert_called_once()
+        assert bridge._events.empty()
+
+    def test_prompt_error_invokes_reset(self, tmp_path: Path) -> None:
+        """On ``PiBridgeError`` the prompt() error path must call the reset helper."""
+        bridge = self._bare_bridge(tmp_path)
+        bridge._events.put({"type": "error", "reason": "boom", "detail": "x"})
+
+        with (
+            patch.object(bridge, "_send"),
+            patch.object(bridge, "_reset_after_error") as mock_reset,
+        ):
+            rc, _out, _err = bridge.prompt("hello")
+
+        assert rc == 1
+        mock_reset.assert_called_once()
+
+    def test_set_model_error_invokes_reset_and_raises(self, tmp_path: Path) -> None:
+        """set_model() failure resets the bridge before re-raising."""
+        bridge = self._bare_bridge(tmp_path)
+        bridge._events.put({"type": "error", "reason": "boom", "detail": "x"})
+
+        with (
+            patch.object(bridge, "_send"),
+            patch.object(bridge, "_reset_after_error") as mock_reset,
+        ):
+            with pytest.raises(PiBridgeError):
+                bridge.set_model("anthropic", "claude-sonnet-4-5")
+
+        mock_reset.assert_called_once()
+        # Config must not advance when the underlying call failed.
+        assert bridge._config.provider is None
+        assert bridge._config.model is None
+
+    def test_compact_error_invokes_reset_and_raises(self, tmp_path: Path) -> None:
+        """compact() failure resets the bridge before re-raising."""
+        bridge = self._bare_bridge(tmp_path)
+        bridge._events.put({"type": "error", "reason": "boom", "detail": "x"})
+
+        with (
+            patch.object(bridge, "_send"),
+            patch.object(bridge, "_reset_after_error") as mock_reset,
+        ):
+            with pytest.raises(PiBridgeError):
+                bridge.compact()
+
+        mock_reset.assert_called_once()
+
+    def test_reset_not_called_on_success(self, tmp_path: Path) -> None:
+        """Success paths must not run the reset helper (it would needlessly abort)."""
+        bridge = self._bare_bridge(tmp_path)
+        bridge._events.put({"type": "ready"})
+
+        with (
+            patch.object(bridge, "_send"),
+            patch.object(bridge, "_reset_after_error") as mock_reset,
+        ):
+            bridge.set_model("anthropic", "claude-sonnet-4-5")
+
+        mock_reset.assert_not_called()
+        assert bridge._config.provider == "anthropic"
+        assert bridge._config.model == "claude-sonnet-4-5"
+
+
 class TestPiBridgePromptTimeoutPlumbing:
     """Prompt-level timeout parameters travel to the right places."""
 

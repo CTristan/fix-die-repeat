@@ -312,6 +312,7 @@ class PiBridge:
                 )
             )
         except PiBridgeError as err:
+            self._reset_after_error()
             return (1, "", self._drain_stderr() + f"\n{err}")
 
         final_text = str(event.get("finalText", ""))
@@ -320,14 +321,18 @@ class PiBridge:
     def set_model(self, provider: str, model_id: str) -> None:
         """Swap the model used by subsequent prompts."""
         self._send({"type": "set_model", "provider": provider, "modelId": model_id})
-        self._await_event(
-            _AwaitParams(
-                expected_types=frozenset({"ready"}),
-                error_types=frozenset({"error"}),
-                idle_timeout_s=DEFAULT_INIT_TIMEOUT_S,
-                context="set_model",
+        try:
+            self._await_event(
+                _AwaitParams(
+                    expected_types=frozenset({"ready"}),
+                    error_types=frozenset({"error"}),
+                    idle_timeout_s=DEFAULT_INIT_TIMEOUT_S,
+                    context="set_model",
+                )
             )
-        )
+        except PiBridgeError:
+            self._reset_after_error()
+            raise
         self._config.provider = provider
         self._config.model = model_id
 
@@ -339,14 +344,18 @@ class PiBridge:
         keeps a stable API to call.
         """
         self._send({"type": "compact"})
-        self._await_event(
-            _AwaitParams(
-                expected_types=frozenset({"ready"}),
-                error_types=frozenset({"error"}),
-                idle_timeout_s=DEFAULT_INIT_TIMEOUT_S,
-                context="compact",
+        try:
+            self._await_event(
+                _AwaitParams(
+                    expected_types=frozenset({"ready"}),
+                    error_types=frozenset({"error"}),
+                    idle_timeout_s=DEFAULT_INIT_TIMEOUT_S,
+                    context="compact",
+                )
             )
-        )
+        except PiBridgeError:
+            self._reset_after_error()
+            raise
 
     def abort(self) -> None:
         """Signal the bridge to cancel the current prompt, if any.
@@ -524,6 +533,26 @@ class PiBridge:
             out = "\n".join(self._stderr_buf)
             self._stderr_buf.clear()
         return out
+
+    # --- error recovery ---
+
+    def _reset_after_error(self) -> None:
+        """Cancel any in-flight bridge turn and discard queued events.
+
+        Called from the error path of every public method that awaits a
+        bridge response (prompt, set_model, compact). The bridge protocol
+        does not correlate events to a request ID, so a late ``ready`` /
+        ``agent_end`` / ``error`` from the failed turn would otherwise be
+        consumed as the terminal event for the next call. Aborting signals
+        Node to stop producing more events; draining the Python-side queue
+        discards any already queued.
+        """
+        self.abort()
+        while True:
+            try:
+                self._events.get_nowait()
+            except queue.Empty:
+                return
 
 
 def _python_version_tuple() -> tuple[int, ...]:
