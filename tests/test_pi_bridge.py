@@ -49,11 +49,13 @@ class FakePopen:
         return self.returncode
 
     def wait(self, timeout: float | None = None) -> int:
-        """Record the wait timeout and mark the process finished."""
+        """Record the wait timeout, mark the process finished, and signal EOF."""
         if timeout is not None:
             self.waited_timeouts.append(timeout)
         if self.returncode is None:
             self.returncode = 0
+            self.stdout.close()
+            self.stderr.close()
         return self.returncode
 
     def kill(self) -> None:

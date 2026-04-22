@@ -16,11 +16,29 @@ from pathlib import Path
 
 import pytest
 
+from fix_die_repeat.bridge_install import BridgeInstallError, _check_node_version
 from fix_die_repeat.pi_bridge import PiBridge, PiBridgeConfig
+
+
+def _node_skip_reason() -> str | None:
+    node = shutil.which("node")
+    if node is None:
+        return "node not on PATH"
+    try:
+        _check_node_version(node, logging.getLogger("test-bridge-integration.node-check"))
+    except BridgeInstallError as err:
+        return str(err)
+    return None
+
+
+_NODE_SKIP_REASON = _node_skip_reason()
 
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.skipif(shutil.which("node") is None, reason="node not on PATH"),
+    pytest.mark.skipif(
+        _NODE_SKIP_REASON is not None,
+        reason=_NODE_SKIP_REASON or "node environment unavailable",
+    ),
 ]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

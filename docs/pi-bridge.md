@@ -113,9 +113,9 @@ This pinning philosophy matches Containment Loop (they're on `0.64.0`, deliberat
 The bridge's `node_modules/` is **not** bundled in the Python wheel. The wheel ships only `bridge.js` + `package.json` + `package-lock.json` under `priv/pi-bridge/` — that's the **source** directory. When the runner enters its context manager, `PiRunner.__enter__` calls `ensure_bridge_installed()`, which:
 
 1. Resolves the **runtime** directory (`<FDR_HOME>/bridge/`, shared across all repos) — this is where `node_modules/` gets installed and where Node will launch from. Keeping runtime separate from source matters because `priv/pi-bridge/` inside an installed wheel can live in a read-only site-packages tree; writing `node_modules/` there would break first-run for pip-installed users.
-2. Checks for `<runtime>/node_modules/.install-marker` (a sentinel file with the package version). If present and matches the expected version, returns immediately.
+2. Checks for `<runtime>/node_modules/.install-marker` (a sentinel file containing a SHA-256 hash of the staged shipped files). If present and matches the expected install hash, returns immediately.
 3. If missing: copies `bridge.js` + `package.json` + `package-lock.json` from the source directory into the runtime directory, then runs `npm ci` there. Requires `node` and `npm` on PATH. `npm ci` uses the checked-in lockfile for deterministic resolution; first-run cost is the npm download (~seconds on a warm network).
-4. On success, writes `.install-marker` with the current package version. Subsequent runs skip the install.
+4. On success, writes `.install-marker` with that install hash. Subsequent runs skip the install only while the shipped files still hash the same way, so any change to `bridge.js`, `package.json`, or `package-lock.json` forces a reinstall even without a package-version bump.
 5. On failure — `node` or `npm` missing — raises `BridgeInstallError` with actionable text: *"fix-die-repeat requires Node.js ≥20 for the pi bridge. Install Node.js (via Homebrew, nvm, or https://nodejs.org) and re-run."*
 
 The marker-file approach keeps the wheel small, avoids bundling platform-specific binaries (pi has native dependencies), and makes the install step legible (one `npm ci`, documented in README).
