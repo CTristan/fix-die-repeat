@@ -172,6 +172,34 @@ class TestPiBridgeLifecycle:
         with pytest.raises(PiBridgeError, match="not found"), bridge:
             pass
 
+    def test_enter_shuts_down_when_init_handshake_fails(self, tmp_path: Path) -> None:
+        """Failed init must reap the subprocess — __exit__ is not called if __enter__ raises.
+
+        Regression: ``PiBridge.__enter__`` used to spawn the subprocess and then
+        send init / await ready without any cleanup on error. If the handshake
+        raised, the Node process and both reader threads would leak because the
+        context-manager contract says ``__exit__`` is only invoked after a
+        successful ``__enter__``.
+        """
+        bridge_script = tmp_path / "bridge.js"
+        bridge_script.write_text("// fake\n")
+        # Stream a single 'error' event so _await_event raises during init.
+        fake = FakePopen([_event({"type": "error", "reason": "boom", "detail": "x"})])
+
+        with patch("fix_die_repeat.pi_bridge.subprocess.Popen", return_value=fake):
+            bridge = PiBridge(
+                PiBridgeConfig(working_dir=tmp_path),
+                bridge_script=bridge_script,
+                logger=_logger(),
+            )
+            with pytest.raises(PiBridgeError, match="init failed"):
+                bridge.__enter__()
+
+        # _shutdown() must have sent the shutdown command and waited on the proc.
+        stdin_content = fake.stdin.getvalue()
+        assert '"type": "shutdown"' in stdin_content
+        assert fake.returncode is not None, "subprocess must be reaped on init failure"
+
     def test_exit_kills_unresponsive_bridge(self, tmp_path: Path) -> None:
         """Bridge.__exit__ falls back to kill() when wait() times out."""
         bridge_script = tmp_path / "bridge.js"
@@ -603,6 +631,96 @@ class TestPiBridgeErrorRecovery:
         mock_reset.assert_not_called()
         assert bridge._config.provider == "anthropic"
         assert bridge._config.model == "claude-sonnet-4-5"
+
+
+class TestPiBridgeReentrancyGuard:
+    """Enforce the documented ``one prompt at a time`` contract.
+
+    Bridge events carry no request ID, so a second command arriving while the
+    first is still in flight would consume the first call's terminal event and
+    silently return the wrong result. The in-flight lock turns that silent
+    correlation bug into a loud ``PiBridgeError``.
+    """
+
+    def _bare_bridge(self, tmp_path: Path) -> PiBridge:
+        bridge_script = tmp_path / "bridge.js"
+        bridge_script.write_text("// fake\n")
+        return PiBridge(
+            PiBridgeConfig(working_dir=tmp_path),
+            bridge_script=bridge_script,
+            logger=_logger(),
+        )
+
+    def test_concurrent_prompt_raises(self, tmp_path: Path) -> None:
+        """A second prompt() while the first is still running must fail fast."""
+        bridge = self._bare_bridge(tmp_path)
+        bridge._in_flight_lock.acquire()
+        try:
+            with patch.object(bridge, "_send"), pytest.raises(PiBridgeError, match="in flight"):
+                bridge.prompt("second call")
+        finally:
+            bridge._in_flight_lock.release()
+
+    def test_concurrent_set_model_raises(self, tmp_path: Path) -> None:
+        """A second set_model() while another command is in flight raises."""
+        bridge = self._bare_bridge(tmp_path)
+        bridge._in_flight_lock.acquire()
+        try:
+            with patch.object(bridge, "_send"), pytest.raises(PiBridgeError, match="in flight"):
+                bridge.set_model("anthropic", "claude-sonnet-4-5")
+        finally:
+            bridge._in_flight_lock.release()
+
+    def test_concurrent_compact_raises(self, tmp_path: Path) -> None:
+        """A second compact() while another command is in flight raises."""
+        bridge = self._bare_bridge(tmp_path)
+        bridge._in_flight_lock.acquire()
+        try:
+            with patch.object(bridge, "_send"), pytest.raises(PiBridgeError, match="in flight"):
+                bridge.compact()
+        finally:
+            bridge._in_flight_lock.release()
+
+    def test_lock_released_after_successful_prompt(self, tmp_path: Path) -> None:
+        """After a prompt completes, the next prompt must be able to acquire the lock."""
+        script, fake = _prepare_bridge(
+            tmp_path,
+            [
+                {"type": "agent_end", "finalText": "first"},
+                {"type": "agent_end", "finalText": "second"},
+            ],
+        )
+        with patch("fix_die_repeat.pi_bridge.subprocess.Popen", return_value=fake):
+            with PiBridge(
+                PiBridgeConfig(working_dir=tmp_path),
+                bridge_script=script,
+                logger=_logger(),
+            ) as bridge:
+                rc1, out1, _ = bridge.prompt("one")
+                rc2, out2, _ = bridge.prompt("two")
+                fake.stdout.close()
+                fake.stderr.close()
+
+        assert (rc1, out1) == (0, "first")
+        assert (rc2, out2) == (0, "second")
+
+    def test_lock_released_after_errored_prompt(self, tmp_path: Path) -> None:
+        """Error paths must still release the lock so the bridge stays usable.
+
+        The ``with self._single_in_flight(...)`` contextmanager must release
+        whether the underlying call returns an error tuple or raises — otherwise
+        the first error would permanently jam the bridge.
+        """
+        bridge = self._bare_bridge(tmp_path)
+        bridge._events.put({"type": "error", "reason": "boom", "detail": "x"})
+
+        with patch.object(bridge, "_send"):
+            rc, _out, _err = bridge.prompt("errors out")
+
+        assert rc == 1
+        # Lock must be free now — a fresh acquire() must succeed.
+        assert bridge._in_flight_lock.acquire(blocking=False)
+        bridge._in_flight_lock.release()
 
 
 class TestPiBridgePromptTimeoutPlumbing:

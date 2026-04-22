@@ -320,6 +320,13 @@ const rl = createInterface({
   crlfDelay: Infinity,
 });
 
+// Serialize command handling: chain each dispatch onto the previous one so a
+// second command (e.g., a `prompt` arriving while the first is still running)
+// cannot interleave and corrupt shared state like `activeSession` or `config`.
+// The trailing `.catch` keeps the chain alive if a dispatch ever rejects — the
+// Python side already enforces single-in-flight, so this is belt-and-suspenders.
+let commandQueue = Promise.resolve();
+
 rl.on("line", (line) => {
   const trimmed = line.trim();
   if (!trimmed) return;
@@ -330,7 +337,14 @@ rl.on("line", (line) => {
     emitError("malformed_command", `Not JSON: ${trimmed.slice(0, 200)}`);
     return;
   }
-  void dispatch(cmd);
+  commandQueue = commandQueue
+    .then(() => dispatch(cmd))
+    .catch((err) => {
+      emitError(
+        "unhandled_rejection",
+        err?.stack ?? err?.message ?? String(err),
+      );
+    });
 });
 
 rl.on("close", () => {

@@ -303,8 +303,13 @@ class PiRunner:
             working_dir=self.paths.project_root,
             tools=("read", "bash", "edit", "write", "grep", "find", "ls"),
         )
-        self._bridge = PiBridge(config, bridge_script=bridge_script, logger=self.logger)
-        self._bridge.__enter__()
+        bridge = PiBridge(config, bridge_script=bridge_script, logger=self.logger)
+        # Only publish self._bridge after a successful __enter__. Otherwise a
+        # failed init would leave the guard in _start_bridge (``if self._bridge
+        # is not None: return``) pointing at a broken bridge, silently skipping
+        # every future restart attempt.
+        bridge.__enter__()
+        self._bridge = bridge
 
     def _stop_bridge(self) -> None:
         if self._bridge is None:

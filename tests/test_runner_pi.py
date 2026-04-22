@@ -317,6 +317,50 @@ class TestApplyModelOverrideErrorHandling:
         assert "provider/model-id" in stderr
         bridge.prompt.assert_not_called()
 
+    def test_start_bridge_clears_reference_when_enter_fails(self, tmp_path: Path) -> None:
+        """A failed __enter__ must leave self._bridge unset so retries can re-attempt startup.
+
+        Regression: ``_start_bridge`` previously assigned ``self._bridge = PiBridge(...)``
+        *before* calling ``__enter__``. If init failed (timeout / init error), the
+        instance stayed attached, and the early-return guard at the top of
+        ``_start_bridge`` (``if self._bridge is not None: return``) would silently
+        skip every future restart attempt — poisoning the runner for its lifetime.
+        """
+        settings = MagicMock()
+        settings.model = None
+        paths = MagicMock()
+        paths.project_root = tmp_path
+        paths.bridge_source_dir = tmp_path / "bridge-src"
+        paths.bridge_runtime_dir = tmp_path / "bridge-runtime"
+
+        runner = PiRunner.__new__(PiRunner)
+        runner.settings = settings
+        runner.paths = paths
+        runner.logger = MagicMock()
+        runner._bridge = None
+
+        enter_error_msg = "init handshake failed"
+
+        class _FailingBridge:
+            def __init__(self, *_args: object, **_kwargs: object) -> None: ...
+
+            def __enter__(self) -> object:
+                raise PiBridgeError(enter_error_msg)
+
+            def __exit__(self, *_exc: object) -> None: ...
+
+        with (
+            patch(
+                "fix_die_repeat.runner.ensure_bridge_installed",
+                return_value=tmp_path / "bridge.js",
+            ),
+            patch("fix_die_repeat.runner.PiBridge", _FailingBridge),
+            pytest.raises(PiBridgeError, match="init handshake failed"),
+        ):
+            runner._start_bridge()
+
+        assert runner._bridge is None
+
     def test_start_bridge_translates_invalid_model_to_bridge_error(self, tmp_path: Path) -> None:
         """Settings with a bare model id must surface a typed bridge error, not ValueError.
 

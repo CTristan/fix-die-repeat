@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Self
 
 if TYPE_CHECKING:
     import logging
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
     from types import TracebackType
 
 # Idle timeout: a pi turn that emits no events for this long is considered hung.
@@ -216,21 +216,34 @@ class PiBridge:
         self._stderr_lock = threading.Lock()
         self._stdout_thread: threading.Thread | None = None
         self._stderr_thread: threading.Thread | None = None
+        # Enforces the documented "one prompt at a time" contract. Commands
+        # share a single event queue and stderr buffer; a second concurrent
+        # call would consume the first call's terminal event. A non-blocking
+        # acquire turns that silent corruption into a loud PiBridgeError.
+        self._in_flight_lock = threading.Lock()
 
     # --- Context manager ---
 
     def __enter__(self) -> Self:
         """Spawn the bridge subprocess and wait for the ``ready`` event."""
         self._spawn()
-        self._send(self._config.to_init_command())
-        self._await_event(
-            _AwaitParams(
-                expected_types=frozenset({"ready"}),
-                error_types=frozenset({"error"}),
-                idle_timeout_s=DEFAULT_INIT_TIMEOUT_S,
-                context="init",
+        # Context-manager contract: if __enter__ raises, __exit__ is NOT called,
+        # so the handshake must own its own cleanup. Without this, a failed
+        # to_init_command/_send/_await_event would orphan the Node subprocess
+        # and both reader threads.
+        try:
+            self._send(self._config.to_init_command())
+            self._await_event(
+                _AwaitParams(
+                    expected_types=frozenset({"ready"}),
+                    error_types=frozenset({"error"}),
+                    idle_timeout_s=DEFAULT_INIT_TIMEOUT_S,
+                    context="init",
+                )
             )
-        )
+        except BaseException:
+            self._shutdown()
+            raise
         self._logger.debug(
             "pi-bridge initialized (provider=%s model=%s)",
             self._config.provider,
@@ -246,6 +259,20 @@ class PiBridge:
     ) -> None:
         """Gracefully stop the bridge subprocess, killing on timeout if needed."""
         self._shutdown()
+
+    @contextlib.contextmanager
+    def _single_in_flight(self, operation: str) -> Iterator[None]:
+        """Fail fast if a second command starts before the first completes."""
+        if not self._in_flight_lock.acquire(blocking=False):
+            msg = (
+                f"pi-bridge {operation} called while another command is in flight "
+                "(PiBridge does not support re-entrancy; serialize calls in the caller)"
+            )
+            raise PiBridgeError(msg)
+        try:
+            yield
+        finally:
+            self._in_flight_lock.release()
 
     # --- Public command API ---
 
@@ -276,65 +303,67 @@ class PiBridge:
         Pass ``on_event`` to observe intermediate events (tool_execution_*,
         text_delta, thinking_delta) as they arrive — useful for progress UI.
         """
-        idle_timeout_s = _coerce_positive_timeout(idle_timeout_s, DEFAULT_IDLE_TIMEOUT_S)
-        hard_timeout_s = _coerce_positive_timeout(hard_timeout_s, DEFAULT_HARD_TIMEOUT_S)
-        self._reset_stderr_capture()
-        command: dict[str, object] = {
-            "type": "prompt",
-            "message": message,
-            "timeoutMs": int(hard_timeout_s * 1000),
-        }
-        if overrides is not None:
-            if (overrides.provider is None) != (overrides.model is None):
-                msg = (
-                    "PromptOverrides requires provider and model to be set together "
-                    f"or both left unset (got provider={overrides.provider!r}, "
-                    f"model={overrides.model!r})."
+        with self._single_in_flight("prompt"):
+            idle_timeout_s = _coerce_positive_timeout(idle_timeout_s, DEFAULT_IDLE_TIMEOUT_S)
+            hard_timeout_s = _coerce_positive_timeout(hard_timeout_s, DEFAULT_HARD_TIMEOUT_S)
+            self._reset_stderr_capture()
+            command: dict[str, object] = {
+                "type": "prompt",
+                "message": message,
+                "timeoutMs": int(hard_timeout_s * 1000),
+            }
+            if overrides is not None:
+                if (overrides.provider is None) != (overrides.model is None):
+                    msg = (
+                        "PromptOverrides requires provider and model to be set together "
+                        f"or both left unset (got provider={overrides.provider!r}, "
+                        f"model={overrides.model!r})."
+                    )
+                    raise PiBridgeError(msg)
+                if overrides.tools is not None:
+                    command["tools"] = list(overrides.tools)
+                if overrides.provider is not None:
+                    command["provider"] = overrides.provider
+                if overrides.model is not None:
+                    command["modelId"] = overrides.model
+            self._send(command)
+            try:
+                event = self._await_event(
+                    _AwaitParams(
+                        expected_types=frozenset({"agent_end"}),
+                        error_types=frozenset({"error"}),
+                        idle_timeout_s=idle_timeout_s,
+                        hard_timeout_s=hard_timeout_s + 10.0,
+                        context="prompt",
+                        drain_intermediate=True,
+                        on_event=on_event,
+                    )
                 )
-                raise PiBridgeError(msg)
-            if overrides.tools is not None:
-                command["tools"] = list(overrides.tools)
-            if overrides.provider is not None:
-                command["provider"] = overrides.provider
-            if overrides.model is not None:
-                command["modelId"] = overrides.model
-        self._send(command)
-        try:
-            event = self._await_event(
-                _AwaitParams(
-                    expected_types=frozenset({"agent_end"}),
-                    error_types=frozenset({"error"}),
-                    idle_timeout_s=idle_timeout_s,
-                    hard_timeout_s=hard_timeout_s + 10.0,
-                    context="prompt",
-                    drain_intermediate=True,
-                    on_event=on_event,
-                )
-            )
-        except PiBridgeError as err:
-            self._reset_after_error()
-            return (1, "", self._drain_stderr() + f"\n{err}")
+            except PiBridgeError as err:
+                self._reset_after_error()
+                return (1, "", self._drain_stderr() + f"\n{err}")
 
-        final_text = str(event.get("finalText", ""))
-        return (0, final_text, self._drain_stderr())
+            final_text = str(event.get("finalText", ""))
+            return (0, final_text, self._drain_stderr())
 
     def set_model(self, provider: str, model_id: str) -> None:
         """Swap the model used by subsequent prompts."""
-        self._send({"type": "set_model", "provider": provider, "modelId": model_id})
-        try:
-            self._await_event(
-                _AwaitParams(
-                    expected_types=frozenset({"ready"}),
-                    error_types=frozenset({"error"}),
-                    idle_timeout_s=DEFAULT_INIT_TIMEOUT_S,
-                    context="set_model",
+        with self._single_in_flight("set_model"):
+            self._send({"type": "set_model", "provider": provider, "modelId": model_id})
+            try:
+                self._await_event(
+                    _AwaitParams(
+                        expected_types=frozenset({"ready"}),
+                        error_types=frozenset({"error"}),
+                        idle_timeout_s=DEFAULT_INIT_TIMEOUT_S,
+                        context="set_model",
+                    )
                 )
-            )
-        except PiBridgeError:
-            self._reset_after_error()
-            raise
-        self._config.provider = provider
-        self._config.model = model_id
+            except PiBridgeError:
+                self._reset_after_error()
+                raise
+            self._config.provider = provider
+            self._config.model = model_id
 
     def compact(self) -> None:
         """Request emergency compaction.
@@ -343,19 +372,20 @@ class PiBridge:
         side, but the command is preserved so ``PiRunner.emergency_compact``
         keeps a stable API to call.
         """
-        self._send({"type": "compact"})
-        try:
-            self._await_event(
-                _AwaitParams(
-                    expected_types=frozenset({"ready"}),
-                    error_types=frozenset({"error"}),
-                    idle_timeout_s=DEFAULT_INIT_TIMEOUT_S,
-                    context="compact",
+        with self._single_in_flight("compact"):
+            self._send({"type": "compact"})
+            try:
+                self._await_event(
+                    _AwaitParams(
+                        expected_types=frozenset({"ready"}),
+                        error_types=frozenset({"error"}),
+                        idle_timeout_s=DEFAULT_INIT_TIMEOUT_S,
+                        context="compact",
+                    )
                 )
-            )
-        except PiBridgeError:
-            self._reset_after_error()
-            raise
+            except PiBridgeError:
+                self._reset_after_error()
+                raise
 
     def abort(self) -> None:
         """Signal the bridge to cancel the current prompt, if any.
