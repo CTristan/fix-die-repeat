@@ -30,6 +30,19 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# Include pi-bridge JavaScript sidecar (bridge.js + package.json + lockfile)
+# in the installed wheel so the runtime can find it next to fix_die_repeat/.
+# node_modules/ is NOT bundled — ensure_bridge_installed() runs `npm ci` on
+# first use.
+[tool.hatch.build.targets.wheel]
+packages = ["fix_die_repeat"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"priv/pi-bridge/bridge.js" = "priv/pi-bridge/bridge.js"
+"priv/pi-bridge/package.json" = "priv/pi-bridge/package.json"
+"priv/pi-bridge/package-lock.json" = "priv/pi-bridge/package-lock.json"
+"priv/pi-bridge/.gitignore" = "priv/pi-bridge/.gitignore"
+
 [tool.ruff]
 target-version = "py312"
 line-length = 100
@@ -51,6 +64,9 @@ extend-exclude = ["*.j2"]
     "S101",  # Pytest idioms rely on assert statements; replacing them reduces failure introspection quality.
     "S603",  # Test subprocess calls use only trusted inputs (hardcoded literals and system-resolved paths from shutil.which), not untrusted user input.
     "SIM117",  # Nested with statements in tests make the mock context manager relationships clearer than combined with statements.
+    "SLF001",  # Tests intentionally exercise internal state (mocked attributes, private helpers) to verify behavior at module boundaries; this is standard pytest practice and preferable to exposing these paths on the public API purely for testability.
+    "D102",  # Test methods self-document through their descriptive name (test_<what>_<expected>) plus assertion content; adding a separate docstring duplicates information without adding value.
+    "D107",  # Test helpers/fakes rarely benefit from an __init__ docstring — the parameter names and class-level docstring already describe the shape.
 ]
 
 [tool.ruff.lint.isort]
@@ -68,4 +84,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "--cov=fix_die_repeat --cov-report=term-missing --cov-report=xml --cov-fail-under=80"
+addopts = "--cov=fix_die_repeat --cov-report=term-missing --cov-report=xml --cov-fail-under=80 -m 'not integration'"
+markers = [
+    "integration: end-to-end tests that require external runtimes (node, etc.); run with `-m integration`",
+]

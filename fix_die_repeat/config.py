@@ -158,6 +158,23 @@ class Settings(BaseSettings):
         description="Minimum delay between sequential pi invocations",
     )
 
+    # Bridge prompt timeouts. The bridge surfaces every pi event (tool calls,
+    # text deltas) so the Python side can tell "working" apart from "hung"; the
+    # idle timeout fires only on true silence, and the hard cap bounds runaway
+    # event storms. Override either via FDR_PI_IDLE_TIMEOUT_S /
+    # FDR_PI_HARD_TIMEOUT_S for hostile networks or extreme-scale reviews.
+    pi_prompt_idle_timeout_s: float = pyd.Field(
+        default=120.0,
+        alias="FDR_PI_IDLE_TIMEOUT_S",
+        description="Fail a pi prompt if no bridge event arrives for this long",
+    )
+
+    pi_prompt_hard_timeout_s: float = pyd.Field(
+        default=3600.0,
+        alias="FDR_PI_HARD_TIMEOUT_S",
+        description="Absolute wall-clock cap on a single pi prompt (safety net)",
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_prefix="FDR_",
@@ -355,6 +372,30 @@ class Paths:
         self.run_timestamps_file = self.fdr_dir / "run_timestamps.md"
         self.introspection_data_file = self.fdr_dir / ".introspection_data.yaml"
         self.introspection_result_file = self.fdr_dir / ".introspection_result.yaml"
+
+        # Pi-bridge has two related paths:
+        #
+        # * ``bridge_source_dir`` — where the shipped files (bridge.js,
+        #   package.json, package-lock.json) live. Defaults to the wheel's
+        #   ``priv/pi-bridge/`` directory; ``FDR_BRIDGE_DIR`` overrides both
+        #   source and runtime for dev checkouts.
+        # * ``bridge_runtime_dir`` — where ``node_modules/`` gets installed and
+        #   where Node actually launches the bridge. Must be writable. Defaults
+        #   to a per-FDR-install cache under ``_central_root() / "bridge"`` so
+        #   installs don't try to write into a potentially read-only
+        #   site-packages directory when fdr is installed as a wheel.
+        #
+        # The cache is shared across all repos because the bridge deps are
+        # repo-independent — installing once per FDR-install saves disk and
+        # cold-cache ``npm ci`` time.
+        override = os.environ.get("FDR_BRIDGE_DIR")
+        if override:
+            override_path = Path(override).expanduser().resolve()
+            self.bridge_source_dir = override_path
+            self.bridge_runtime_dir = override_path
+        else:
+            self.bridge_source_dir = (Path(__file__).parent.parent / "priv" / "pi-bridge").resolve()
+            self.bridge_runtime_dir = (_central_root() / "bridge").resolve(strict=False)
 
     @staticmethod
     def _find_project_root() -> Path:
