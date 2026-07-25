@@ -61,6 +61,53 @@ All options can be set via `FDR_`-prefixed environment variables:
 
 ---
 
+## External Workflow Sequencer
+
+The sequencer owns workflow state and routing, which means your external agent keeps ownership of
+repository changes. It reads the target repository, writes state and artifacts under `FDR_HOME`,
+and returns exactly one JSON response for every completed non-help command.
+
+The public commands are:
+
+```text
+fix-die-repeat sequencer --run-id RUN_ID [--repo PATH] init --workflow PATH [--flag NAME=VALUE ...]
+fix-die-repeat sequencer --run-id RUN_ID [--repo PATH] next [--workflow PATH]
+fix-die-repeat sequencer --run-id RUN_ID [--repo PATH] done STEP [--workflow PATH] [--force | --recover]
+fix-die-repeat sequencer --run-id RUN_ID [--repo PATH] status [--workflow PATH]
+```
+
+`--repo` defaults to your current directory. `init` freezes the validated workflow semantics and
+resolved flags for that repository-scoped run ID. Later commands use the stored workflow source
+unless you provide a matching replacement path.
+
+Each response tells you what happened through `outcome`, `message`, and the process exit code:
+
+| Exit | `outcome` | Meaning |
+|---:|---|---|
+| `0` | `proceed` | Continue with the returned step. |
+| `2` | `environment_error` | A required Git, filesystem, or configuration probe failed. |
+| `3` | `terminal` | The workflow reached its declared terminal state. |
+| `4` | `blocked` | Validation, ordering, or configuration state blocked progress. |
+| `5` | `recovery` | Reconcile a previously issued mutating step before retrying it. |
+| `64` | `usage_error` | The command or supplied values were invalid. |
+| `70` | `internal_error` | A sequencer invariant failed unexpectedly. |
+| `130` | `interrupted` | The command received an interrupt. |
+
+When a response contains `step`, run the work described by `step.instruction`. Write requested
+artifacts under `step.artifact_root`, then call `done` with the same step ID. A repeated `next`
+for an issued mutating step returns `recovery` because the sequencer cannot tell whether the
+external work started before the interruption. Reconcile the repository, then call
+`done STEP --recover` to acknowledge and reissue it.
+
+`--force` bypasses failed postconditions and records every bypassed gap in the transition history.
+Use it only when you intend to accept those missing proofs.
+
+See the [check, fix, and review example](../examples/sequencer/check-fix-review/) for a complete
+workflow. The [sequencer ADR](adr/0001-sequencer-contract.md) documents the schema, validators,
+state model, trust boundary, rejected alternatives, and adversarial findings.
+
+---
+
 ## Check Command Resolution
 
 fix-die-repeat automatically finds your project's check command using this priority chain:

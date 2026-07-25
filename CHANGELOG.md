@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added the external workflow sequencer with versioned YAML workflows, one-object JSON responses, atomic repository-scoped state, explicit recovery, closed validators, live Git predicates, and a self-contained check-fix-review example. See [`docs/adr/0001-sequencer-contract.md`](docs/adr/0001-sequencer-contract.md).
 - Node.js sidecar bridge for pi invocation. `fix-die-repeat` now drives pi via the `@mariozechner/pi-coding-agent` SDK through a small Node.js process at `priv/pi-bridge/bridge.js`. Every pi call routes through a JSON-lines protocol on stdin/stdout, enabling a structured event stream (text deltas, tool-execution start/end, thinking, agent end) and clean lifecycle management. See [`docs/pi-bridge.md`](docs/pi-bridge.md) for the design note.
 - Idle-based prompt timeout for the pi bridge. The Python side now fails a prompt only when the bridge stops emitting events (`FDR_PI_IDLE_TIMEOUT_S`, default 120s), with a separate absolute cap (`FDR_PI_HARD_TIMEOUT_S`, default 60 min) as a safety net. Long contextual reviews that stream tool-execution events every few seconds no longer hit a 5-minute wall clock.
 - Live tool-call progress in the log. Pi's `tool_execution_start` events are surfaced at INFO level as `pi: <tool> <arg>` so long turns show what the agent is doing without enabling `--debug`.

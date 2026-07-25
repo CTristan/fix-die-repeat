@@ -1,0 +1,70 @@
+schema_version: 1
+id: check-fix-review
+start: check
+steps:
+  check:
+    instruction: Run agent/check.py and write check-result.json under artifact_root.
+    mutates_repository: false
+    postconditions:
+      - id: check-result
+        validator:
+          op: json.pointer_type
+          path:
+            scope: artifacts
+            value: check-result.json
+          pointer: /passed
+          expected: boolean
+    routes:
+      - id: fix-failed-check
+        when:
+          op: json.pointer_equals
+          path:
+            scope: artifacts
+            value: check-result.json
+          pointer: /passed
+          expected: false
+        to: fix
+      - id: review-passing-check
+        when: always
+        to: review
+  fix:
+    instruction: Fix target/app.txt, then return after the repository content changes.
+    mutates_repository: true
+    postconditions:
+      - id: repository-changed
+        validator:
+          op: git.working_tree_changed
+    routes:
+      - id: recheck
+        when: always
+        to: check
+        repeat: true
+  review:
+    instruction: Run agent/review.py and write review-result.json under artifact_root.
+    mutates_repository: false
+    postconditions:
+      - id: review-result
+        validator:
+          op: json.pointer_type
+          path:
+            scope: artifacts
+            value: review-result.json
+          pointer: /passed
+          expected: boolean
+    routes:
+      - id: fix-review-finding
+        when:
+          op: json.pointer_equals
+          path:
+            scope: artifacts
+            value: review-result.json
+          pointer: /passed
+          expected: false
+        to: fix
+        repeat: true
+      - id: finish
+        when: always
+        terminal:
+          code: checks-and-review-passed
+          status: success
+          message: Checks and review passed.
