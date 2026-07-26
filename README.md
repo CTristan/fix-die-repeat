@@ -69,8 +69,9 @@ On first run, fix-die-repeat [detects your project type](docs/guide.md#check-com
 ### External workflow sequencing
 
 `fix-die-repeat sequencer` drives a versioned workflow without running the work itself. Your
-external agent receives one instruction at a time, writes declared JSON artifacts, and reports
-completion so the sequencer can validate and route the next step.
+external agent receives one instruction at a time, performs the requested repository work, writes
+any declared JSON artifacts, and reports completion so the sequencer can validate and route the
+next step.
 
 See the [sequencer guide](docs/guide.md#external-workflow-sequencer) for the command and response
 contract. The [check, fix, and review example](examples/sequencer/check-fix-review/) includes a

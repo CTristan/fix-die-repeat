@@ -1,11 +1,12 @@
 """Tests for sequencer workflow loading and validation."""
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from fix_die_repeat.sequencer_workflow import (
+    MAX_WORKFLOW_BYTES,
     PathSpec,
     WorkflowValidationError,
     load_workflow,
@@ -208,13 +209,17 @@ def test_load_workflow_rejects_unknown_and_duplicate_flags(tmp_path: Path) -> No
 def test_load_workflow_rejects_oversized_file(tmp_path: Path) -> None:
     """Workflow input is bounded before YAML parsing."""
     path = tmp_path / "large.yaml"
-    path.write_bytes(b"x" * (1024 * 1024 + 1))
+    handle = MagicMock()
+    handle.__enter__.return_value = handle
+    handle.read.return_value = b"x" * (MAX_WORKFLOW_BYTES + 1)
 
     with (
-        patch.object(Path, "read_bytes", side_effect=AssertionError("unbounded read")),
+        patch.object(Path, "open", return_value=handle),
         pytest.raises(WorkflowValidationError, match="workflow_too_large"),
     ):
         load_workflow(path, {})
+
+    handle.read.assert_called_once_with(MAX_WORKFLOW_BYTES + 1)
 
 
 @pytest.mark.parametrize(
@@ -283,3 +288,51 @@ def test_load_workflow_handles_long_acyclic_graph(tmp_path: Path) -> None:
     loaded = load_workflow(_write_workflow(tmp_path, content), {})
 
     assert len(loaded.active_steps) == step_count
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        "flag:\n        name: [review]\n        equals: true",
+        "all: 1",
+    ],
+)
+def test_load_workflow_reports_malformed_applicability(
+    tmp_path: Path,
+    condition: str,
+) -> None:
+    """Malformed raw applicability conditions return validation gaps."""
+    content = VALID_WORKFLOW.replace(
+        "    instruction: Fix the failures.",
+        f"    instruction: Fix the failures.\n    applies_when:\n      {condition}",
+    )
+
+    with pytest.raises(WorkflowValidationError):
+        load_workflow(_write_workflow(tmp_path, content), {})
+
+
+@pytest.mark.parametrize("condition", ["2026-07-25", "!!binary 'aGVsbG8='"])
+def test_load_workflow_reports_non_json_route_scalars(
+    tmp_path: Path,
+    condition: str,
+) -> None:
+    """Loader-specific YAML scalars become validation gaps instead of exceptions."""
+    content = VALID_WORKFLOW.replace(
+        "      - id: finish\n        when: always",
+        f"      - id: finish\n        when: {condition}",
+    )
+
+    with pytest.raises(WorkflowValidationError, match="invalid_condition"):
+        load_workflow(_write_workflow(tmp_path, content), {})
+
+
+def test_unknown_flag_gaps_are_deterministic(tmp_path: Path) -> None:
+    """Unknown supplied flags are reported in sorted order."""
+    with pytest.raises(WorkflowValidationError) as error:
+        load_workflow(
+            _write_workflow(tmp_path),
+            {"zeta": "true", "alpha": "true"},
+        )
+
+    subjects = [gap.subject for gap in error.value.gaps if gap.code == "unknown_flag"]
+    assert subjects == ["alpha", "zeta"]

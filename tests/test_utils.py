@@ -13,6 +13,7 @@ import pytest
 
 from fix_die_repeat.utils import (
     ReviewScope,
+    RunCommandOptions,
     _collect_git_files,
     _should_exclude_file,
     configure_logger,
@@ -39,6 +40,7 @@ HELLO_WORLD_SIZE = 13  # len("Hello, World!")
 TEST_FILE_LINES = 3
 COMMAND_NOT_FOUND_EXIT_CODE = 127
 COMMAND_SYNTAX_EXIT_CODE = 2
+COMMAND_TIMEOUT_EXIT_CODE = 124
 
 
 class TestFormatDuration:
@@ -434,6 +436,20 @@ class TestRunCommand:
 
         mock_run.assert_called_once()
         assert mock_run.call_args.kwargs.get("stdin") == subprocess.DEVNULL
+
+    def test_run_command_reports_timeout(self) -> None:
+        """A subprocess deadline becomes a stable nonzero command result."""
+        with patch(
+            "fix_die_repeat.utils.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["git"], 30),
+        ):
+            returncode, _stdout, stderr = run_command(
+                ["git"],
+                options=RunCommandOptions(timeout=30),
+            )
+
+        assert returncode == COMMAND_TIMEOUT_EXIT_CODE
+        assert stderr == "Command timed out after 30 seconds"
 
 
 class TestPlayCompletionSound:

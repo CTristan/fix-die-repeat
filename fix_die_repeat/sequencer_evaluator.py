@@ -16,6 +16,8 @@ from fix_die_repeat.sequencer_git import (
 )
 from fix_die_repeat.sequencer_workflow import GIT_OPERATIONS, OperationSpec
 
+MAX_JSON_ARTIFACT_BYTES = 1024 * 1024
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -59,6 +61,13 @@ def _resolve_path(operation: OperationSpec, context: EvaluationContext) -> Path:
 def _read_json(path: Path) -> tuple[object | None, str | None]:
     if not path.is_file():
         return None, f"{path} is not a regular file"
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        msg = f"Cannot inspect {path}: {exc}"
+        raise EvaluationError(msg) from exc
+    if size > MAX_JSON_ARTIFACT_BYTES:
+        return None, f"{path} exceeds 1 MiB"
 
     def reject_constant(value: str) -> None:
         msg = f"non-standard constant {value}"
@@ -69,10 +78,10 @@ def _read_json(path: Path) -> tuple[object | None, str | None]:
         return json.loads(raw, parse_constant=reject_constant), None
     except json.JSONDecodeError as exc:
         return None, f"{path} is not valid JSON: {exc.msg}"
-    except ValueError as exc:
-        return None, f"{path} is not valid JSON: {exc}"
     except UnicodeDecodeError as exc:
         return None, f"{path} is not valid UTF-8 JSON: {exc}"
+    except ValueError as exc:
+        return None, f"{path} is not valid JSON: {exc}"
     except OSError as exc:
         msg = f"Cannot read {path}: {exc}"
         raise EvaluationError(msg) from exc
@@ -83,11 +92,17 @@ def _json_pointer(value: object, pointer: str) -> tuple[bool, object | None]:
         return True, value
     current = value
     for encoded in pointer.removeprefix("/").split("/"):
-        token = encoded.replace("~1", "/").replace("~0", "~")
-        if isinstance(current, dict) and token in current:
-            current = current[token]
-        elif isinstance(current, list) and token.isdigit() and int(token) < len(current):
-            current = current[int(token)]
+        index_text = encoded.replace("~1", "/").replace("~0", "~")
+        if isinstance(current, dict) and index_text in current:
+            current = current[index_text]
+        elif (
+            isinstance(current, list)
+            and index_text.isascii()
+            and index_text.isdecimal()
+            and (index_text == "0" or not index_text.startswith("0"))
+            and int(index_text) < len(current)
+        ):
+            current = current[int(index_text)]
         else:
             return False, None
     return True, current
@@ -120,7 +135,10 @@ def _evaluate_json(operation: OperationSpec, path: Path) -> OperationResult:
             message=f"{path} has no value at {operation.pointer}",
         )
     if operation.op == "json.pointer_equals":
-        passed = selected == operation.expected
+        passed = (
+            _json_type(selected) == _json_type(operation.expected)
+            and selected == operation.expected
+        )
         comparison = "equals" if passed else "does not equal"
         return OperationResult(
             passed=passed,
@@ -198,10 +216,14 @@ def evaluate_condition(value: object, context: EvaluationContext) -> bool:
             msg = "Invalid persisted flag condition"
             raise EvaluationError(msg)
         return context.flags.get(str(flag["name"])) == flag["equals"]
-    if set(value) == {"all"}:
-        return all(evaluate_condition(child, context) for child in value["all"])
-    if set(value) == {"any"}:
-        return any(evaluate_condition(child, context) for child in value["any"])
+    if set(value) in ({"all"}, {"any"}):
+        key = next(iter(value))
+        children = value[key]
+        if not isinstance(children, list):
+            msg = f"Invalid persisted {key} condition"
+            raise EvaluationError(msg)
+        combine = all if key == "all" else any
+        return combine(evaluate_condition(child, context) for child in children)
     if set(value) == {"not"}:
         return not evaluate_condition(value["not"], context)
     return evaluate_operation(_operation_from_condition(value), context).passed

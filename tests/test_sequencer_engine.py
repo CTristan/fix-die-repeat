@@ -14,6 +14,7 @@ from fix_die_repeat.sequencer_engine import (
     SequencerResult,
     SequencerService,
 )
+from fix_die_repeat.sequencer_state import StateError
 from fix_die_repeat.sequencer_workflow import (
     LoadedWorkflow,
     WorkflowValidationError,
@@ -73,6 +74,7 @@ steps:
 def _git(repo: Path, *args: str) -> str:
     if GIT_PATH is None:
         pytest.skip("Git is required for sequencer tests")
+    # The executable comes from shutil.which, and subprocess runs fixed argv without a shell.
     result = subprocess.run(
         [GIT_PATH, "-C", str(repo), *args],
         check=True,
@@ -310,3 +312,17 @@ def test_missing_run_is_blocked(tmp_path: Path) -> None:
 
     assert result.outcome == "blocked"
     assert result.gaps[0]["code"] == "run_not_initialized"
+
+
+def test_persisted_repository_identity_mismatch_fails_closed(tmp_path: Path) -> None:
+    """Copied state cannot attach to a different repository identity."""
+    repo = _repo(tmp_path)
+    service = _service(tmp_path)
+    initialized = service.init(repo, "run-1", _workflow(tmp_path), [])
+    state_path = Path(initialized.configuration["state_path"])
+    state = json.loads(state_path.read_text())
+    state["repository"]["root"] = str(tmp_path / "different-repo")
+    state_path.write_text(json.dumps(state))
+
+    with pytest.raises(StateError, match="repository identity"):
+        service.status(repo, "run-1")

@@ -351,7 +351,7 @@ def _run_sequencer(
     command: str,
     context: _SequencerContext,
     operation: Callable[[], SequencerResult],
-) -> int:
+) -> Never:
     """Execute one service operation behind the stable response boundary."""
     try:
         result = operation()

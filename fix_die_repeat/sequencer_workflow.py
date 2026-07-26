@@ -298,7 +298,7 @@ def _resolve_flags(
     supplied: dict[str, str] | list[tuple[str, str]],
 ) -> tuple[dict[str, bool | str], list[ValidationGap]]:
     raw, gaps = _pairs(supplied)
-    for name in raw.keys() - workflow.flags.keys():
+    for name in sorted(raw.keys() - workflow.flags.keys()):
         gaps.append(_gap("unknown_flag", name, f"flag {name!r} is not declared"))
 
     resolved: dict[str, bool | str] = {}
@@ -442,14 +442,17 @@ def _flag_condition_value(
     elif set(value) == {"flag"} and isinstance(value["flag"], dict):
         flag = value["flag"]
         name = flag.get("name")
-        if name not in flags:
+        if not isinstance(name, str) or name not in flags:
             gaps.append(_gap("unknown_flag", subject, f"flag {name!r} is not declared"))
             result = False
         else:
             result = flags[name] == flag.get("equals")
     elif set(value) in ({"all"}, {"any"}):
         key = next(iter(value))
-        children = [_flag_condition_value(child, flags, subject, gaps) for child in value[key]]
+        raw_children = value[key]
+        if not isinstance(raw_children, list):
+            return None
+        children = [_flag_condition_value(child, flags, subject, gaps) for child in raw_children]
         if any(child is None for child in children):
             result = None
         else:
@@ -464,7 +467,19 @@ def _flag_condition_value(
 
 
 def _condition_key(value: object) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    def encode_non_json(item: object) -> dict[str, str]:
+        return {
+            "__invalid_type__": f"{type(item).__module__}.{type(item).__qualname__}",
+            "representation": repr(item),
+        }
+
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=encode_non_json,
+    )
 
 
 def _active_steps(

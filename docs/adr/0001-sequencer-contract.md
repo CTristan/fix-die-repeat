@@ -670,6 +670,10 @@ Schema version 1 supports these artifact validators:
 | `json.pointer_equals` | The RFC 6901 pointer exists and equals the declared scalar or JSON value. |
 | `json.pointer_type` | The RFC 6901 pointer exists and has the declared JSON type. |
 
+JSON validators reject artifacts larger than 1 MiB before parsing, matching the workflow input
+ceiling. Larger outputs need a smaller declared summary artifact because validator reads occur
+while the transition lock is held.
+
 Schema version 1 supports these live Git predicates:
 
 | Operation | Result |
@@ -729,9 +733,12 @@ An unreadable or missing workflow passed explicitly to `init`, `next`, `done`, o
 `configuration_error` with every safe validation gap. A missing, invalid, or drifted source for
 an existing run returns `blocked` because the persisted configuration relationship broke.
 
-`init` performs all workflow validation before it creates the run directory or state file. It
-rechecks the workflow after acquiring the transition lock, so a file change between validation and
-state creation fails without creating `state.json`.
+`init` performs an initial workflow validation before it creates the run directory. It then creates
+the provisional run directory and `transition.lock`, acquires that run's lock, and revalidates the
+workflow before it creates the artifact directory or `state.json`. This closes the
+validation-to-state-creation race. Failed revalidation may leave the empty run directory and lock
+file in place. `init` does not remove them because another process may already own or be waiting on
+that lock; the validated repository key and run ID retain ownership of the provisional directory.
 
 Commands against existing state acquire the run lock before they load the explicit or stored
 workflow. This prevents another transition from changing the expected state while configuration
@@ -807,6 +814,11 @@ Every command opens `transition.lock` and retries a non-blocking exclusive opera
 for up to 10 seconds. Unix uses `fcntl.flock`, and Windows uses `msvcrt.locking`, matching the
 project's existing cross-platform lock behavior. A caller that cannot acquire the lock within that
 window receives an `environment_error` instead of waiting forever.
+
+The 10-second limit bounds lock acquisition, not validator execution. The lock holder keeps the
+lock while it runs bounded artifact reads and Git probes so one transition observes one repository
+state. A slow probe may therefore make a concurrent caller time out, but it does not time out the
+active transition. Individual Git probes have a 30-second subprocess timeout.
 
 The operating system releases the lock when a process exits, so a crashed process cannot leave a
 permanent stale lock. The lock file may remain on disk and carries no ownership truth.

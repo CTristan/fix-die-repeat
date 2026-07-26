@@ -7,7 +7,14 @@ from unittest.mock import patch
 
 import pytest
 
-from fix_die_repeat.sequencer_state import SequencerLock, StateError, read_state, write_state
+from fix_die_repeat.sequencer_git import RepositoryInfo
+from fix_die_repeat.sequencer_state import (
+    SequencerLock,
+    StateError,
+    read_state,
+    run_paths,
+    write_state,
+)
 
 
 def test_lock_times_out_with_a_state_error(tmp_path: Path) -> None:
@@ -65,3 +72,37 @@ def test_read_state_uses_utf8_encoding(tmp_path: Path) -> None:
         assert read_state(path) == state
 
     read_text.assert_called_once_with(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "[]",
+        '{"state_schema_version": 999}',
+    ],
+)
+def test_read_state_rejects_invalid_payloads(tmp_path: Path, payload: str) -> None:
+    """State must remain an object with the supported schema version."""
+    path = tmp_path / "state.json"
+    path.write_text(payload, encoding="utf-8")
+
+    with pytest.raises(StateError):
+        read_state(path)
+
+
+def test_read_state_wraps_invalid_utf8(tmp_path: Path) -> None:
+    """State decoding errors use the module error contract."""
+    path = tmp_path / "state.json"
+    path.write_bytes(b"\xff")
+
+    with pytest.raises(StateError, match="Cannot read sequencer state"):
+        read_state(path)
+
+
+@pytest.mark.parametrize("run_id", ["", "../escape", "with space"])
+def test_run_paths_rejects_invalid_run_ids(tmp_path: Path, run_id: str) -> None:
+    """Run IDs cannot become uncontrolled path components."""
+    repository = RepositoryInfo(root=tmp_path, common_dir=tmp_path / ".git", key="repo")
+
+    with pytest.raises(StateError, match="Invalid run ID"):
+        run_paths(tmp_path / "home", repository, run_id)

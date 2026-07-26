@@ -28,7 +28,7 @@ steps:
         when: always
         to: review
   fix:
-    instruction: Fix target/app.txt, then return after the repository content changes.
+    instruction: Fix app.txt, then return after the repository content changes.
     mutates_repository: true
     postconditions:
       - id: repository-changed

@@ -71,6 +71,13 @@ def _run_agent(
     assert result.returncode == 0, result.stderr
 
 
+def _assert_root_fix_instruction(payload: dict[str, object]) -> None:
+    step = payload["step"]
+    assert isinstance(step, dict)
+    assert "app.txt" in step["instruction"]
+    assert "target/app.txt" not in step["instruction"]
+
+
 def test_check_fix_review_example_completes(tmp_path: Path) -> None:
     """The public protocol survives recovery, force, repetition, and completion."""
     repo = tmp_path / "repo"
@@ -100,8 +107,9 @@ def test_check_fix_review_example_completes(tmp_path: Path) -> None:
     target = repo / "app.txt"
 
     _run_agent("check.py", target, environment, artifact_root)
-    issued, _ = _response(repo, environment, "done", "check")
+    issued, issued_payload = _response(repo, environment, "done", "check")
     assert issued.returncode == EXIT_CODES["proceed"]
+    _assert_root_fix_instruction(issued_payload)
 
     recovery, _ = _response(repo, environment, "next")
     assert recovery.returncode == EXIT_CODES["recovery"]

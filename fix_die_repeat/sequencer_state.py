@@ -135,7 +135,7 @@ def read_state(path: Path) -> dict[str, Any]:
     try:
         raw = path.read_text(encoding="utf-8")
         value = json.loads(raw)
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         msg = f"Cannot read sequencer state {path}: {exc}"
         raise StateError(msg) from exc
     if not isinstance(value, dict):

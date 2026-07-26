@@ -1,5 +1,6 @@
 """Tests for read-only sequencer Git predicates."""
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -19,11 +20,21 @@ from fix_die_repeat.sequencer_git import (
 def _resolve_git_path() -> str:
     path = shutil.which("git")
     if path is None:
-        pytest.skip("Git is required for sequencer Git tests")
+        pytest.skip("Git is required for sequencer Git tests", allow_module_level=True)
     return path
 
 
 GIT_PATH = _resolve_git_path()
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_git(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Keep test repositories independent of ambient Git configuration."""
+    empty_config = tmp_path / "empty-gitconfig"
+    empty_config.touch()
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty_config))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(empty_config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -59,6 +70,16 @@ def test_resolve_repository_uses_worktree_specific_identity(tmp_path: Path) -> N
 
     assert first_info.key != second_info.key
     assert first_info.root == first.resolve()
+
+
+def test_repository_key_sanitizes_worktree_name(tmp_path: Path) -> None:
+    """State directory keys contain only portable filename characters."""
+    repo = _init_repo(tmp_path / "unsafe name")
+
+    key = resolve_repository(repo).key
+
+    assert re.fullmatch(r"[A-Za-z0-9._-]+", key)
+    assert key.startswith("unsafe_name-")
 
 
 def test_snapshot_detects_edit_when_tree_was_already_dirty(tmp_path: Path) -> None:
@@ -104,7 +125,9 @@ def test_git_probes_decode_raw_paths_with_surrogateescape(tmp_path: Path) -> Non
         )
 
     assert result.stdout == "invalid-\udcff.txt\0"
-    assert run_command.call_args.kwargs["encoding_errors"] == "surrogateescape"
+    options = run_command.call_args.kwargs["options"]
+    assert options.encoding_errors == "surrogateescape"
+    assert options.timeout == sequencer_git.GIT_TIMEOUT_SECONDS
 
 
 def test_head_changed_detects_symbolic_ref_change_at_same_commit(tmp_path: Path) -> None:
@@ -229,6 +252,22 @@ def test_working_tree_changed_requires_issued_snapshot(tmp_path: Path) -> None:
         info,
         issued=issued,
     )
+
+
+def test_working_tree_changed_checks_baseline_before_snapshot(tmp_path: Path) -> None:
+    """A missing issued baseline fails before an expensive content snapshot."""
+    repo = _init_repo(tmp_path / "repo")
+    info = resolve_repository(repo)
+
+    with (
+        patch.object(
+            sequencer_git,
+            "capture_snapshot",
+            side_effect=AssertionError("content snapshot was requested"),
+        ),
+        pytest.raises(GitProbeError, match="requires an issued-step snapshot"),
+    ):
+        evaluate_git_operation("git.working_tree_changed", info)
 
 
 def test_git_probe_rejects_non_repository(tmp_path: Path) -> None:

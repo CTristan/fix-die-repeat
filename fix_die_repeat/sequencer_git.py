@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 import stat
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from fix_die_repeat.utils import run_command
+from fix_die_repeat.utils import RunCommandOptions, run_command
+
+GIT_TIMEOUT_SECONDS = 30.0
 
 
 class GitProbeError(RuntimeError):
@@ -89,7 +92,10 @@ def _run_git(
     returncode, stdout, stderr = run_command(
         [git_path, "-C", str(repo), *args],
         check=False,
-        encoding_errors="surrogateescape",
+        options=RunCommandOptions(
+            encoding_errors="surrogateescape",
+            timeout=GIT_TIMEOUT_SECONDS,
+        ),
     )
     result = _GitResult(returncode=returncode, stdout=stdout, stderr=stderr)
     if check and result.returncode != 0:
@@ -118,7 +124,8 @@ def resolve_repository(path: Path) -> RepositoryInfo:
         common_path = root / common_path
     common_dir = common_path.resolve()
     digest = hashlib.sha256(f"{root}\0{common_dir}".encode()).hexdigest()
-    key = f"{root.name}-{digest[:16]}"
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", root.name) or "repo"
+    key = f"{safe_name}-{digest[:16]}"
     return RepositoryInfo(root=root, common_dir=common_dir, key=key)
 
 
@@ -152,6 +159,7 @@ def _update_untracked_digest(
     for relative_path in relative_paths:
         digest.update(b"untracked\0")
         digest.update(os.fsencode(relative_path))
+        digest.update(b"\0")
         path = repo / relative_path
         try:
             metadata = path.lstat()
@@ -294,10 +302,10 @@ def evaluate_git_operation(
             initial.symbolic_ref,
         )
     elif operation == "git.working_tree_changed":
-        current = capture_snapshot(repository)
         if issued is None:
             msg = "git.working_tree_changed requires an issued-step snapshot"
             raise GitProbeError(msg)
+        current = capture_snapshot(repository)
         result = current.digest != issued.digest
     else:
         msg = f"Unsupported Git operation: {operation}"

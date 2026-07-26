@@ -11,6 +11,8 @@ root, then commit the baseline before you run the workflow:
 mkdir -p /path/to/temporary-repository
 cp -R target/. /path/to/temporary-repository/
 git -C /path/to/temporary-repository init -b main
+git -C /path/to/temporary-repository config user.email "example@example.invalid"
+git -C /path/to/temporary-repository config user.name "Example"
 git -C /path/to/temporary-repository add app.txt
 git -C /path/to/temporary-repository commit -m "Added example baseline"
 ```
