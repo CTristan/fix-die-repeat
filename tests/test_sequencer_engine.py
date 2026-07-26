@@ -5,10 +5,12 @@ import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
 
+from fix_die_repeat import sequencer_engine
 from fix_die_repeat.sequencer_engine import (
     DoneOptions,
     SequencerResult,
@@ -23,6 +25,23 @@ from fix_die_repeat.sequencer_workflow import (
 
 GIT_PATH = shutil.which("git")
 RECOVERED_ATTEMPT_NUMBER = 2
+HISTORY_OVERFLOW_EVENTS = 2
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_git(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Keep engine repositories independent of ambient Git configuration."""
+    empty_config = tmp_path / "empty-gitconfig"
+    empty_config.touch()
+    empty_template = tmp_path / "empty-template"
+    empty_template.mkdir()
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty_config))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(empty_config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_TEMPLATE_DIR", str(empty_template))
+    for variable in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        monkeypatch.delenv(variable, raising=False)
+
 
 WORKFLOW = """\
 schema_version: 1
@@ -348,6 +367,34 @@ def test_configuration_drift_blocks_transition(tmp_path: Path) -> None:
     assert result.gaps[0]["code"] == "configuration_drift"
 
 
+def test_configuration_check_reports_implicit_invalid_workflow(tmp_path: Path) -> None:
+    """A malformed stored workflow blocks without hiding the run."""
+    repo = _repo(tmp_path)
+    workflow = _workflow(tmp_path)
+    service = _service(tmp_path)
+    service.init(repo, "run-1", workflow, [])
+    workflow.write_text("[")
+
+    result = service.status(repo, "run-1")
+
+    assert result.outcome == "blocked"
+    assert result.gaps[0]["code"] == "invalid_yaml"
+
+
+def test_configuration_check_reports_explicit_unreadable_workflow(tmp_path: Path) -> None:
+    """An explicitly selected unreadable workflow is an environment error."""
+    repo = _repo(tmp_path)
+    service = _service(tmp_path)
+    service.init(repo, "run-1", _workflow(tmp_path), [])
+    unreadable = tmp_path / "workflow-directory"
+    unreadable.mkdir()
+
+    result = service.status(repo, "run-1", workflow_path=unreadable)
+
+    assert result.outcome == "environment_error"
+    assert result.gaps[0]["code"] == "workflow_unreadable"
+
+
 def test_relocation_and_transition_increment_revision_once(tmp_path: Path) -> None:
     """One persisted transition produces one revision even when its source moved."""
     repo = _repo(tmp_path)
@@ -368,6 +415,43 @@ def test_relocation_and_transition_increment_revision_once(tmp_path: Path) -> No
     assert isinstance(initialized.state_revision, int)
     assert result.state_revision == initialized.state_revision + 1
     assert result.configuration["source"] == str(relocated.resolve())
+
+
+def test_matching_relocation_persists_when_done_is_blocked(tmp_path: Path) -> None:
+    """A matching explicit source repairs relocation before postcondition blocking."""
+    repo = _repo(tmp_path)
+    workflow = _workflow(tmp_path)
+    service = _service(tmp_path)
+    initialized = service.init(repo, "run-1", workflow, [])
+    relocated = tmp_path / "relocated.yaml"
+    workflow.rename(relocated)
+
+    result = service.done(
+        repo,
+        "run-1",
+        "check",
+        DoneOptions(workflow_path=relocated),
+    )
+
+    state = json.loads(Path(initialized.configuration["state_path"]).read_text())
+    assert result.outcome == "blocked"
+    assert state["workflow_source"] == str(relocated.resolve())
+    assert result.state_revision == state["revision"]
+
+
+def test_history_retains_only_recent_events() -> None:
+    """The state history keeps its bounded, ordered tail."""
+    state: dict[str, Any] = {"history": []}
+    total = sequencer_engine.MAX_HISTORY_EVENTS + HISTORY_OVERFLOW_EVENTS
+
+    for index in range(total):
+        sequencer_engine._append_history(state, {"index": index})
+
+    history = state["history"]
+    assert isinstance(history, list)
+    assert len(history) == sequencer_engine.MAX_HISTORY_EVENTS
+    assert history[0]["index"] == HISTORY_OVERFLOW_EVENTS
+    assert history[-1]["index"] == total - 1
 
 
 @pytest.mark.parametrize(

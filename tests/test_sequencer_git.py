@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from hashlib import sha256
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -142,6 +142,48 @@ def test_snapshot_rejects_excessive_tracked_diff_output(tmp_path: Path) -> None:
         capture_snapshot(resolve_repository(repo))
 
     assert "16 byte snapshot budget" in str(raised.value)
+
+
+def test_bounded_git_output_reports_timeout(tmp_path: Path) -> None:
+    """Bounded Git execution converts subprocess deadlines into probe errors."""
+    process = MagicMock()
+    process.stdout.read.return_value = b""
+    process.wait.side_effect = [
+        subprocess.TimeoutExpired(["git"], 30),
+        0,
+    ]
+
+    with (
+        patch.object(subprocess, "Popen", return_value=process),
+        pytest.raises(GitProbeError, match="timed out"),
+    ):
+        sequencer_git._run_git_bounded(tmp_path, ["diff"], 16)
+
+
+def test_bounded_git_output_reports_nonzero_output(tmp_path: Path) -> None:
+    """Bounded Git failures include their decoded diagnostic output."""
+    process = MagicMock()
+    process.stdout.read.side_effect = [b"fatal: failed\n", b""]
+    process.wait.return_value = 1
+
+    with (
+        patch.object(subprocess, "Popen", return_value=process),
+        pytest.raises(GitProbeError, match="fatal: failed"),
+    ):
+        sequencer_git._run_git_bounded(tmp_path, ["diff"], 64)
+
+
+def test_bounded_git_output_reports_reader_failure(tmp_path: Path) -> None:
+    """Reader-thread failures cannot turn partial output into a snapshot."""
+    process = MagicMock()
+    process.stdout.read.side_effect = OSError("read failed")
+    process.wait.return_value = 0
+
+    with (
+        patch.object(subprocess, "Popen", return_value=process),
+        pytest.raises(GitProbeError, match="Cannot read Git probe output"),
+    ):
+        sequencer_git._run_git_bounded(tmp_path, ["diff"], 64)
 
 
 def test_snapshot_reuses_diff_and_untracked_probe_output(tmp_path: Path) -> None:

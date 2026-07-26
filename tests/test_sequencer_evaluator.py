@@ -85,6 +85,19 @@ def test_persisted_flag_condition_requires_name_and_equals(
         evaluate_condition({"flag": flag}, context)
 
 
+def test_persisted_flag_condition_uses_type_strict_equality(
+    tmp_path: Path,
+    context_factory: Callable[[Path, dict[str, bool | str]], EvaluationContext],
+) -> None:
+    """Corrupt boolean-number comparisons cannot pass through Python coercion."""
+    context = context_factory(tmp_path / "artifacts", {"review": True})
+
+    assert not evaluate_condition(
+        {"flag": {"name": "review", "equals": 1}},
+        context,
+    )
+
+
 def test_json_valid_rejects_oversized_artifact(
     tmp_path: Path,
     context_factory: Callable[[Path, dict[str, bool | str]], EvaluationContext],
@@ -169,11 +182,102 @@ def test_json_valid_reports_excessive_nesting(
         },
     )
 
-    with patch.object(sequencer_evaluator.json, "loads", side_effect=RecursionError):
+    class RecursiveContent(bytes):
+        def decode(self, *args: object, **kwargs: object) -> str:
+            del args, kwargs
+            raise RecursionError
+
+    handle = MagicMock()
+    handle.__enter__.return_value = handle
+    handle.read.return_value = RecursiveContent(b"[0]")
+    with patch.object(Path, "open", return_value=handle):
         result = evaluate_operation(operation, context_factory(artifact_root, {}))
 
     assert not result.passed
     assert "nested too deeply" in result.message
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [(None, False), (b"", False), (b"value", True)],
+)
+def test_file_non_empty_reports_file_state(
+    tmp_path: Path,
+    content: bytes | None,
+    context_factory: Callable[[Path, dict[str, bool | str]], EvaluationContext],
+    *,
+    expected: bool,
+) -> None:
+    """The non-empty predicate distinguishes missing, empty, and populated files."""
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    if content is not None:
+        (artifact_root / "result.txt").write_bytes(content)
+    operation = OperationSpec.model_validate(
+        {
+            "op": "file.non_empty",
+            "path": {"scope": "artifacts", "value": "result.txt"},
+        },
+    )
+
+    result = evaluate_operation(operation, context_factory(artifact_root, {}))
+
+    assert result.passed is expected
+
+
+def test_path_exists_reports_existing_artifact(
+    tmp_path: Path,
+    context_factory: Callable[[Path, dict[str, bool | str]], EvaluationContext],
+) -> None:
+    """The existence predicate accepts an existing scoped artifact."""
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    (artifact_root / "result.txt").touch()
+    operation = OperationSpec.model_validate(
+        {
+            "op": "path.exists",
+            "path": {"scope": "artifacts", "value": "result.txt"},
+        },
+    )
+
+    assert evaluate_operation(operation, context_factory(artifact_root, {})).passed
+
+
+def test_json_valid_rejects_directory(
+    tmp_path: Path,
+    context_factory: Callable[[Path, dict[str, bool | str]], EvaluationContext],
+) -> None:
+    """JSON parsing rejects non-regular artifact paths."""
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    (artifact_root / "result.json").mkdir()
+    operation = OperationSpec.model_validate(
+        {
+            "op": "json.valid",
+            "path": {"scope": "artifacts", "value": "result.json"},
+        },
+    )
+
+    result = evaluate_operation(operation, context_factory(artifact_root, {}))
+
+    assert not result.passed
+    assert "not a regular file" in result.message
+
+
+def test_unsupported_operation_raises_evaluation_error(
+    tmp_path: Path,
+    context_factory: Callable[[Path, dict[str, bool | str]], EvaluationContext],
+) -> None:
+    """A corrupt persisted operation cannot leave the closed registry."""
+    operation = OperationSpec.model_validate(
+        {
+            "op": "unsupported",
+            "path": {"scope": "artifacts", "value": "result.txt"},
+        },
+    )
+
+    with pytest.raises(EvaluationError, match="Unsupported operation: unsupported"):
+        evaluate_operation(operation, context_factory(tmp_path / "artifacts", {}))
 
 
 @pytest.mark.parametrize(

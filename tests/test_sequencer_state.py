@@ -3,7 +3,7 @@
 import json
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -57,6 +57,39 @@ def test_write_state_wraps_directory_creation_failure(tmp_path: Path) -> None:
         pytest.raises(StateError, match="Cannot write sequencer state"),
     ):
         write_state(path, {"state_schema_version": 1})
+
+
+def test_write_state_wraps_serialization_failure(tmp_path: Path) -> None:
+    """Non-JSON state fails through the persistence error contract."""
+    path = tmp_path / "state" / "state.json"
+
+    with pytest.raises(StateError, match="Cannot write sequencer state"):
+        write_state(path, {"state_schema_version": 1, "invalid": object()})
+
+    assert not list(path.parent.glob(".state-*.tmp"))
+
+
+def test_lock_initialization_wraps_open_failure(tmp_path: Path) -> None:
+    """Lock-file open failures use the state error contract."""
+    with (
+        patch.object(Path, "open", side_effect=OSError("denied")),
+        pytest.raises(StateError, match="Cannot open sequencer transition lock"),
+    ):
+        SequencerLock(tmp_path / "transition.lock")
+
+
+def test_lock_initialization_closes_handle_after_region_failure(tmp_path: Path) -> None:
+    """A Windows-region setup failure cannot leak its opened handle."""
+    handle = MagicMock()
+
+    with (
+        patch.object(Path, "open", return_value=handle),
+        patch.object(SequencerLock, "_ensure_lock_region", side_effect=OSError("denied")),
+        pytest.raises(StateError, match="Cannot open sequencer transition lock"),
+    ):
+        SequencerLock(tmp_path / "transition.lock")
+
+    handle.close.assert_called_once_with()
 
 
 def test_state_round_trip_uses_repository_run_layout(tmp_path: Path) -> None:

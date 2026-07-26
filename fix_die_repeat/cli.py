@@ -148,7 +148,7 @@ class _RootGroup(click.Group):
                 exc.format_message(),
                 context=context,
             )
-            ctx.exit(_emit_sequencer_result(result, diagnostic=True))
+            _exit_with_sequencer_result(result, diagnostic=True)
 
 
 def _sequencer_usage_context(

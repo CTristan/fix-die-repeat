@@ -5,6 +5,7 @@ from types import MappingProxyType
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
 from fix_die_repeat.sequencer_workflow import (
     MAX_CONDITION_DEPTH,
@@ -204,6 +205,11 @@ def test_flag_conditions_match_declarations(
     subject_suffix: str,
 ) -> None:
     """Flag conditions reject unknown names and undeclared enum values."""
+    serialized_condition = yaml.safe_dump(
+        condition,
+        default_flow_style=True,
+        sort_keys=True,
+    ).strip()
     content = f"""\
 schema_version: 1
 id: flag-condition
@@ -217,7 +223,7 @@ steps:
   conditional:
     instruction: Check.
     mutates_repository: false
-    applies_when: {condition!r}
+    applies_when: {serialized_condition}
     routes:
       - id: finish
         when: always
@@ -250,9 +256,9 @@ def test_load_workflow_resolves_flags_and_active_steps(tmp_path: Path) -> None:
 def test_load_workflow_fingerprint_ignores_formatting(tmp_path: Path) -> None:
     """Comments and mapping presentation do not change semantic identity."""
     first = load_workflow(_write_workflow(tmp_path), {})
-    reformatted = VALID_WORKFLOW.replace(
-        "schema_version: 1",
-        "# harmless comment\nschema_version: 1",
+    reformatted = "# harmless comment\n" + yaml.safe_dump(
+        yaml.safe_load(VALID_WORKFLOW),
+        sort_keys=True,
     )
     second_path = tmp_path / "reformatted.yaml"
     second_path.write_text(reformatted)
@@ -453,6 +459,9 @@ def test_load_workflow_rejects_oversized_file(tmp_path: Path) -> None:
         r"C:\absolute\result.json",
         r"..\result.json",
         "C:/foo/bar.json",
+        "",
+        "a/",
+        "a//b",
     ],
 )
 def test_path_spec_rejects_absolute_dot_and_nul_paths(value: str) -> None:
@@ -527,8 +536,13 @@ def test_load_workflow_reports_malformed_applicability(
         f"    instruction: Fix the failures.\n    applies_when:\n      {condition}",
     )
 
-    with pytest.raises(WorkflowValidationError):
+    with pytest.raises(WorkflowValidationError) as raised:
         load_workflow(_write_workflow(tmp_path, content), {})
+
+    expected_code = (
+        "invalid_flag_condition" if condition.startswith("flag:") else "invalid_condition"
+    )
+    assert expected_code in {gap.code for gap in raised.value.gaps}
 
 
 @pytest.mark.parametrize("condition", ["2026-07-25", "!!binary 'aGVsbG8='"])
@@ -553,8 +567,21 @@ def test_load_workflow_reports_mixed_condition_keys(tmp_path: Path) -> None:
         "      - id: finish\n        when:\n          1: true\n          text: true",
     )
 
-    with pytest.raises(WorkflowValidationError):
+    with pytest.raises(WorkflowValidationError) as raised:
         load_workflow(_write_workflow(tmp_path, content), {})
+
+    assert "invalid_condition" in {gap.code for gap in raised.value.gaps}
+
+
+def test_load_workflow_wraps_excessive_yaml_nesting(tmp_path: Path) -> None:
+    """Recursive YAML parser failures use the workflow validation contract."""
+    path = _write_workflow(tmp_path)
+
+    with (
+        patch("fix_die_repeat.sequencer_workflow.yaml.load", side_effect=RecursionError),
+        pytest.raises(WorkflowValidationError, match="invalid_yaml"),
+    ):
+        load_workflow(path, {})
 
 
 def test_load_workflow_rejects_unhashable_json_type(tmp_path: Path) -> None:

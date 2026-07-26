@@ -140,18 +140,24 @@ def _read_bounded_output(
     limit: int,
     output: bytearray,
     exceeded: threading.Event,
+    errors: list[Exception],
 ) -> None:
     if process.stdout is None:
         return
-    while chunk := process.stdout.read(1024 * 1024):
-        remaining = limit + 1 - len(output)
-        if remaining > 0:
-            output.extend(chunk[:remaining])
-        if len(chunk) > remaining or len(output) > limit:
-            exceeded.set()
-            with suppress(OSError):
-                process.kill()
-            return
+    try:
+        while chunk := process.stdout.read(1024 * 1024):
+            remaining = limit + 1 - len(output)
+            if remaining > 0:
+                output.extend(chunk[:remaining])
+            if len(chunk) > remaining or len(output) > limit:
+                exceeded.set()
+                with suppress(OSError):
+                    process.kill()
+                return
+    except (OSError, ValueError) as exc:
+        errors.append(exc)
+        with suppress(OSError):
+            process.kill()
 
 
 def _run_git_bounded(repo: Path, args: list[str], limit: int) -> bytes:
@@ -168,9 +174,10 @@ def _run_git_bounded(repo: Path, args: list[str], limit: int) -> bytes:
     )
     output = bytearray()
     exceeded = threading.Event()
+    reader_errors: list[Exception] = []
     reader = threading.Thread(
         target=_read_bounded_output,
-        args=(process, limit, output, exceeded),
+        args=(process, limit, output, exceeded, reader_errors),
         daemon=True,
     )
     reader.start()
@@ -187,6 +194,9 @@ def _run_git_bounded(repo: Path, args: list[str], limit: int) -> bytes:
     reader.join()
     if process.stdout is not None:
         process.stdout.close()
+    if reader_errors:
+        msg = f"Cannot read Git probe output: {reader_errors[0]}"
+        raise GitProbeError(msg) from reader_errors[0]
     if exceeded.is_set():
         msg = f"Tracked diff content exceeds the remaining {limit} byte snapshot budget"
         raise GitProbeError(msg)
@@ -339,20 +349,19 @@ def capture_snapshot(repository: RepositoryInfo) -> GitSnapshot:
         repository.root,
         ["ls-files", "--others", "--exclude-standard", "-z"],
     ).stdout
-    untracked_paths = list(filter(None, untracked_output.split("\0")))
+    untracked_paths = sorted(filter(None, untracked_output.split("\0")))
     dirty = DirtyState(
         staged=bool(staged),
         unstaged=bool(unstaged),
         untracked=bool(untracked_paths),
     )
     digest = hashlib.sha256()
-    digest.update((head or "<unborn>").encode())
-    digest.update(b"\0")
-    digest.update((symbolic_ref or "<detached>").encode())
-    digest.update(b"\0staged\0")
-    digest.update(staged)
-    digest.update(b"\0unstaged\0")
-    digest.update(unstaged)
+    _update_digest_field(digest, (head or "<unborn>").encode())
+    _update_digest_field(digest, (symbolic_ref or "<detached>").encode())
+    _update_digest_field(digest, b"staged")
+    _update_digest_field(digest, staged)
+    _update_digest_field(digest, b"unstaged")
+    _update_digest_field(digest, unstaged)
     _update_untracked_digest(repository.root, digest, untracked_paths)
     return GitSnapshot(
         head=head,

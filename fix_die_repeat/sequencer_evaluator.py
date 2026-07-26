@@ -261,7 +261,7 @@ def evaluate_condition(
         if not isinstance(flag, dict) or "name" not in flag or "equals" not in flag:
             msg = "Invalid persisted flag condition"
             raise EvaluationError(msg)
-        return context.flags.get(str(flag["name"])) == flag["equals"]
+        return _json_equal(context.flags.get(str(flag["name"])), flag["equals"])
     if set(value) in ({"all"}, {"any"}):
         key = next(iter(value))
         children = value[key]

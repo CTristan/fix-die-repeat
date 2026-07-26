@@ -50,7 +50,6 @@ FLAG_GAP_CODES = frozenset(
     {
         "duplicate_flag",
         "invalid_flag",
-        "invalid_flag_value",
         "missing_flag",
         "unknown_flag",
     },
@@ -318,6 +317,10 @@ def _load_yaml(path: Path) -> object:
         raise WorkflowValidationError([_gap(code, str(path), str(exc))]) from exc
     except yaml.YAMLError as exc:
         raise WorkflowValidationError([_gap("invalid_yaml", str(path), str(exc))]) from exc
+    except RecursionError as exc:
+        raise WorkflowValidationError(
+            [_gap("invalid_yaml", str(path), "workflow nesting is too deep")],
+        ) from exc
 
 
 def _pydantic_gaps(exc: ValidationError) -> list[ValidationGap]:
@@ -454,7 +457,10 @@ def _validate_flag_reference(
         gaps.append(_gap("invalid_flag_condition", subject, "flag requires name and equals"))
         return
     name = value["name"]
-    if not isinstance(name, str) or name not in declarations:
+    if not isinstance(name, str):
+        gaps.append(_gap("invalid_flag_condition", subject, "flag name must be a string"))
+        return
+    if name not in declarations:
         gaps.append(_gap("unknown_flag", subject, f"flag {name!r} is not declared"))
         return
     declaration = declarations[name]
@@ -522,8 +528,8 @@ def parse_condition(
     declarations: dict[str, FlagDeclaration],
     *,
     depth: int = 0,
-) -> object:
-    """Validate a condition and return its normalized representation."""
+) -> None:
+    """Validate a condition and collect every discovered gap."""
     if depth > MAX_CONDITION_DEPTH:
         gaps.append(
             _gap(
@@ -532,12 +538,12 @@ def parse_condition(
                 f"condition nesting exceeds {MAX_CONDITION_DEPTH}",
             ),
         )
-        return value
+        return
     if value == "always":
-        return "always"
+        return
     if not isinstance(value, dict):
         gaps.append(_gap("invalid_condition", subject, "condition must be a mapping or always"))
-        return value
+        return
 
     keys = set(value)
     if keys == {"flag"}:
@@ -562,9 +568,16 @@ def parse_condition(
             declarations,
             depth=depth + 1,
         )
-    else:
+    elif "op" in value:
         _parse_operation(value, subject, gaps)
-    return value
+    else:
+        gaps.append(
+            _gap(
+                "invalid_condition",
+                subject,
+                "condition mapping must declare flag, all, any, not, or op",
+            ),
+        )
 
 
 def _flag_condition_value(
@@ -694,7 +707,7 @@ class _Graph:
     non_repeat_edges: dict[str, set[str]]
 
 
-@dataclass
+@dataclass(frozen=True)
 class _RouteContext:
     """Shared state for validating one step's routes."""
 
@@ -703,7 +716,6 @@ class _RouteContext:
     flags: dict[str, bool | str]
     graph: _Graph
     gaps: list[ValidationGap]
-    step_id: str
 
 
 @dataclass
@@ -751,20 +763,21 @@ def _validate_postconditions(
 
 
 def _validate_route_identity(
+    step_id: str,
     route: Route,
     index: int,
     seen: _RouteSeen,
     context: _RouteContext,
 ) -> None:
-    _validate_id(route.id, f"steps.{context.step_id}.routes", context.gaps)
+    _validate_id(route.id, f"steps.{step_id}.routes", context.gaps)
     if route.id in seen.ids:
         context.gaps.append(
-            _gap("duplicate_route_id", context.step_id, f"duplicate route {route.id!r}"),
+            _gap("duplicate_route_id", step_id, f"duplicate route {route.id!r}"),
         )
     seen.ids.add(route.id)
     parse_condition(
         route.when,
-        f"steps.{context.step_id}.routes.{route.id}",
+        f"steps.{step_id}.routes.{route.id}",
         context.gaps,
         context.workflow.flags,
     )
@@ -773,7 +786,7 @@ def _validate_route_identity(
         context.gaps.append(
             _gap(
                 "duplicate_route_predicate",
-                context.step_id,
+                step_id,
                 f"route {route.id!r} repeats an earlier predicate",
             ),
         )
@@ -785,6 +798,7 @@ def _validate_route_identity(
 
 
 def _record_route_target(
+    step_id: str,
     route: Route,
     context: _RouteContext,
 ) -> None:
@@ -792,7 +806,7 @@ def _record_route_target(
         if route.terminal is not None:
             _validate_id(
                 route.terminal.code,
-                f"steps.{context.step_id}.routes.{route.id}",
+                f"steps.{step_id}.routes.{route.id}",
                 context.gaps,
             )
         return
@@ -805,7 +819,7 @@ def _record_route_target(
             ),
         )
         return
-    if context.step_id not in context.active:
+    if step_id not in context.active:
         return
     if route.to not in context.active:
         condition_value = _flag_condition_value(
@@ -821,9 +835,9 @@ def _record_route_target(
                 ),
             )
         return
-    context.graph.edges[context.step_id].add(route.to)
+    context.graph.edges[step_id].add(route.to)
     if not route.repeat:
-        context.graph.non_repeat_edges[context.step_id].add(route.to)
+        context.graph.non_repeat_edges[step_id].add(route.to)
 
 
 def _validate_routes(
@@ -831,11 +845,10 @@ def _validate_routes(
     step: Step,
     context: _RouteContext,
 ) -> None:
-    context.step_id = step_id
     seen = _RouteSeen(ids=set(), predicates=set(), count=len(step.routes))
     for index, route in enumerate(step.routes):
-        _validate_route_identity(route, index, seen, context)
-        _record_route_target(route, context)
+        _validate_route_identity(step_id, route, index, seen, context)
+        _record_route_target(step_id, route, context)
     if step.routes[-1].when != "always":
         context.gaps.append(
             _gap("missing_fallback", step_id, "last route must use when: always"),
@@ -907,7 +920,6 @@ def _validate_graph(
         flags=flags,
         graph=graph,
         gaps=gaps,
-        step_id="",
     )
     for step_id, step in workflow.steps.items():
         _validate_id(step_id, f"steps.{step_id}", gaps)

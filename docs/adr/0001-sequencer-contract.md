@@ -384,10 +384,18 @@ which means `fix-die-repeat sequencer` cannot accidentally consume an existing l
 `fix-die-repeat --help` will show the existing loop options plus the new `sequencer` command.
 `fix-die-repeat sequencer --help` will show only the sequencer protocol.
 
-`init` stores the canonical workflow source path and normalized workflow. `next` and `done` load
-the explicit `--workflow` when present, otherwise they load the stored source path. Either command
-returns `blocked` when the stored source is missing, invalid, or semantically drifted. An explicit
-path that cannot be read returns `environment_error`.
+`init` stores the canonical workflow source path and normalized workflow. `next` and `done` select
+an explicit `--workflow` before they inspect the stored source path. A readable explicit workflow
+with the persisted workflow ID and fingerprint is a relocation, so the command persists its
+canonical path even when the stored source is missing or moved. `next` persists that repair before
+it returns the instruction. `done` combines the repair with a successful transition or recovery;
+if a later ordering, recovery, or postcondition check blocks the command, it persists the repair
+as its own revision before returning the blocked result.
+
+Without an explicit workflow, `next` and `done` return `blocked` when the stored source is missing,
+invalid, or semantically drifted. An explicit path that is missing or unreadable returns
+`environment_error`; an explicit readable workflow that is invalid or drifted returns `blocked`.
+Commands never fall back to the stored source after an explicit source fails.
 
 `status` always reads persisted state first. It reports the workflow as `matching`, `missing`,
 `invalid`, or `drifted`, but a configuration problem cannot hide the cursor or recovery state.
@@ -488,7 +496,7 @@ current Click behavior.
   `repeated: true`, and no state change. Its outcome reflects the persisted state, so an issued
   mutating step returns `recovery`.
 - `init` with a different source path but the same workflow ID and fingerprint records the new
-  path and increments `state_revision`.
+  path, increments `state_revision`, and returns `created: false` and `repeated: true`.
 - `init` against a terminal run returns `terminal`.
 - `init` with different flags or a different workflow fingerprint returns `blocked`.
 - `next`, `done`, or `status` for a missing run returns `blocked` with `run_not_initialized`.
@@ -503,6 +511,8 @@ current Click behavior.
 - `status` returns `recovery` for an issued mutating step, `blocked` for configuration drift, and
   `proceed` for any other incomplete state. Terminal state takes precedence over configuration
   health. `status` never changes state.
+- State retains the most recent 1,000 transition and recovery events in order. Older events age
+  out so repeated workflows cannot grow `state.json` without limit.
 
 A successful `done` returns the next instruction in the same response. This removes an
 unnecessary round trip while preserving `next` as a safe way to retrieve that instruction again.

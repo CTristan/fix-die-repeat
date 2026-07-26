@@ -49,9 +49,15 @@ class SequencerLock:
 
     def __init__(self, path: Path) -> None:
         """Open the dedicated lock file without treating its contents as state."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self._handle = path.open("a+", encoding="utf-8")
-        self._ensure_lock_region()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._handle = path.open("a+", encoding="utf-8")
+            self._ensure_lock_region()
+        except OSError as exc:
+            if hasattr(self, "_handle"):
+                self._handle.close()
+            msg = f"Cannot open sequencer transition lock {path}: {exc}"
+            raise StateError(msg) from exc
 
     def _ensure_lock_region(self) -> None:
         if sys.platform != "win32":
@@ -192,7 +198,7 @@ def write_state(path: Path, state: dict[str, Any]) -> None:
         temporary_path.replace(path)
         temporary_path = None
         _sync_directory(path.parent)
-    except OSError as exc:
+    except (OSError, TypeError, ValueError) as exc:
         msg = f"Cannot write sequencer state {path}: {exc}"
         raise StateError(msg) from exc
     finally:

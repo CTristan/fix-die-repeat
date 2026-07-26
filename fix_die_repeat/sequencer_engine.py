@@ -49,11 +49,19 @@ EXIT_CODES = {
     "configuration_error": 78,
     "interrupted": 130,
 }
+MAX_HISTORY_EVENTS = 1000
 
 
 def _state_exists(path: Path) -> bool:
     """Return whether one authoritative run state file exists."""
     return path.exists()
+
+
+def _append_history(state: dict[str, Any], event: dict[str, Any]) -> None:
+    history = state["history"]
+    history.append(event)
+    if len(history) > MAX_HISTORY_EVENTS:
+        del history[:-MAX_HISTORY_EVENTS]
 
 
 @dataclass
@@ -112,6 +120,14 @@ class DoneOptions:
     workflow_path: Path | None = None
     force: bool = False
     recover: bool = False
+
+
+@dataclass(frozen=True)
+class _CompletionOptions:
+    """Transition controls already resolved under the run lock."""
+
+    force: bool
+    relocated: bool
 
 
 @dataclass(frozen=True)
@@ -555,19 +571,33 @@ class SequencerService:
         check = self._configuration_check(state, options.workflow_path)
         if check.status != "matching":
             return self._configuration_block("done", state, located, check)
+        relocated = self._apply_relocation(state, check)
         if step_id != state["cursor"]:
+            self._persist_relocation(state, located, relocated=relocated)
             return self._step_order_block(state, located, step_id)
         loaded = _require_loaded(check)
         step = loaded.active_steps[state["cursor"]]
         if options.recover:
-            return self._recover_step(state, located, step)
+            return self._recover_step(state, located, step, relocated=relocated)
         return self._complete_step(
             state,
             located,
             check,
             step,
-            force=options.force,
+            _CompletionOptions(force=options.force, relocated=relocated),
         )
+
+    @staticmethod
+    def _persist_relocation(
+        state: dict[str, Any],
+        located: _LocatedRun,
+        *,
+        relocated: bool,
+    ) -> None:
+        if not relocated:
+            return
+        state["revision"] += 1
+        write_state(located.paths.state, state)
 
     @staticmethod
     def _step_order_block(
@@ -591,8 +621,11 @@ class SequencerService:
         state: dict[str, Any],
         located: _LocatedRun,
         step: Step,
+        *,
+        relocated: bool,
     ) -> SequencerResult:
         if not step.mutates_repository or state["attempt"]["status"] != "issued":
+            self._persist_relocation(state, located, relocated=relocated)
             return _blocked_result(
                 "done",
                 located,
@@ -603,7 +636,8 @@ class SequencerService:
                 ),
                 state=state,
             )
-        state["history"].append(
+        _append_history(
+            state,
             {
                 "type": "recovery",
                 "step": state["cursor"],
@@ -680,13 +714,17 @@ class SequencerService:
         located: _LocatedRun,
         check: _ConfigurationCheck,
         step: Step,
-        *,
-        force: bool,
+        options: _CompletionOptions,
     ) -> SequencerResult:
         # Closed built-in probes stay under the lock so validation and commit observe one state.
         context = self._evaluation_context(state, located)
         gaps = self._postcondition_gaps(step, context)
-        if gaps and not force:
+        if gaps and not options.force:
+            self._persist_relocation(
+                state,
+                located,
+                relocated=options.relocated,
+            )
             result = _base_result("done", state, located)
             result.outcome = "blocked"
             result.message = "Postconditions did not pass"
@@ -705,8 +743,7 @@ class SequencerService:
             "revision": state["revision"],
             "timestamp": _timestamp(),
         }
-        self._apply_relocation(state, check)
-        state["history"].append(event)
+        _append_history(state, event)
         state["revision"] += 1
         newly_issued = False
         if route.terminal is not None:
