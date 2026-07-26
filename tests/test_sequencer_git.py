@@ -301,3 +301,33 @@ def test_git_probe_rejects_non_repository(tmp_path: Path) -> None:
     """Probe failures remain environment errors."""
     with pytest.raises(GitProbeError, match="Git working tree"):
         resolve_repository(tmp_path)
+
+
+def test_resolve_repository_reports_probe_timeout(tmp_path: Path) -> None:
+    """Repository discovery distinguishes a timed-out Git probe."""
+    with (
+        patch.object(
+            sequencer_git,
+            "_run_git",
+            return_value=sequencer_git._GitResult(
+                returncode=sequencer_git.COMMAND_TIMEOUT_EXIT_CODE,
+                stdout="",
+                stderr="Command timed out after 30 seconds",
+            ),
+        ),
+        pytest.raises(GitProbeError, match="timed out"),
+    ):
+        resolve_repository(tmp_path)
+
+
+def test_resolve_repository_rejects_empty_success_output(tmp_path: Path) -> None:
+    """Repository discovery requires a root path from a successful probe."""
+    with (
+        patch.object(
+            sequencer_git,
+            "_run_git",
+            return_value=sequencer_git._GitResult(returncode=0, stdout="", stderr=""),
+        ),
+        pytest.raises(GitProbeError, match="empty repository root"),
+    ):
+        resolve_repository(tmp_path)

@@ -240,6 +240,8 @@ def run_command(
     except FileNotFoundError:
         return (127, "", f"Command not found: {args[0]}")
     except subprocess.TimeoutExpired:
+        if check:
+            raise
         return (
             COMMAND_TIMEOUT_EXIT_CODE,
             "",

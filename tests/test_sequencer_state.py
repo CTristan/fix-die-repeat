@@ -45,6 +45,23 @@ def test_write_state_wraps_directory_creation_failure(tmp_path: Path) -> None:
         write_state(path, {"state_schema_version": 1})
 
 
+def test_state_round_trip_uses_repository_run_layout(tmp_path: Path) -> None:
+    """State writes round-trip atomically under the repository-scoped run path."""
+    repository = RepositoryInfo(root=tmp_path, common_dir=tmp_path / ".git", key="repo-key")
+    paths = run_paths(tmp_path / "home", repository, "run-1")
+    state = {"state_schema_version": 1, "message": "ready"}
+
+    write_state(paths.state, state)
+
+    assert paths.directory.parent.name == "runs"
+    assert paths.directory.parent.parent.name == "repo-key"
+    assert paths.state == paths.directory / "state.json"
+    assert paths.lock == paths.directory / "transition.lock"
+    assert paths.artifacts == paths.directory / "artifacts"
+    assert read_state(paths.state) == state
+    assert list(paths.directory.glob(".state-*.tmp")) == []
+
+
 def test_lock_closes_handle_when_unlock_fails(tmp_path: Path) -> None:
     """Unlock errors cannot leak the lock-file handle."""
     lock = SequencerLock(tmp_path / "transition.lock")

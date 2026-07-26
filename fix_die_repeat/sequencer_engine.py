@@ -51,6 +51,11 @@ EXIT_CODES = {
 }
 
 
+def _state_exists(path: Path) -> bool:
+    """Return whether one authoritative run state file exists."""
+    return path.exists()
+
+
 @dataclass
 class SequencerResult:
     """Stable command result before JSON serialization."""
@@ -374,7 +379,7 @@ class SequencerService:
         with SequencerLock(located.paths.lock):
             # Reparse under the lock so the persisted graph matches the validated source.
             loaded = load_workflow(workflow_path, flags)
-            if located.paths.state.exists():
+            if _state_exists(located.paths.state):
                 return self._repeat_init(loaded, located)
             located.paths.artifacts.mkdir(parents=True, exist_ok=True)
             initial = capture_snapshot(located.repository)
@@ -464,10 +469,10 @@ class SequencerService:
     ) -> SequencerResult:
         """Report persisted cursor and configuration health without writing."""
         located = self._locate(repository, run_id)
-        if not located.paths.state.exists():
+        if not _state_exists(located.paths.state):
             return self._missing_result("status", located)
         with SequencerLock(located.paths.lock):
-            if not located.paths.state.exists():
+            if not _state_exists(located.paths.state):
                 return self._missing_result("status", located)
             state = self._load_existing(located)
             check = self._configuration_check(state, workflow_path)
@@ -490,10 +495,10 @@ class SequencerService:
     ) -> SequencerResult:
         """Return the current instruction without advancing the cursor."""
         located = self._locate(repository, run_id)
-        if not located.paths.state.exists():
+        if not _state_exists(located.paths.state):
             return self._missing_result("next", located)
         with SequencerLock(located.paths.lock):
-            if not located.paths.state.exists():
+            if not _state_exists(located.paths.state):
                 return self._missing_result("next", located)
             state = self._load_existing(located)
             if state["status"] == "terminal":
@@ -529,10 +534,10 @@ class SequencerService:
         """Validate and advance the current step once."""
         resolved_options = options or DoneOptions()
         located = self._locate(repository, run_id)
-        if not located.paths.state.exists():
+        if not _state_exists(located.paths.state):
             return self._missing_result("done", located)
         with SequencerLock(located.paths.lock):
-            if not located.paths.state.exists():
+            if not _state_exists(located.paths.state):
                 return self._missing_result("done", located)
             state = self._load_existing(located)
             return self._done_from_state(state, located, step_id, resolved_options)

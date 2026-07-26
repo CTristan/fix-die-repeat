@@ -100,8 +100,10 @@ for an issued mutating step returns `recovery` because the sequencer cannot tell
 external work started before the interruption. Reconcile the repository, then call
 `done STEP --recover` to acknowledge and reissue it.
 
-`--force` bypasses failed postconditions and records every bypassed gap in the transition history.
-Use it only when you intend to accept those missing proofs.
+`--force` bypasses only failed postconditions backed by validators that produced reliable
+results, and it records each bypassed gap in transition history. It cannot bypass recovery,
+configuration drift, cursor identity or ordering checks, or a Git probe that failed to produce
+a reliable result.
 
 See the [check, fix, and review example](../examples/sequencer/check-fix-review/) for a complete
 workflow. The [sequencer ADR](adr/0001-sequencer-contract.md) documents the schema, validators,

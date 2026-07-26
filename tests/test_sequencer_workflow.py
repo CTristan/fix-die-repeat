@@ -8,13 +8,12 @@ import pytest
 
 from fix_die_repeat.sequencer_workflow import (
     MAX_WORKFLOW_BYTES,
+    SHA256_HEX_LENGTH,
+    FlagDeclaration,
     PathSpec,
     WorkflowValidationError,
     load_workflow,
 )
-
-SHA256_HEX_LENGTH = 64
-
 
 VALID_WORKFLOW = """\
 schema_version: 1
@@ -72,6 +71,167 @@ def _write_workflow(tmp_path: Path, content: str = VALID_WORKFLOW) -> Path:
     path = tmp_path / "workflow.yaml"
     path.write_text(content)
     return path
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        {"type": "boolean", "values": ["true"]},
+        {"type": "boolean", "default": "true"},
+        {"type": "enum", "values": ["fast", "fast"]},
+        {"type": "enum", "values": ["fast", ""]},
+        {"type": "enum", "values": ["fast"], "default": "safe"},
+    ],
+)
+def test_flag_declaration_rejects_inconsistent_values(declaration: dict[str, object]) -> None:
+    """Flag declarations reject values outside their declared type contract."""
+    with pytest.raises(ValueError, match=r"boolean|enum"):
+        FlagDeclaration.model_validate(declaration)
+
+
+def test_load_workflow_reports_missing_required_flag(tmp_path: Path) -> None:
+    """A declared flag without a default must be supplied."""
+    content = VALID_WORKFLOW.replace("    default: true\n", "")
+
+    with pytest.raises(WorkflowValidationError) as raised:
+        load_workflow(_write_workflow(tmp_path, content), {})
+
+    assert [gap.code for gap in raised.value.gaps].count("missing_flag") == 1
+    assert "unknown_flag" not in {gap.code for gap in raised.value.gaps}
+
+
+def test_load_workflow_requires_final_fallback(tmp_path: Path) -> None:
+    """Every route list ends with an unconditional fallback."""
+    content = VALID_WORKFLOW.replace(
+        "      - id: finish\n        when: always",
+        """      - id: finish
+        when:
+          flag:
+            name: review
+            equals: true""",
+    )
+
+    with pytest.raises(WorkflowValidationError) as raised:
+        load_workflow(_write_workflow(tmp_path, content), {})
+
+    assert "missing_fallback" in {gap.code for gap in raised.value.gaps}
+
+
+def test_load_workflow_rejects_early_fallback(tmp_path: Path) -> None:
+    """An unconditional route cannot shadow later routes."""
+    content = VALID_WORKFLOW.replace(
+        """        when:
+          op: json.pointer_equals
+          path:
+            scope: artifacts
+            value: result.json
+          pointer: /passed
+          expected: false""",
+        "        when: always",
+        1,
+    )
+
+    with pytest.raises(WorkflowValidationError) as raised:
+        load_workflow(_write_workflow(tmp_path, content), {})
+
+    assert "early_fallback" in {gap.code for gap in raised.value.gaps}
+
+
+def test_enum_flag_resolves_before_ordered_route_validation(tmp_path: Path) -> None:
+    """Declared enum values remain available to ordered route predicates."""
+    content = """\
+schema_version: 1
+id: enum-route
+start: check
+flags:
+  mode:
+    type: enum
+    values: [fix, skip]
+    default: skip
+steps:
+  check:
+    instruction: Check.
+    mutates_repository: false
+    routes:
+      - id: fix
+        when:
+          flag:
+            name: mode
+            equals: fix
+        to: repair
+      - id: finish
+        when: always
+        terminal:
+          code: passed
+          status: success
+          message: Done.
+  repair:
+    instruction: Repair.
+    mutates_repository: true
+    routes:
+      - id: recheck
+        when: always
+        to: check
+        repeat: true
+"""
+
+    loaded = load_workflow(_write_workflow(tmp_path, content), {"mode": "fix"})
+
+    assert loaded.flags == {"mode": "fix"}
+    assert [route.id for route in loaded.workflow.steps["check"].routes] == ["fix", "finish"]
+
+
+@pytest.mark.parametrize(
+    ("condition", "code", "subject_suffix"),
+    [
+        (
+            {"all": [{"flag": {"name": "missing", "equals": True}}]},
+            "unknown_flag",
+            ".all.0",
+        ),
+        (
+            {"flag": {"name": "mode", "equals": "other"}},
+            "invalid_flag_condition",
+            "applies_when",
+        ),
+    ],
+)
+def test_flag_conditions_match_declarations(
+    tmp_path: Path,
+    condition: dict[str, object],
+    code: str,
+    subject_suffix: str,
+) -> None:
+    """Flag conditions reject unknown names and undeclared enum values."""
+    content = f"""\
+schema_version: 1
+id: flag-condition
+start: conditional
+flags:
+  mode:
+    type: enum
+    values: [fix, skip]
+    default: skip
+steps:
+  conditional:
+    instruction: Check.
+    mutates_repository: false
+    applies_when: {condition!r}
+    routes:
+      - id: finish
+        when: always
+        terminal:
+          code: passed
+          status: success
+          message: Done.
+"""
+
+    with pytest.raises(WorkflowValidationError) as raised:
+        load_workflow(_write_workflow(tmp_path, content), {})
+
+    matching = [gap for gap in raised.value.gaps if gap.code == code]
+    assert matching
+    assert matching[0].subject.endswith(subject_suffix)
 
 
 def test_load_workflow_resolves_flags_and_active_steps(tmp_path: Path) -> None:

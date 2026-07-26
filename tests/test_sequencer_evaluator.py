@@ -2,9 +2,12 @@
 
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
+from fix_die_repeat import sequencer_evaluator
 from fix_die_repeat.sequencer_evaluator import (
     MAX_JSON_ARTIFACT_BYTES,
     EvaluationContext,
@@ -104,6 +107,34 @@ def test_json_valid_rejects_oversized_artifact(
     assert "exceeds 1 MiB" in result.message
 
 
+def test_json_valid_bounds_read_when_artifact_grows_after_stat(
+    tmp_path: Path,
+    context_factory: Callable[[Path, dict[str, bool | str]], EvaluationContext],
+) -> None:
+    """The read limit remains authoritative when a file grows after inspection."""
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    artifact = artifact_root / "result.json"
+    artifact.write_bytes(b"x" * (MAX_JSON_ARTIFACT_BYTES + 1))
+    operation = OperationSpec.model_validate(
+        {
+            "op": "json.valid",
+            "path": {"scope": "artifacts", "value": "result.json"},
+        },
+    )
+    real_stat = artifact.stat()
+
+    with patch.object(
+        Path,
+        "stat",
+        return_value=SimpleNamespace(st_mode=real_stat.st_mode, st_size=1),
+    ):
+        result = evaluate_operation(operation, context_factory(artifact_root, {}))
+
+    assert not result.passed
+    assert "exceeds 1 MiB" in result.message
+
+
 def test_json_valid_reports_invalid_utf8(
     tmp_path: Path,
     context_factory: Callable[[Path, dict[str, bool | str]], EvaluationContext],
@@ -157,6 +188,28 @@ def test_json_pointer_equals_respects_json_types(
     assert result.passed is (expected_outcome == "pass")
 
 
+def test_json_pointer_equals_respects_nested_json_types(
+    tmp_path: Path,
+    context_factory: Callable[[Path, dict[str, bool | str]], EvaluationContext],
+) -> None:
+    """Nested booleans and numbers retain distinct JSON types."""
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    (artifact_root / "result.json").write_text('{"value": {"nested": [true]}}')
+    operation = OperationSpec.model_validate(
+        {
+            "op": "json.pointer_equals",
+            "path": {"scope": "artifacts", "value": "result.json"},
+            "pointer": "/value",
+            "expected": {"nested": [1]},
+        },
+    )
+
+    result = evaluate_operation(operation, context_factory(artifact_root, {}))
+
+    assert not result.passed
+
+
 @pytest.mark.parametrize("pointer", ["/values/01", "/values/\N{ARABIC-INDIC DIGIT ONE}"])
 def test_json_pointer_rejects_noncanonical_array_indices(
     tmp_path: Path,
@@ -181,14 +234,65 @@ def test_json_pointer_rejects_noncanonical_array_indices(
     assert not result.passed
 
 
-@pytest.mark.parametrize("key", ["all", "any"])
-def test_persisted_compound_condition_requires_list(
+@pytest.mark.parametrize(("key", "children"), [("all", 1), ("any", 1), ("all", []), ("any", [])])
+def test_persisted_compound_condition_requires_non_empty_list(
     tmp_path: Path,
     key: str,
+    children: object,
     context_factory: Callable[[Path, dict[str, bool | str]], EvaluationContext],
 ) -> None:
     """Corrupt persisted compound conditions fail closed."""
     context = context_factory(tmp_path / "artifacts", {})
 
     with pytest.raises(EvaluationError, match=f"Invalid persisted {key} condition"):
-        evaluate_condition({key: 1}, context)
+        evaluate_condition({key: children}, context)
+
+
+def test_persisted_not_condition_inverts_child(
+    tmp_path: Path,
+    context_factory: Callable[[Path, dict[str, bool | str]], EvaluationContext],
+) -> None:
+    """Persisted negation evaluates its child before inversion."""
+    context = context_factory(tmp_path / "artifacts", {"review": True})
+
+    assert not evaluate_condition({"not": {"flag": {"name": "review", "equals": True}}}, context)
+
+
+def test_artifact_path_rejects_symlink_escape(
+    tmp_path: Path,
+    context_factory: Callable[[Path, dict[str, bool | str]], EvaluationContext],
+) -> None:
+    """Resolved artifact paths cannot escape through a symlink."""
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (artifact_root / "link").symlink_to(outside, target_is_directory=True)
+    operation = OperationSpec.model_validate(
+        {
+            "op": "path.exists",
+            "path": {"scope": "artifacts", "value": "link/result.json"},
+        },
+    )
+
+    with pytest.raises(EvaluationError, match="escapes artifacts scope"):
+        evaluate_operation(operation, context_factory(artifact_root, {}))
+
+
+def test_git_probe_error_uses_evaluation_error_contract(
+    tmp_path: Path,
+    context_factory: Callable[[Path, dict[str, bool | str]], EvaluationContext],
+) -> None:
+    """Git probe failures remain closed evaluator errors."""
+    operation = OperationSpec.model_validate({"op": "git.is_clean"})
+    context = context_factory(tmp_path / "artifacts", {})
+
+    with (
+        patch.object(
+            sequencer_evaluator,
+            "evaluate_git_operation",
+            side_effect=sequencer_evaluator.GitProbeError("probe failed"),
+        ),
+        pytest.raises(EvaluationError, match="probe failed"),
+    ):
+        evaluate_operation(operation, context)

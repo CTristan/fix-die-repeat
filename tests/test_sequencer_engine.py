@@ -341,7 +341,7 @@ def test_state_disappearance_after_lock_returns_missing(
     repo = _repo(tmp_path)
     service = _service(tmp_path)
 
-    with patch.object(Path, "exists", side_effect=[True, False]):
+    with patch("fix_die_repeat.sequencer_engine._state_exists", side_effect=[True, False]):
         result = getattr(service, method)(repo, "run-1", *arguments)
 
     assert result.gaps[0]["code"] == "run_not_initialized"

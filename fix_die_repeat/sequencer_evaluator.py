@@ -58,6 +58,22 @@ def _resolve_path(operation: OperationSpec, context: EvaluationContext) -> Path:
     return resolved
 
 
+def _parse_json_content(path: Path, content: bytes) -> tuple[object | None, str | None]:
+    def reject_constant(value: str) -> None:
+        msg = f"non-standard constant {value}"
+        raise ValueError(msg)
+
+    try:
+        raw = content.decode("utf-8")
+        return json.loads(raw, parse_constant=reject_constant), None
+    except json.JSONDecodeError as exc:
+        return None, f"{path} is not valid JSON: {exc.msg}"
+    except UnicodeDecodeError as exc:
+        return None, f"{path} is not valid UTF-8 JSON: {exc}"
+    except ValueError as exc:
+        return None, f"{path} is not valid JSON: {exc}"
+
+
 def _read_json(path: Path) -> tuple[object | None, str | None]:
     if not path.is_file():
         return None, f"{path} is not a regular file"
@@ -69,22 +85,15 @@ def _read_json(path: Path) -> tuple[object | None, str | None]:
     if size > MAX_JSON_ARTIFACT_BYTES:
         return None, f"{path} exceeds 1 MiB"
 
-    def reject_constant(value: str) -> None:
-        msg = f"non-standard constant {value}"
-        raise ValueError(msg)
-
     try:
-        raw = path.read_text(encoding="utf-8")
-        return json.loads(raw, parse_constant=reject_constant), None
-    except json.JSONDecodeError as exc:
-        return None, f"{path} is not valid JSON: {exc.msg}"
-    except UnicodeDecodeError as exc:
-        return None, f"{path} is not valid UTF-8 JSON: {exc}"
-    except ValueError as exc:
-        return None, f"{path} is not valid JSON: {exc}"
+        with path.open("rb") as handle:
+            content = handle.read(MAX_JSON_ARTIFACT_BYTES + 1)
     except OSError as exc:
         msg = f"Cannot read {path}: {exc}"
         raise EvaluationError(msg) from exc
+    if len(content) > MAX_JSON_ARTIFACT_BYTES:
+        return None, f"{path} exceeds 1 MiB"
+    return _parse_json_content(path, content)
 
 
 def _json_pointer(value: object, pointer: str) -> tuple[bool, object | None]:
@@ -122,6 +131,21 @@ def _json_type(value: object) -> str:
     return "object"
 
 
+def _json_equal(left: object, right: object) -> bool:
+    if _json_type(left) != _json_type(right):
+        return False
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            _json_equal(left_item, right_item)
+            for left_item, right_item in zip(left, right, strict=True)
+        )
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left.keys() == right.keys() and all(
+            _json_equal(left[key], right[key]) for key in left
+        )
+    return left == right
+
+
 def _evaluate_json(operation: OperationSpec, path: Path) -> OperationResult:
     value, error = _read_json(path)
     if error is not None:
@@ -135,10 +159,7 @@ def _evaluate_json(operation: OperationSpec, path: Path) -> OperationResult:
             message=f"{path} has no value at {operation.pointer}",
         )
     if operation.op == "json.pointer_equals":
-        passed = (
-            _json_type(selected) == _json_type(operation.expected)
-            and selected == operation.expected
-        )
+        passed = _json_equal(selected, operation.expected)
         comparison = "equals" if passed else "does not equal"
         return OperationResult(
             passed=passed,
@@ -219,7 +240,7 @@ def evaluate_condition(value: object, context: EvaluationContext) -> bool:
     if set(value) in ({"all"}, {"any"}):
         key = next(iter(value))
         children = value[key]
-        if not isinstance(children, list):
+        if not isinstance(children, list) or not children:
             msg = f"Invalid persisted {key} condition"
             raise EvaluationError(msg)
         combine = all if key == "all" else any

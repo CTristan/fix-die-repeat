@@ -28,21 +28,46 @@ fix-die-repeat sequencer \
   --workflow /path/to/workflow.yaml
 ```
 
-Each response contains `step.instruction` and `step.artifact_root`. Run these commands from this
-example directory. After the `check` and `review` responses, copy each returned
-`step.artifact_root` into its matching quoted variable:
+Each response contains `step.id`, `step.instruction`, and `step.artifact_root`. Run this
+procedure from the example directory, and inspect each `done` response before you execute the
+next step:
 
-```bash
-CHECK_ARTIFACT_ROOT="/absolute/path/from-the-check-response"
-python agent/check.py /path/to/temporary-repository/app.txt "$CHECK_ARTIFACT_ROOT"
-python agent/fix.py /path/to/temporary-repository/app.txt
-REVIEW_ARTIFACT_ROOT="/absolute/path/from-the-review-response"
-python agent/review.py /path/to/temporary-repository/app.txt "$REVIEW_ARTIFACT_ROOT"
-```
+1. Copy the `check` response's `step.artifact_root`, run the check, and complete `check`.
 
-Call `done STEP_ID` after the work, and call `next` when you need the current instruction again.
-A mutating `fix` step returns recovery exit `5` if you request it twice. Reconcile the repository,
-then acknowledge that retry with `done fix --recover`.
+   ```bash
+   CHECK_ARTIFACT_ROOT="/absolute/path/from-the-check-response"
+   python agent/check.py /path/to/temporary-repository/app.txt "$CHECK_ARTIFACT_ROOT"
+   fix-die-repeat sequencer --run-id example --repo /path/to/temporary-repository done check
+   ```
+
+2. If the response selects `step.id` `fix`, run the fix, and complete `fix`.
+
+   ```bash
+   python agent/fix.py /path/to/temporary-repository/app.txt
+   fix-die-repeat sequencer --run-id example --repo /path/to/temporary-repository done fix
+   ```
+
+3. The `fix` route returns to `check`, so run the newly returned check instruction and complete
+   `check` again.
+
+   ```bash
+   CHECK_ARTIFACT_ROOT="/absolute/path/from-the-new-check-response"
+   python agent/check.py /path/to/temporary-repository/app.txt "$CHECK_ARTIFACT_ROOT"
+   fix-die-repeat sequencer --run-id example --repo /path/to/temporary-repository done check
+   ```
+
+4. If the response selects `step.id` `review`, copy its artifact root, run the review, and
+   complete `review`.
+
+   ```bash
+   REVIEW_ARTIFACT_ROOT="/absolute/path/from-the-review-response"
+   python agent/review.py /path/to/temporary-repository/app.txt "$REVIEW_ARTIFACT_ROOT"
+   fix-die-repeat sequencer --run-id example --repo /path/to/temporary-repository done review
+   ```
+
+Call `next` when you need the current instruction again. A mutating `fix` step returns recovery
+exit `5` if you request it twice. Reconcile the repository, then acknowledge that retry with
+`done fix --recover`.
 
 The example test at `tests/test_sequencer_example.py` runs the whole protocol, including a forced
 transition, recovery acknowledgement, repeat routing, and terminal completion.

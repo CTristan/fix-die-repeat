@@ -399,10 +399,62 @@ def _parse_operation(
     return operation
 
 
+def _validate_flag_reference(
+    value: object,
+    subject: str,
+    gaps: list[ValidationGap],
+    declarations: dict[str, FlagDeclaration],
+) -> None:
+    if not isinstance(value, dict) or set(value) != {"name", "equals"}:
+        gaps.append(_gap("invalid_flag_condition", subject, "flag requires name and equals"))
+        return
+    name = value["name"]
+    if not isinstance(name, str) or name not in declarations:
+        gaps.append(_gap("unknown_flag", subject, f"flag {name!r} is not declared"))
+        return
+    declaration = declarations[name]
+    expected = value["equals"]
+    if declaration.type == "boolean" and not isinstance(expected, bool):
+        gaps.append(
+            _gap(
+                "invalid_flag_condition",
+                subject,
+                f"flag {name!r} comparison must be true or false",
+            ),
+        )
+    elif declaration.type == "enum" and (
+        not isinstance(expected, str)
+        or declaration.values is None
+        or expected not in declaration.values
+    ):
+        gaps.append(
+            _gap(
+                "invalid_flag_condition",
+                subject,
+                f"flag {name!r} comparison must be one of {declaration.values!r}",
+            ),
+        )
+
+
+def _validate_compound_condition(
+    key: str,
+    children: object,
+    subject: str,
+    gaps: list[ValidationGap],
+    declarations: dict[str, FlagDeclaration],
+) -> None:
+    if not isinstance(children, list) or not children:
+        gaps.append(_gap("invalid_condition", subject, f"{key} requires a non-empty list"))
+        return
+    for index, child in enumerate(children):
+        parse_condition(child, f"{subject}.{key}.{index}", gaps, declarations)
+
+
 def parse_condition(
     value: object,
     subject: str,
     gaps: list[ValidationGap],
+    declarations: dict[str, FlagDeclaration],
 ) -> object:
     """Validate a condition and return its normalized representation."""
     if value == "always":
@@ -413,32 +465,20 @@ def parse_condition(
 
     keys = set(value)
     if keys == {"flag"}:
-        flag = value["flag"]
-        if not isinstance(flag, dict) or set(flag) != {"name", "equals"}:
-            gaps.append(_gap("invalid_flag_condition", subject, "flag requires name and equals"))
-        return value
-    if keys in ({"all"}, {"any"}):
+        _validate_flag_reference(value["flag"], subject, gaps, declarations)
+    elif keys in ({"all"}, {"any"}):
         key = next(iter(keys))
-        children = value[key]
-        if not isinstance(children, list) or not children:
-            gaps.append(_gap("invalid_condition", subject, f"{key} requires a non-empty list"))
-        else:
-            for index, child in enumerate(children):
-                parse_condition(child, f"{subject}.{key}.{index}", gaps)
-        return value
-    if keys == {"not"}:
-        parse_condition(value["not"], f"{subject}.not", gaps)
-        return value
-
-    _parse_operation(value, subject, gaps)
+        _validate_compound_condition(key, value[key], subject, gaps, declarations)
+    elif keys == {"not"}:
+        parse_condition(value["not"], f"{subject}.not", gaps, declarations)
+    else:
+        _parse_operation(value, subject, gaps)
     return value
 
 
 def _flag_condition_value(
     value: object,
     flags: dict[str, bool | str],
-    subject: str,
-    gaps: list[ValidationGap],
 ) -> bool | None:
     result: bool | None
     if value == "always":
@@ -449,7 +489,6 @@ def _flag_condition_value(
         flag = value["flag"]
         name = flag.get("name")
         if not isinstance(name, str) or name not in flags:
-            gaps.append(_gap("unknown_flag", subject, f"flag {name!r} is not declared"))
             result = False
         else:
             result = flags[name] == flag.get("equals")
@@ -458,14 +497,14 @@ def _flag_condition_value(
         raw_children = value[key]
         if not isinstance(raw_children, list):
             return None
-        children = [_flag_condition_value(child, flags, subject, gaps) for child in raw_children]
+        children = [_flag_condition_value(child, flags) for child in raw_children]
         if any(child is None for child in children):
             result = None
         else:
             values = [bool(child) for child in children]
             result = all(values) if key == "all" else any(values)
     elif set(value) == {"not"}:
-        child = _flag_condition_value(value["not"], flags, subject, gaps)
+        child = _flag_condition_value(value["not"], flags)
         result = None if child is None else not child
     else:
         result = None
@@ -529,12 +568,15 @@ def _active_steps(
         if step.applies_when is None:
             active[step_id] = step
             continue
-        parse_condition(step.applies_when, f"steps.{step_id}.applies_when", gaps)
+        parse_condition(
+            step.applies_when,
+            f"steps.{step_id}.applies_when",
+            gaps,
+            workflow.flags,
+        )
         applies = _flag_condition_value(
             step.applies_when,
             flags,
-            f"steps.{step_id}.applies_when",
-            gaps,
         )
         if applies is None:
             gaps.append(
@@ -579,6 +621,7 @@ class _RouteSeen:
 
 
 def _validate_postconditions(
+    workflow: Workflow,
     step_id: str,
     step: Step,
     flags: dict[str, bool | str],
@@ -600,8 +643,8 @@ def _validate_postconditions(
         _parse_operation(postcondition.validator, subject, gaps)
         if postcondition.when is None:
             continue
-        parse_condition(postcondition.when, f"{subject}.when", gaps)
-        applies = _flag_condition_value(postcondition.when, flags, f"{subject}.when", gaps)
+        parse_condition(postcondition.when, f"{subject}.when", gaps, workflow.flags)
+        applies = _flag_condition_value(postcondition.when, flags)
         if applies is None:
             gaps.append(
                 _gap(
@@ -628,6 +671,7 @@ def _validate_route_identity(
         route.when,
         f"steps.{context.step_id}.routes.{route.id}",
         context.gaps,
+        context.workflow.flags,
     )
     predicate = _condition_key(route.when)
     if predicate in seen.predicates:
@@ -672,8 +716,6 @@ def _record_route_target(
         condition_value = _flag_condition_value(
             route.when,
             context.flags,
-            f"steps.{context.step_id}.routes.{route.id}",
-            context.gaps,
         )
         if condition_value is not False:
             context.gaps.append(
@@ -774,7 +816,7 @@ def _validate_graph(
     )
     for step_id, step in workflow.steps.items():
         _validate_id(step_id, f"steps.{step_id}", gaps)
-        _validate_postconditions(step_id, step, flags, gaps)
+        _validate_postconditions(workflow, step_id, step, flags, gaps)
         _validate_routes(step_id, step, route_context)
 
     gaps.extend(

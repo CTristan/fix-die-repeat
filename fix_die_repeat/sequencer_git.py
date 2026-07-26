@@ -119,10 +119,18 @@ def resolve_repository(path: Path) -> RepositoryInfo:
     """Resolve one worktree without modifying Git state."""
     candidate = path.expanduser().resolve(strict=False)
     result = _run_git(candidate, ["rev-parse", "--show-toplevel"], check=False)
+    if result.returncode == COMMAND_TIMEOUT_EXIT_CODE:
+        diagnostic = result.stderr.strip()
+        msg = f"Git repository probe timed out: {diagnostic}"
+        raise GitProbeError(msg)
     if result.returncode != 0:
         msg = f"{candidate} is not a Git working tree"
         raise GitProbeError(msg)
-    root = Path(result.stdout.strip()).resolve()
+    root_text = result.stdout.strip()
+    if not root_text:
+        msg = "Git repository probe returned an empty repository root"
+        raise GitProbeError(msg)
+    root = Path(root_text).resolve()
     common_raw = _stdout(root, "rev-parse", "--git-common-dir")
     common_path = Path(common_raw)
     if not common_path.is_absolute():
