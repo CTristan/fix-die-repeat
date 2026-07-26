@@ -442,10 +442,10 @@ def sequencer_init(
     context: _SequencerContext,
     workflow: Path,
     flags: tuple[str, ...],
-) -> int:
+) -> Never:
     """Initialize a workflow run."""
     parsed_flags = _parse_flags(flags)
-    return _run_sequencer(
+    _run_sequencer(
         "init",
         context,
         lambda: SequencerService().init(
@@ -472,9 +472,9 @@ def _workflow_option[**Parameters, Return](
 @sequencer.command(name="next")
 @_workflow_option
 @click.pass_obj
-def sequencer_next(context: _SequencerContext, workflow: Path | None) -> int:
+def sequencer_next(context: _SequencerContext, workflow: Path | None) -> Never:
     """Return the current instruction without advancing."""
-    return _run_sequencer(
+    _run_sequencer(
         "next",
         context,
         lambda: SequencerService().next(context.repository, context.run_id, workflow),
@@ -484,9 +484,9 @@ def sequencer_next(context: _SequencerContext, workflow: Path | None) -> int:
 @sequencer.command(name="status")
 @_workflow_option
 @click.pass_obj
-def sequencer_status(context: _SequencerContext, workflow: Path | None) -> int:
+def sequencer_status(context: _SequencerContext, workflow: Path | None) -> Never:
     """Report the persisted cursor and configuration health."""
-    return _run_sequencer(
+    _run_sequencer(
         "status",
         context,
         lambda: SequencerService().status(context.repository, context.run_id, workflow),
@@ -506,13 +506,13 @@ def sequencer_done(
     workflow: Path | None,
     force: bool,
     recover: bool,
-) -> int:
+) -> Never:
     """Validate and advance the current step."""
     _validate_protocol_id(step, "step ID")
     if force and recover:
         message = "--force and --recover are mutually exclusive"
         raise click.UsageError(message, ctx=click.get_current_context())
-    return _run_sequencer(
+    _run_sequencer(
         "done",
         context,
         lambda: SequencerService().done(

@@ -22,6 +22,7 @@ from fix_die_repeat.sequencer_workflow import (
 )
 
 GIT_PATH = shutil.which("git")
+RECOVERED_ATTEMPT_NUMBER = 2
 
 WORKFLOW = """\
 schema_version: 1
@@ -232,6 +233,10 @@ def test_mutating_step_returns_recovery_until_reconciled(tmp_path: Path) -> None
     assert recovery.outcome == "recovery"
     assert reissued.outcome == "proceed"
     assert reissued.step["id"] == "fix"
+    state = json.loads(Path(initialized.configuration["state_path"]).read_text())
+    assert state["attempt"]["number"] == RECOVERED_ATTEMPT_NUMBER
+    assert state["history"][-1]["type"] == "recovery"
+    assert state["history"][-1]["step"] == "fix"
 
     (repo / "tracked.txt").write_text("fixed\n")
     check = service.done(repo, "run-1", "fix")
@@ -417,14 +422,18 @@ def test_missing_run_is_blocked(tmp_path: Path) -> None:
     assert result.gaps[0]["code"] == "run_not_initialized"
 
 
-def test_persisted_repository_identity_mismatch_fails_closed(tmp_path: Path) -> None:
+@pytest.mark.parametrize("key", ["root", "common_dir"])
+def test_persisted_repository_identity_mismatch_fails_closed(
+    tmp_path: Path,
+    key: str,
+) -> None:
     """Copied state cannot attach to a different repository identity."""
     repo = _repo(tmp_path)
     service = _service(tmp_path)
     initialized = service.init(repo, "run-1", _workflow(tmp_path), [])
     state_path = Path(initialized.configuration["state_path"])
     state = json.loads(state_path.read_text())
-    state["repository"]["root"] = str(tmp_path / "different-repo")
+    state["repository"][key] = str(tmp_path / "different-repo")
     state_path.write_text(json.dumps(state))
 
     with pytest.raises(StateError, match="repository identity"):

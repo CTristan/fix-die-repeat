@@ -2,8 +2,7 @@
 
 from collections.abc import Callable
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -115,24 +114,23 @@ def test_json_valid_bounds_read_when_artifact_grows_after_stat(
     artifact_root = tmp_path / "artifacts"
     artifact_root.mkdir()
     artifact = artifact_root / "result.json"
-    artifact.write_bytes(b"x" * (MAX_JSON_ARTIFACT_BYTES + 1))
+    artifact.write_text("{}")
     operation = OperationSpec.model_validate(
         {
             "op": "json.valid",
             "path": {"scope": "artifacts", "value": "result.json"},
         },
     )
-    real_stat = artifact.stat()
+    handle = MagicMock()
+    handle.__enter__.return_value = handle
+    handle.read.return_value = b"x" * (MAX_JSON_ARTIFACT_BYTES + 1)
 
-    with patch.object(
-        Path,
-        "stat",
-        return_value=SimpleNamespace(st_mode=real_stat.st_mode, st_size=1),
-    ):
+    with patch.object(Path, "open", return_value=handle):
         result = evaluate_operation(operation, context_factory(artifact_root, {}))
 
     assert not result.passed
     assert "exceeds 1 MiB" in result.message
+    handle.read.assert_called_once_with(MAX_JSON_ARTIFACT_BYTES + 1)
 
 
 def test_json_valid_reports_invalid_utf8(
@@ -312,6 +310,19 @@ def test_persisted_not_condition_inverts_child(
     context = context_factory(tmp_path / "artifacts", {"review": True})
 
     assert not evaluate_condition({"not": {"flag": {"name": "review", "equals": True}}}, context)
+
+
+def test_persisted_condition_rejects_excessive_nesting(
+    tmp_path: Path,
+    context_factory: Callable[[Path, dict[str, bool | str]], EvaluationContext],
+) -> None:
+    """Persisted condition evaluation stops at the shared depth limit."""
+    condition: object = "always"
+    for _ in range(sequencer_evaluator.MAX_CONDITION_DEPTH + 1):
+        condition = {"not": condition}
+
+    with pytest.raises(EvaluationError, match="Condition nesting exceeds"):
+        evaluate_condition(condition, context_factory(tmp_path / "artifacts", {}))
 
 
 def test_artifact_path_rejects_symlink_escape(

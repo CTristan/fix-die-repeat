@@ -79,7 +79,23 @@ class GitSnapshot:
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> GitSnapshot:
         """Restore a snapshot from persisted state."""
-        dirty = DirtyState(**value["dirty"])
+        required = {"head", "symbolic_ref", "dirty", "digest"}
+        dirty_required = {"staged", "unstaged", "untracked"}
+        if not isinstance(value, dict) or set(value) != required:
+            msg = "Invalid persisted Git snapshot"
+            raise GitProbeError(msg)
+        dirty_value = value["dirty"]
+        if (
+            not isinstance(dirty_value, dict)
+            or set(dirty_value) != dirty_required
+            or not all(isinstance(dirty_value[key], bool) for key in dirty_required)
+            or not (value["head"] is None or isinstance(value["head"], str))
+            or not (value["symbolic_ref"] is None or isinstance(value["symbolic_ref"], str))
+            or not isinstance(value["digest"], str)
+        ):
+            msg = "Invalid persisted Git snapshot"
+            raise GitProbeError(msg)
+        dirty = DirtyState(**dirty_value)
         return cls(
             head=value["head"],
             symbolic_ref=value["symbolic_ref"],
@@ -273,11 +289,11 @@ def _update_untracked_digest(
 ) -> None:
     read_bytes = 0
     for relative_path, path, metadata in _untracked_entries(repo, relative_paths):
-        digest.update(b"untracked\0")
-        digest.update(os.fsencode(relative_path))
-        digest.update(b"\0")
-        digest.update(str(metadata.st_mode).encode())
+        _update_digest_field(digest, b"untracked")
+        _update_digest_field(digest, os.fsencode(relative_path))
+        _update_digest_field(digest, str(metadata.st_mode).encode())
         if stat.S_ISREG(metadata.st_mode):
+            _update_digest_field(digest, b"regular")
             try:
                 with path.open("rb") as handle:
                     while chunk := handle.read(1024 * 1024):
@@ -285,16 +301,25 @@ def _update_untracked_digest(
                         if read_bytes > MAX_UNTRACKED_BYTES:
                             msg = "Untracked regular-file content exceeds the 64 MiB snapshot limit"
                             raise GitProbeError(msg)
-                        digest.update(chunk)
+                        _update_digest_field(digest, chunk)
+                    _update_digest_field(digest, b"")
             except OSError as exc:
                 msg = f"Cannot read untracked file {path}: {exc}"
                 raise GitProbeError(msg) from exc
         elif stat.S_ISLNK(metadata.st_mode):
+            _update_digest_field(digest, b"symlink")
             try:
-                digest.update(os.fsencode(path.readlink()))
+                _update_digest_field(digest, os.fsencode(path.readlink()))
             except OSError as exc:
                 msg = f"Cannot read untracked symlink {path}: {exc}"
                 raise GitProbeError(msg) from exc
+        else:
+            _update_digest_field(digest, b"other")
+
+
+def _update_digest_field(digest: _Digest, value: bytes) -> None:
+    digest.update(len(value).to_bytes(8, "big"))
+    digest.update(value)
 
 
 def capture_snapshot(repository: RepositoryInfo) -> GitSnapshot:
@@ -361,7 +386,11 @@ def _has_unpushed(repository: RepositoryInfo) -> bool:
     upstream, configured = _configured_upstream(repository.root, symbolic_ref)
     if upstream is not None:
         count = _stdout(repository.root, "rev-list", "--count", f"{upstream}..HEAD")
-        return int(count) > 0
+        try:
+            return int(count) > 0
+        except ValueError as exc:
+            msg = f"Git rev-list returned an unparsable count: {count!r}"
+            raise GitProbeError(msg) from exc
     if configured:
         msg = "The configured upstream no longer resolves"
         raise GitProbeError(msg)

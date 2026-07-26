@@ -34,6 +34,20 @@ def test_lock_times_out_with_a_state_error(tmp_path: Path) -> None:
         lock.__enter__()
 
 
+def test_lock_enforces_mutual_exclusion_and_releases(tmp_path: Path) -> None:
+    """One lock excludes peers until its context exits."""
+    path = tmp_path / "transition.lock"
+    first = SequencerLock(path)
+    second = SequencerLock(path)
+    with first:
+        assert not second._try_acquire()
+        second._handle.close()
+
+    third = SequencerLock(path)
+    with third:
+        pass
+
+
 def test_write_state_wraps_directory_creation_failure(tmp_path: Path) -> None:
     """State directory failures preserve the module error contract."""
     path = tmp_path / "state" / "state.json"

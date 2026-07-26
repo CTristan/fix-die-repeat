@@ -13,6 +13,7 @@ from fix_die_repeat import sequencer_git
 from fix_die_repeat.sequencer_git import (
     MAX_UNTRACKED_BYTES,
     GitProbeError,
+    GitSnapshot,
     capture_snapshot,
     evaluate_git_operation,
     resolve_repository,
@@ -244,7 +245,7 @@ def test_unpushed_is_false_for_unborn_repository(tmp_path: Path) -> None:
 def test_head_probe_timeout_is_not_an_unborn_repository(tmp_path: Path) -> None:
     """A failed HEAD probe cannot silently become an unborn snapshot."""
     result = sequencer_git._GitResult(
-        returncode=124,
+        returncode=sequencer_git.COMMAND_TIMEOUT_EXIT_CODE,
         stdout="",
         stderr="Command timed out after 30 seconds",
     )
@@ -254,6 +255,46 @@ def test_head_probe_timeout_is_not_an_unborn_repository(tmp_path: Path) -> None:
         pytest.raises(GitProbeError, match="Git HEAD probe failed"),
     ):
         sequencer_git._head(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {},
+        {"head": 1, "symbolic_ref": None, "dirty": {}, "digest": ""},
+        {
+            "head": None,
+            "symbolic_ref": None,
+            "dirty": {"staged": 1, "unstaged": False, "untracked": False},
+            "digest": "digest",
+        },
+    ],
+)
+def test_snapshot_rejects_invalid_persisted_fields(value: dict[str, object]) -> None:
+    """Persisted snapshot corruption uses the Git probe error contract."""
+    with pytest.raises(GitProbeError, match="Invalid persisted Git snapshot"):
+        GitSnapshot.from_dict(value)
+
+
+def test_unpushed_rejects_unparsable_rev_list_count(tmp_path: Path) -> None:
+    """Malformed Git count output fails closed."""
+    repository = sequencer_git.RepositoryInfo(
+        root=tmp_path,
+        common_dir=tmp_path / ".git",
+        key="repo",
+    )
+
+    with (
+        patch.object(sequencer_git, "_head", return_value=("head", "refs/heads/main")),
+        patch.object(
+            sequencer_git,
+            "_configured_upstream",
+            return_value=("origin/main", True),
+        ),
+        patch.object(sequencer_git, "_stdout", return_value="not-a-count"),
+        pytest.raises(GitProbeError, match="unparsable count"),
+    ):
+        sequencer_git._has_unpushed(repository)
 
 
 def test_unpushed_requires_remote_tracking_truth(tmp_path: Path) -> None:

@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 MAX_WORKFLOW_BYTES = 1024 * 1024
+MAX_CONDITION_DEPTH = 64
 SHA256_HEX_LENGTH = 64
 ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
@@ -414,7 +415,7 @@ def _validate_operation_fields(
             gaps.append(
                 _gap("missing_operation_field", subject, f"{operation.op} requires expected"),
             )
-    elif fields & {"pointer", "expected"}:
+    elif operation.op not in GIT_OPERATIONS and fields & {"pointer", "expected"}:
         gaps.append(
             _gap("unexpected_operation_field", subject, f"{operation.op} does not accept pointer"),
         )
@@ -480,18 +481,38 @@ def _validate_flag_reference(
         )
 
 
+@dataclass(frozen=True)
+class _ConditionContext:
+    """Shared declarations and diagnostics for condition validation."""
+
+    subject: str
+    gaps: list[ValidationGap]
+    declarations: dict[str, FlagDeclaration]
+    depth: int
+
+
 def _validate_compound_condition(
     key: str,
     children: object,
-    subject: str,
-    gaps: list[ValidationGap],
-    declarations: dict[str, FlagDeclaration],
+    context: _ConditionContext,
 ) -> None:
     if not isinstance(children, list) or not children:
-        gaps.append(_gap("invalid_condition", subject, f"{key} requires a non-empty list"))
+        context.gaps.append(
+            _gap(
+                "invalid_condition",
+                context.subject,
+                f"{key} requires a non-empty list",
+            ),
+        )
         return
     for index, child in enumerate(children):
-        parse_condition(child, f"{subject}.{key}.{index}", gaps, declarations)
+        parse_condition(
+            child,
+            f"{context.subject}.{key}.{index}",
+            context.gaps,
+            context.declarations,
+            depth=context.depth + 1,
+        )
 
 
 def parse_condition(
@@ -499,8 +520,19 @@ def parse_condition(
     subject: str,
     gaps: list[ValidationGap],
     declarations: dict[str, FlagDeclaration],
+    *,
+    depth: int = 0,
 ) -> object:
     """Validate a condition and return its normalized representation."""
+    if depth > MAX_CONDITION_DEPTH:
+        gaps.append(
+            _gap(
+                "condition_too_deep",
+                subject,
+                f"condition nesting exceeds {MAX_CONDITION_DEPTH}",
+            ),
+        )
+        return value
     if value == "always":
         return "always"
     if not isinstance(value, dict):
@@ -512,9 +544,24 @@ def parse_condition(
         _validate_flag_reference(value["flag"], subject, gaps, declarations)
     elif keys in ({"all"}, {"any"}):
         key = next(iter(keys))
-        _validate_compound_condition(key, value[key], subject, gaps, declarations)
+        _validate_compound_condition(
+            key,
+            value[key],
+            _ConditionContext(
+                subject=subject,
+                gaps=gaps,
+                declarations=declarations,
+                depth=depth,
+            ),
+        )
     elif keys == {"not"}:
-        parse_condition(value["not"], f"{subject}.not", gaps, declarations)
+        parse_condition(
+            value["not"],
+            f"{subject}.not",
+            gaps,
+            declarations,
+            depth=depth + 1,
+        )
     else:
         _parse_operation(value, subject, gaps)
     return value
@@ -523,7 +570,11 @@ def parse_condition(
 def _flag_condition_value(
     value: object,
     flags: dict[str, bool | str],
+    *,
+    depth: int = 0,
 ) -> bool | None:
+    if depth > MAX_CONDITION_DEPTH:
+        return None
     result: bool | None
     if value == "always":
         result = True
@@ -541,14 +592,14 @@ def _flag_condition_value(
         raw_children = value[key]
         if not isinstance(raw_children, list):
             return None
-        children = [_flag_condition_value(child, flags) for child in raw_children]
+        children = [_flag_condition_value(child, flags, depth=depth + 1) for child in raw_children]
         if any(child is None for child in children):
             result = None
         else:
             values = [bool(child) for child in children]
             result = all(values) if key == "all" else any(values)
     elif set(value) == {"not"}:
-        child = _flag_condition_value(value["not"], flags)
+        child = _flag_condition_value(value["not"], flags, depth=depth + 1)
         result = None if child is None else not child
     else:
         result = None

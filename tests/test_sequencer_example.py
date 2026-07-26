@@ -14,6 +14,7 @@ from fix_die_repeat.sequencer_engine import EXIT_CODES
 GIT_PATH = shutil.which("git")
 PROJECT_ROOT = Path(__file__).parents[1]
 EXAMPLE_ROOT = PROJECT_ROOT / "examples" / "sequencer" / "check-fix-review"
+PROCESS_TIMEOUT_SECONDS = 60
 
 
 def _run(arguments: list[str], *, environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -23,6 +24,7 @@ def _run(arguments: list[str], *, environment: dict[str, str]) -> subprocess.Com
         capture_output=True,
         text=True,
         env=environment,
+        timeout=PROCESS_TIMEOUT_SECONDS,
     )
 
 
@@ -33,6 +35,7 @@ def _git(repo: Path, *arguments: str) -> None:
         [GIT_PATH, "-C", str(repo), *arguments],
         check=True,
         capture_output=True,
+        timeout=PROCESS_TIMEOUT_SECONDS,
     )
 
 

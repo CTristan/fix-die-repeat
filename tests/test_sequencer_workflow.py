@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fix_die_repeat.sequencer_workflow import (
+    MAX_CONDITION_DEPTH,
     MAX_WORKFLOW_BYTES,
     SHA256_HEX_LENGTH,
     FlagDeclaration,
@@ -367,6 +368,45 @@ def test_load_workflow_rejects_unknown_and_duplicate_flags(tmp_path: Path) -> No
 
     with pytest.raises(WorkflowValidationError, match="duplicate_flag"):
         load_workflow(path, [("review", "true"), ("review", "false")])
+
+
+def test_load_workflow_rejects_excessive_condition_nesting(tmp_path: Path) -> None:
+    """Workflow validation stops at the shared condition-depth limit."""
+    condition = "always"
+    for _ in range(MAX_CONDITION_DEPTH + 1):
+        condition = f"{{not: {condition}}}"
+    content = VALID_WORKFLOW.replace(
+        "    mutates_repository: false",
+        f"    mutates_repository: false\n    applies_when: {condition}",
+        1,
+    )
+
+    with pytest.raises(WorkflowValidationError, match="condition_too_deep"):
+        load_workflow(_write_workflow(tmp_path, content), {})
+
+
+def test_git_operation_fields_produce_one_gap(tmp_path: Path) -> None:
+    """One invalid Git operation produces one field-contract diagnostic."""
+    content = VALID_WORKFLOW.replace(
+        """        when:
+          op: json.pointer_equals
+          path:
+            scope: artifacts
+            value: result.json
+          pointer: /passed
+          expected: false""",
+        """        when:
+          op: git.is_clean
+          pointer: /passed
+          expected: false""",
+        1,
+    )
+
+    with pytest.raises(WorkflowValidationError) as raised:
+        load_workflow(_write_workflow(tmp_path, content), {})
+
+    codes = [gap.code for gap in raised.value.gaps]
+    assert codes.count("unexpected_operation_field") == 1
 
 
 @pytest.mark.parametrize("expected", ["2026-07-26", "!!binary aGVsbG8="])

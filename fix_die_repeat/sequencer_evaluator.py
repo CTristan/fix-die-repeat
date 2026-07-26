@@ -14,7 +14,11 @@ from fix_die_repeat.sequencer_git import (
     RepositoryInfo,
     evaluate_git_operation,
 )
-from fix_die_repeat.sequencer_workflow import GIT_OPERATIONS, OperationSpec
+from fix_die_repeat.sequencer_workflow import (
+    GIT_OPERATIONS,
+    MAX_CONDITION_DEPTH,
+    OperationSpec,
+)
 
 MAX_JSON_ARTIFACT_BYTES = 1024 * 1024
 
@@ -237,8 +241,16 @@ def _operation_from_condition(value: dict[str, Any]) -> OperationSpec:
         raise EvaluationError(msg) from exc
 
 
-def evaluate_condition(value: object, context: EvaluationContext) -> bool:
+def evaluate_condition(
+    value: object,
+    context: EvaluationContext,
+    *,
+    depth: int = 0,
+) -> bool:
     """Evaluate one validated condition tree."""
+    if depth > MAX_CONDITION_DEPTH:
+        msg = f"Condition nesting exceeds {MAX_CONDITION_DEPTH}"
+        raise EvaluationError(msg)
     if value == "always":
         return True
     if not isinstance(value, dict):
@@ -257,7 +269,7 @@ def evaluate_condition(value: object, context: EvaluationContext) -> bool:
             msg = f"Invalid persisted {key} condition"
             raise EvaluationError(msg)
         combine = all if key == "all" else any
-        return combine(evaluate_condition(child, context) for child in children)
+        return combine(evaluate_condition(child, context, depth=depth + 1) for child in children)
     if set(value) == {"not"}:
-        return not evaluate_condition(value["not"], context)
+        return not evaluate_condition(value["not"], context, depth=depth + 1)
     return evaluate_operation(_operation_from_condition(value), context).passed
