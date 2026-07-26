@@ -88,6 +88,10 @@ class SequencerLock:
             fcntl.flock(self._handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return False
+        except OSError as exc:
+            self._handle.close()
+            msg = f"Cannot lock sequencer transition file: {exc}"
+            raise StateError(msg) from exc
         return True
 
     def __exit__(
@@ -155,7 +159,10 @@ def _sync_directory(path: Path) -> None:
     except OSError:
         return
     try:
-        os.fsync(descriptor)
+        try:
+            os.fsync(descriptor)
+        except OSError:
+            return
     finally:
         os.close(descriptor)
 

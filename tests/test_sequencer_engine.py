@@ -139,6 +139,23 @@ def test_repeated_init_is_idempotent(tmp_path: Path) -> None:
     assert second.state_revision == first.state_revision
 
 
+def test_relocated_init_remains_repeated(tmp_path: Path) -> None:
+    """Relocating a compatible source still returns an existing run."""
+    repo = _repo(tmp_path)
+    workflow = _workflow(tmp_path)
+    service = _service(tmp_path)
+    first = service.init(repo, "run-1", workflow, [])
+    relocated = tmp_path / "relocated.yaml"
+    workflow.rename(relocated)
+
+    second = service.init(repo, "run-1", relocated, [])
+
+    assert second.repeated
+    assert second.configuration["relocated"] is True
+    assert isinstance(first.state_revision, int)
+    assert second.state_revision == first.state_revision + 1
+
+
 def test_init_revalidates_workflow_under_transition_lock(tmp_path: Path) -> None:
     """A workflow change before lock acquisition cannot enter persisted state."""
     repo = _repo(tmp_path)
@@ -283,6 +300,51 @@ def test_configuration_drift_blocks_transition(tmp_path: Path) -> None:
 
     assert result.outcome == "blocked"
     assert result.gaps[0]["code"] == "configuration_drift"
+
+
+def test_relocation_and_transition_increment_revision_once(tmp_path: Path) -> None:
+    """One persisted transition produces one revision even when its source moved."""
+    repo = _repo(tmp_path)
+    workflow = _workflow(tmp_path)
+    service = _service(tmp_path)
+    initialized = service.init(repo, "run-1", workflow, [])
+    _write_result(initialized, passed=False)
+    relocated = tmp_path / "relocated.yaml"
+    workflow.rename(relocated)
+
+    result = service.done(
+        repo,
+        "run-1",
+        "check",
+        DoneOptions(workflow_path=relocated),
+    )
+
+    assert isinstance(initialized.state_revision, int)
+    assert result.state_revision == initialized.state_revision + 1
+    assert result.configuration["source"] == str(relocated.resolve())
+
+
+@pytest.mark.parametrize(
+    ("method", "arguments"),
+    [
+        ("status", ()),
+        ("next", ()),
+        ("done", ("check",)),
+    ],
+)
+def test_state_disappearance_after_lock_returns_missing(
+    tmp_path: Path,
+    method: str,
+    arguments: tuple[str, ...],
+) -> None:
+    """Commands recheck state after acquiring the transition lock."""
+    repo = _repo(tmp_path)
+    service = _service(tmp_path)
+
+    with patch.object(Path, "exists", side_effect=[True, False]):
+        result = getattr(service, method)(repo, "run-1", *arguments)
+
+    assert result.gaps[0]["code"] == "run_not_initialized"
 
 
 def test_concurrent_done_calls_produce_one_cursor_transition(tmp_path: Path) -> None:

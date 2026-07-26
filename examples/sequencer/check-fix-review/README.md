@@ -28,13 +28,16 @@ fix-die-repeat sequencer \
   --workflow /path/to/workflow.yaml
 ```
 
-Each response contains `step.instruction` and `step.artifact_root`. Use the matching script to
-simulate the external work:
+Each response contains `step.instruction` and `step.artifact_root`. Run these commands from this
+example directory. After the `check` and `review` responses, copy each returned
+`step.artifact_root` into its matching quoted variable:
 
 ```bash
-python agent/check.py /path/to/temporary-repository/app.txt ARTIFACT_ROOT
+CHECK_ARTIFACT_ROOT="/absolute/path/from-the-check-response"
+python agent/check.py /path/to/temporary-repository/app.txt "$CHECK_ARTIFACT_ROOT"
 python agent/fix.py /path/to/temporary-repository/app.txt
-python agent/review.py /path/to/temporary-repository/app.txt ARTIFACT_ROOT
+REVIEW_ARTIFACT_ROOT="/absolute/path/from-the-review-response"
+python agent/review.py /path/to/temporary-repository/app.txt "$REVIEW_ARTIFACT_ROOT"
 ```
 
 Call `done STEP_ID` after the work, and call `next` when you need the current instruction again.

@@ -7,12 +7,16 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal, cast, override
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Literal, cast, override
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from yaml.constructor import ConstructorError
 from yaml.events import AliasEvent
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 MAX_WORKFLOW_BYTES = 1024 * 1024
 SHA256_HEX_LENGTH = 64
@@ -190,8 +194,8 @@ class LoadedWorkflow:
 
     source: Path
     workflow: Workflow
-    flags: dict[str, bool | str]
-    active_steps: dict[str, Step]
+    flags: Mapping[str, bool | str]
+    active_steps: Mapping[str, Step]
     fingerprint: str
 
 
@@ -370,7 +374,9 @@ def _validate_operation_fields(
         gaps.append(
             _gap("unexpected_operation_field", subject, f"{operation.op} does not accept pointer"),
         )
-    if operation.op == "json.pointer_type" and operation.expected not in JSON_TYPES:
+    if operation.op == "json.pointer_type" and (
+        not isinstance(operation.expected, str) or operation.expected not in JSON_TYPES
+    ):
         gaps.append(
             _gap("invalid_json_type", subject, f"unknown JSON type {operation.expected!r}"),
         )
@@ -473,13 +479,44 @@ def _condition_key(value: object) -> str:
             "representation": repr(item),
         }
 
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        default=encode_non_json,
-    )
+    def stable_invalid(item: object) -> object:
+        if isinstance(item, dict):
+            pairs = [(stable_invalid(key), stable_invalid(child)) for key, child in item.items()]
+            pairs.sort(
+                key=lambda pair: json.dumps(
+                    pair[0],
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ),
+            )
+            return {"__invalid_mapping__": pairs}
+        if isinstance(item, list):
+            return [stable_invalid(child) for child in item]
+        if isinstance(item, tuple):
+            return {"__invalid_tuple__": [stable_invalid(child) for child in item]}
+        try:
+            json.dumps(item)
+        except (TypeError, ValueError):
+            return encode_non_json(item)
+        return item
+
+    try:
+        normalized = json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            default=encode_non_json,
+        )
+    except (TypeError, ValueError):
+        normalized = json.dumps(
+            stable_invalid(value),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+    return normalized
 
 
 def _active_steps(
@@ -742,7 +779,7 @@ def _validate_graph(
 
     gaps.extend(
         _gap("unreachable_step", step_id, f"step {step_id!r} is unreachable")
-        for step_id in _find_unreachable(workflow.start, active, graph.edges)
+        for step_id in sorted(_find_unreachable(workflow.start, active, graph.edges))
     )
     if _contains_cycle(graph.non_repeat_edges):
         gaps.append(
@@ -780,10 +817,12 @@ def load_workflow(
     if gaps:
         raise WorkflowValidationError(gaps)
 
+    immutable_flags = MappingProxyType(dict(resolved_flags))
+    immutable_active = MappingProxyType(dict(active))
     canonical = json.dumps(
         {
             "workflow": workflow.model_dump(mode="json"),
-            "flags": resolved_flags,
+            "flags": dict(immutable_flags),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -793,7 +832,7 @@ def load_workflow(
     return LoadedWorkflow(
         source=path.expanduser().resolve(strict=False),
         workflow=workflow,
-        flags=resolved_flags,
-        active_steps=active,
+        flags=immutable_flags,
+        active_steps=immutable_active,
         fingerprint=fingerprint,
     )

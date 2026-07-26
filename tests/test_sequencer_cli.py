@@ -15,6 +15,7 @@ from fix_die_repeat.sequencer_engine import (
     DoneOptions,
     SequencerResult,
 )
+from fix_die_repeat.sequencer_workflow import ValidationGap, WorkflowValidationError
 
 GIT_PATH = shutil.which("git")
 
@@ -200,9 +201,12 @@ def test_internal_error_is_json_with_exit_70(
 ) -> None:
     """Unexpected failures do not leak a traceback into stdout."""
     monkeypatch.setenv("FDR_HOME", str(tmp_path / "home"))
-    with patch(
-        "fix_die_repeat.cli.SequencerService.init",
-        side_effect=RuntimeError("unexpected"),
+    with (
+        patch(
+            "fix_die_repeat.cli.SequencerService.init",
+            side_effect=RuntimeError("unexpected"),
+        ),
+        patch("fix_die_repeat.cli.logger.exception") as log_exception,
     ):
         result = _invoke(
             CliRunner(),
@@ -213,6 +217,7 @@ def test_internal_error_is_json_with_exit_70(
     assert result.exit_code == EXIT_CODES["internal_error"]
     assert _payload(result)["outcome"] == "internal_error"
     assert "unexpected" in result.stderr
+    log_exception.assert_called_once_with("Unhandled sequencer error in %s", "init")
 
 
 def test_interruption_is_json_with_exit_130(
@@ -297,6 +302,29 @@ def test_invalid_workflow_is_configuration_error(
     assert result.exit_code == EXIT_CODES["configuration_error"]
     assert _payload(result)["outcome"] == "configuration_error"
     assert "Error:" in result.stderr
+
+
+def test_workflow_error_diagnostic_matches_selected_outcome(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The concise diagnostic describes the gap that selected the outcome."""
+    monkeypatch.setenv("FDR_HOME", str(tmp_path / "home"))
+    error = WorkflowValidationError(
+        [
+            ValidationGap("invalid_workflow_root", "workflow", "configuration invalid"),
+            ValidationGap("workflow_unreadable", "workflow", "workflow disappeared"),
+        ],
+    )
+    with patch("fix_die_repeat.cli.SequencerService.init", side_effect=error):
+        result = _invoke(
+            CliRunner(),
+            _repo(tmp_path),
+            ["init", "--workflow", str(_workflow(tmp_path))],
+        )
+
+    assert result.exit_code == EXIT_CODES["environment_error"]
+    assert result.stderr == "Error: workflow disappeared\n"
 
 
 @pytest.mark.parametrize(

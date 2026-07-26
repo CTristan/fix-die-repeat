@@ -341,7 +341,6 @@ class SequencerService:
         if source == state["workflow_source"]:
             return False
         state["workflow_source"] = source
-        state["revision"] += 1
         return True
 
     def _configuration_block(
@@ -373,6 +372,7 @@ class SequencerService:
         load_workflow(workflow_path, flags)
         located = self._locate(repository, run_id)
         with SequencerLock(located.paths.lock):
+            # Reparse under the lock so the persisted graph matches the validated source.
             loaded = load_workflow(workflow_path, flags)
             if located.paths.state.exists():
                 return self._repeat_init(loaded, located)
@@ -394,7 +394,7 @@ class SequencerService:
                 "workflow_source": str(loaded.source),
                 "workflow_fingerprint": loaded.fingerprint,
                 "workflow": loaded.workflow.model_dump(mode="json"),
-                "flags": loaded.flags,
+                "flags": dict(loaded.flags),
                 "cursor": loaded.workflow.start,
                 "status": "incomplete",
                 "terminal": None,
@@ -441,7 +441,8 @@ class SequencerService:
             state["revision"] += 1
             write_state(located.paths.state, state)
         result = _state_outcome("init", state, located)
-        result.repeated = not relocated
+        result.repeated = True
+        result.configuration["relocated"] = relocated
         result.message = "Existing run returned"
         return result
 
@@ -466,6 +467,8 @@ class SequencerService:
         if not located.paths.state.exists():
             return self._missing_result("status", located)
         with SequencerLock(located.paths.lock):
+            if not located.paths.state.exists():
+                return self._missing_result("status", located)
             state = self._load_existing(located)
             check = self._configuration_check(state, workflow_path)
             result = _state_outcome("status", state, located)
@@ -490,6 +493,8 @@ class SequencerService:
         if not located.paths.state.exists():
             return self._missing_result("next", located)
         with SequencerLock(located.paths.lock):
+            if not located.paths.state.exists():
+                return self._missing_result("next", located)
             state = self._load_existing(located)
             if state["status"] == "terminal":
                 return _state_outcome("next", state, located)
@@ -502,8 +507,8 @@ class SequencerService:
             newly_issued = False
             if step.mutates_repository and state["attempt"]["status"] != "issued":
                 state["attempt"], newly_issued = self._new_attempt(step, located.repository)
-                state["revision"] += 1
             if relocated or newly_issued:
+                state["revision"] += 1
                 write_state(located.paths.state, state)
             result = _state_outcome(
                 "next",
@@ -527,25 +532,37 @@ class SequencerService:
         if not located.paths.state.exists():
             return self._missing_result("done", located)
         with SequencerLock(located.paths.lock):
+            if not located.paths.state.exists():
+                return self._missing_result("done", located)
             state = self._load_existing(located)
-            if state["status"] == "terminal":
-                return _state_outcome("done", state, located)
-            check = self._configuration_check(state, resolved_options.workflow_path)
-            if check.status != "matching":
-                return self._configuration_block("done", state, located, check)
-            if step_id != state["cursor"]:
-                return self._step_order_block(state, located, step_id)
-            loaded = _require_loaded(check)
-            step = loaded.active_steps[state["cursor"]]
-            if resolved_options.recover:
-                return self._recover_step(state, located, step)
-            return self._complete_step(
-                state,
-                located,
-                check,
-                step,
-                force=resolved_options.force,
-            )
+            return self._done_from_state(state, located, step_id, resolved_options)
+
+    def _done_from_state(
+        self,
+        state: dict[str, Any],
+        located: _LocatedRun,
+        step_id: str,
+        options: DoneOptions,
+    ) -> SequencerResult:
+        """Complete one transition after state is loaded under its lock."""
+        if state["status"] == "terminal":
+            return _state_outcome("done", state, located)
+        check = self._configuration_check(state, options.workflow_path)
+        if check.status != "matching":
+            return self._configuration_block("done", state, located, check)
+        if step_id != state["cursor"]:
+            return self._step_order_block(state, located, step_id)
+        loaded = _require_loaded(check)
+        step = loaded.active_steps[state["cursor"]]
+        if options.recover:
+            return self._recover_step(state, located, step)
+        return self._complete_step(
+            state,
+            located,
+            check,
+            step,
+            force=options.force,
+        )
 
     @staticmethod
     def _step_order_block(
@@ -661,6 +678,7 @@ class SequencerService:
         *,
         force: bool,
     ) -> SequencerResult:
+        # Closed built-in probes stay under the lock so validation and commit observe one state.
         context = self._evaluation_context(state, located)
         gaps = self._postcondition_gaps(step, context)
         if gaps and not force:

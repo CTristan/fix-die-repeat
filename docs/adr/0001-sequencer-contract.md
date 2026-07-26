@@ -398,9 +398,10 @@ does not change state.
 ## Response protocol
 
 Every completed non-help sequencer invocation writes exactly one UTF-8 JSON object followed by a
-newline to `stdout`. Expected outcomes leave `stderr` empty. Usage, environment, and internal
-errors also write the JSON response to `stdout`, then write one concise diagnostic line to
-`stderr`.
+newline to `stdout`. Expected outcomes leave `stderr` empty. Usage, environment, configuration,
+and internal errors also write the JSON response to `stdout`, then write one concise diagnostic
+line to `stderr`. A readable but invalid workflow is a configuration error, so it follows this
+diagnostic path.
 
 `--help` and `--version` keep Click's normal text output and return `0`.
 
@@ -818,7 +819,8 @@ window receives an `environment_error` instead of waiting forever.
 The 10-second limit bounds lock acquisition, not validator execution. The lock holder keeps the
 lock while it runs bounded artifact reads and Git probes so one transition observes one repository
 state. A slow probe may therefore make a concurrent caller time out, but it does not time out the
-active transition. Individual Git probes have a 30-second subprocess timeout.
+active transition. Individual Git probes have a 30-second subprocess timeout. The registry is
+closed, so no user-defined validator code runs while the lock is held.
 
 The operating system releases the lock when a process exits, so a crashed process cannot leave a
 permanent stale lock. The lock file may remain on disk and carries no ownership truth.
@@ -895,6 +897,12 @@ binary diff, and every untracked path. It streams regular-file payloads and hash
 without following them. It records other filesystem types without opening them, because reading a
 FIFO or device could block or produce side effects. This detects a content change even when the
 repository stays dirty before and after the step.
+
+The snapshot accepts up to 64 MiB of total regular untracked-file content and returns
+`environment_error` before hashing when the repository exceeds that limit. It still hashes every
+accepted file to completion because a prefix-only digest could miss a repository change and
+advance incorrectly. Large generated content should be ignored or committed before a mutating
+step; special files remain metadata-only.
 
 Git commands may use documented non-zero values as data. For example, `git diff --quiet` returns
 `1` when a difference exists. Every other probe failure returns `environment_error`; the engine

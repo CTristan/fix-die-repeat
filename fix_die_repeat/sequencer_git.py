@@ -11,9 +11,14 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from fix_die_repeat.utils import RunCommandOptions, run_command
+from fix_die_repeat.utils import (
+    COMMAND_TIMEOUT_EXIT_CODE,
+    RunCommandOptions,
+    run_command,
+)
 
 GIT_TIMEOUT_SECONDS = 30.0
+MAX_UNTRACKED_BYTES = 64 * 1024 * 1024
 
 
 class GitProbeError(RuntimeError):
@@ -131,7 +136,9 @@ def resolve_repository(path: Path) -> RepositoryInfo:
 
 def _head(repo: Path) -> tuple[str | None, str | None]:
     head_result = _run_git(repo, ["rev-parse", "--verify", "HEAD"], check=False)
-    head = head_result.stdout.strip() if head_result.returncode == 0 else None
+    if head_result.returncode == COMMAND_TIMEOUT_EXIT_CODE:
+        msg = f"Git HEAD probe failed: {head_result.stderr.strip()}"
+        raise GitProbeError(msg)
 
     ref_result = _run_git(repo, ["symbolic-ref", "-q", "HEAD"], check=False)
     if ref_result.returncode not in {0, 1}:
@@ -139,7 +146,19 @@ def _head(repo: Path) -> tuple[str | None, str | None]:
         msg = f"Git symbolic-ref probe failed: {diagnostic}"
         raise GitProbeError(msg)
     symbolic_ref = ref_result.stdout.strip() if ref_result.returncode == 0 else None
-    return head, symbolic_ref
+    if head_result.returncode == 0:
+        return head_result.stdout.strip(), symbolic_ref
+    if symbolic_ref is not None:
+        ref_check = _run_git(
+            repo,
+            ["show-ref", "--verify", "--quiet", symbolic_ref],
+            check=False,
+        )
+        if ref_check.returncode == 1:
+            return None, symbolic_ref
+    diagnostic = head_result.stderr.strip()
+    msg = f"Git HEAD probe failed: {diagnostic}"
+    raise GitProbeError(msg)
 
 
 def _dirty(repo: Path) -> DirtyState:
@@ -151,21 +170,37 @@ def _dirty(repo: Path) -> DirtyState:
     return DirtyState(staged=staged, unstaged=unstaged, untracked=untracked)
 
 
-def _update_untracked_digest(
+def _untracked_entries(
     repo: Path,
-    digest: _Digest,
     relative_paths: list[str],
-) -> None:
+) -> list[tuple[str, Path, os.stat_result]]:
+    entries: list[tuple[str, Path, os.stat_result]] = []
+    regular_file_bytes = 0
     for relative_path in relative_paths:
-        digest.update(b"untracked\0")
-        digest.update(os.fsencode(relative_path))
-        digest.update(b"\0")
         path = repo / relative_path
         try:
             metadata = path.lstat()
         except OSError as exc:
             msg = f"Cannot inspect untracked path {path}: {exc}"
             raise GitProbeError(msg) from exc
+        if stat.S_ISREG(metadata.st_mode):
+            regular_file_bytes += metadata.st_size
+            if regular_file_bytes > MAX_UNTRACKED_BYTES:
+                msg = "Untracked regular-file content exceeds the 64 MiB snapshot limit"
+                raise GitProbeError(msg)
+        entries.append((relative_path, path, metadata))
+    return entries
+
+
+def _update_untracked_digest(
+    repo: Path,
+    digest: _Digest,
+    relative_paths: list[str],
+) -> None:
+    for relative_path, path, metadata in _untracked_entries(repo, relative_paths):
+        digest.update(b"untracked\0")
+        digest.update(os.fsencode(relative_path))
+        digest.update(b"\0")
         digest.update(str(metadata.st_mode).encode())
         if stat.S_ISREG(metadata.st_mode):
             try:

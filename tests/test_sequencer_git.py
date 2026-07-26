@@ -10,6 +10,7 @@ import pytest
 
 from fix_die_repeat import sequencer_git
 from fix_die_repeat.sequencer_git import (
+    MAX_UNTRACKED_BYTES,
     GitProbeError,
     capture_snapshot,
     evaluate_git_operation,
@@ -93,6 +94,17 @@ def test_snapshot_detects_edit_when_tree_was_already_dirty(tmp_path: Path) -> No
 
     assert before.dirty.unstaged
     assert after.digest != before.digest
+
+
+def test_snapshot_rejects_excessive_untracked_content(tmp_path: Path) -> None:
+    """Untracked hashing fails closed before exceeding its content budget."""
+    repo = _init_repo(tmp_path / "repo")
+    large = repo / "large.bin"
+    with large.open("wb") as handle:
+        handle.truncate(MAX_UNTRACKED_BYTES + 1)
+
+    with pytest.raises(GitProbeError, match="64 MiB"):
+        capture_snapshot(resolve_repository(repo))
 
 
 def test_snapshot_reuses_diff_and_untracked_probe_output(tmp_path: Path) -> None:
@@ -191,6 +203,21 @@ def test_unpushed_is_false_for_unborn_repository(tmp_path: Path) -> None:
         "git.has_unpushed_commits",
         resolve_repository(repo),
     )
+
+
+def test_head_probe_timeout_is_not_an_unborn_repository(tmp_path: Path) -> None:
+    """A failed HEAD probe cannot silently become an unborn snapshot."""
+    result = sequencer_git._GitResult(
+        returncode=124,
+        stdout="",
+        stderr="Command timed out after 30 seconds",
+    )
+
+    with (
+        patch.object(sequencer_git, "_run_git", return_value=result),
+        pytest.raises(GitProbeError, match="Git HEAD probe failed"),
+    ):
+        sequencer_git._head(tmp_path)
 
 
 def test_unpushed_requires_remote_tracking_truth(tmp_path: Path) -> None:

@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
+from fix_die_repeat import sequencer_state
 from fix_die_repeat.sequencer_git import RepositoryInfo
 from fix_die_repeat.sequencer_state import (
     SequencerLock,
@@ -63,6 +64,20 @@ def test_lock_closes_handle_when_unlock_fails(tmp_path: Path) -> None:
     assert lock._handle.closed
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX flock behavior")
+def test_lock_wraps_non_contention_os_error(tmp_path: Path) -> None:
+    """Unexpected flock errors fail immediately and close the handle."""
+    lock = SequencerLock(tmp_path / "transition.lock")
+
+    with (
+        patch("fix_die_repeat.sequencer_state.fcntl.flock", side_effect=OSError("denied")),
+        pytest.raises(StateError, match="Cannot lock sequencer transition file"),
+    ):
+        lock.__enter__()
+
+    assert lock._handle.closed
+
+
 def test_read_state_uses_utf8_encoding(tmp_path: Path) -> None:
     """State decoding matches the writer's explicit UTF-8 encoding."""
     state = {"state_schema_version": 1, "message": "résumé"}
@@ -72,6 +87,18 @@ def test_read_state_uses_utf8_encoding(tmp_path: Path) -> None:
         assert read_state(path) == state
 
     read_text.assert_called_once_with(encoding="utf-8")
+
+
+def test_directory_sync_is_best_effort(tmp_path: Path) -> None:
+    """Directory fsync failures do not invalidate an atomic state replacement."""
+    with (
+        patch("fix_die_repeat.sequencer_state.os.open", return_value=7),
+        patch("fix_die_repeat.sequencer_state.os.fsync", side_effect=OSError("unsupported")),
+        patch("fix_die_repeat.sequencer_state.os.close") as close,
+    ):
+        sequencer_state._sync_directory(tmp_path)
+
+    close.assert_called_once_with(7)
 
 
 @pytest.mark.parametrize(

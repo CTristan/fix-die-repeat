@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 _MAIN_HELP = (
@@ -364,6 +365,7 @@ def _run_sequencer(
             gap["code"]
             in {
                 "duplicate_flag",
+                "invalid_flag",
                 "invalid_flag_value",
                 "missing_flag",
                 "unknown_flag",
@@ -377,10 +379,27 @@ def _run_sequencer(
             if invalid_flags
             else "configuration_error"
         )
+        preferred_codes = (
+            {"workflow_unreadable"}
+            if outcome == "environment_error"
+            else {
+                "duplicate_flag",
+                "invalid_flag",
+                "invalid_flag_value",
+                "missing_flag",
+                "unknown_flag",
+            }
+            if outcome == "usage_error"
+            else set()
+        )
+        diagnostic_gap = next(
+            (gap for gap in gaps if gap["code"] in preferred_codes),
+            gaps[0],
+        )
         result = _sequencer_error(
             command,
             outcome,
-            gaps[0]["message"],
+            diagnostic_gap["message"],
             context=context,
             gaps=gaps,
         )
@@ -405,6 +424,7 @@ def _run_sequencer(
         )
         _exit_with_sequencer_result(result, diagnostic=True)
     except Exception as exc:
+        logger.exception("Unhandled sequencer error in %s", command)
         result = _sequencer_error(
             command,
             "internal_error",

@@ -26,6 +26,7 @@ DEFAULT_EXCLUDE_PATTERNS: list[str] = [
     "go.sum",
     "*.min.*",
 ]
+COMMAND_TIMEOUT_EXIT_CODE = 124
 
 
 @dataclass(frozen=True)
@@ -239,7 +240,11 @@ def run_command(
     except FileNotFoundError:
         return (127, "", f"Command not found: {args[0]}")
     except subprocess.TimeoutExpired:
-        return (124, "", f"Command timed out after {resolved_options.timeout} seconds")
+        return (
+            COMMAND_TIMEOUT_EXIT_CODE,
+            "",
+            f"Command timed out after {resolved_options.timeout} seconds",
+        )
     else:
         return (result.returncode, result.stdout or "", result.stderr or "")
 

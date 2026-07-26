@@ -1,6 +1,7 @@
 """Tests for sequencer workflow loading and validation."""
 
 from pathlib import Path
+from types import MappingProxyType
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -81,6 +82,8 @@ def test_load_workflow_resolves_flags_and_active_steps(tmp_path: Path) -> None:
     assert loaded.flags == {"review": False}
     assert set(loaded.active_steps) == {"check", "fix"}
     assert len(loaded.fingerprint) == SHA256_HEX_LENGTH
+    assert isinstance(loaded.flags, MappingProxyType)
+    assert isinstance(loaded.active_steps, MappingProxyType)
 
 
 def test_load_workflow_fingerprint_ignores_formatting(tmp_path: Path) -> None:
@@ -326,6 +329,25 @@ def test_load_workflow_reports_non_json_route_scalars(
         load_workflow(_write_workflow(tmp_path, content), {})
 
 
+def test_load_workflow_reports_mixed_condition_keys(tmp_path: Path) -> None:
+    """Mixed mapping keys cannot escape condition validation."""
+    content = VALID_WORKFLOW.replace(
+        "      - id: finish\n        when: always",
+        "      - id: finish\n        when:\n          1: true\n          text: true",
+    )
+
+    with pytest.raises(WorkflowValidationError):
+        load_workflow(_write_workflow(tmp_path, content), {})
+
+
+def test_load_workflow_rejects_unhashable_json_type(tmp_path: Path) -> None:
+    """A list cannot enter the JSON type-name registry lookup."""
+    content = VALID_WORKFLOW.replace("          expected: boolean", "          expected: [boolean]")
+
+    with pytest.raises(WorkflowValidationError, match="invalid_json_type"):
+        load_workflow(_write_workflow(tmp_path, content), {})
+
+
 def test_unknown_flag_gaps_are_deterministic(tmp_path: Path) -> None:
     """Unknown supplied flags are reported in sorted order."""
     with pytest.raises(WorkflowValidationError) as error:
@@ -335,4 +357,37 @@ def test_unknown_flag_gaps_are_deterministic(tmp_path: Path) -> None:
         )
 
     subjects = [gap.subject for gap in error.value.gaps if gap.code == "unknown_flag"]
+    assert subjects == ["alpha", "zeta"]
+
+
+def test_unreachable_step_gaps_are_deterministic(tmp_path: Path) -> None:
+    """Unreachable steps are reported in sorted order."""
+    unreachable = """\
+  zeta:
+    instruction: Stop at zeta.
+    mutates_repository: false
+    routes:
+      - id: stop-zeta
+        when: always
+        terminal:
+          code: zeta
+          status: stopped
+          message: Zeta.
+  alpha:
+    instruction: Stop at alpha.
+    mutates_repository: false
+    routes:
+      - id: stop-alpha
+        when: always
+        terminal:
+          code: alpha
+          status: stopped
+          message: Alpha.
+"""
+    content = VALID_WORKFLOW + unreachable
+
+    with pytest.raises(WorkflowValidationError) as error:
+        load_workflow(_write_workflow(tmp_path, content), {})
+
+    subjects = [gap.subject for gap in error.value.gaps if gap.code == "unreachable_step"]
     assert subjects == ["alpha", "zeta"]
