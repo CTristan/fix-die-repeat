@@ -10,15 +10,17 @@ root, then commit the baseline before you run the workflow:
 ```bash
 mkdir -p /path/to/temporary-repository
 cp -R target/. /path/to/temporary-repository/
-git -C /path/to/temporary-repository init -b main
+git -C /path/to/temporary-repository init
+git -C /path/to/temporary-repository symbolic-ref HEAD refs/heads/main
 git -C /path/to/temporary-repository config user.email "example@example.invalid"
 git -C /path/to/temporary-repository config user.name "Example"
 git -C /path/to/temporary-repository add app.txt
 git -C /path/to/temporary-repository commit -m "Added example baseline"
 ```
 
-The `fix` postcondition compares repository snapshots, so `app.txt` must start as a tracked file.
-Then initialize a run:
+The `fix` postcondition compares repository snapshots, including tracked diffs, untracked paths,
+and untracked contents. The committed baseline gives this example a clean starting point; the
+validator does not require `app.txt` itself to be tracked. Then initialize a run:
 
 ```bash
 fix-die-repeat sequencer \
@@ -28,9 +30,10 @@ fix-die-repeat sequencer \
   --workflow /path/to/workflow.yaml
 ```
 
-Each response contains `step.id`, `step.instruction`, and `step.artifact_root`. Run this
-procedure from the example directory, and inspect each `done` response before you execute the
-next step:
+Each non-terminal response that contains `step` includes `step.id`, `step.instruction`, and
+`step.artifact_root`. Run this procedure from the example directory, and inspect each `done`
+response before you execute the next step. Stop when the response contains `terminal` instead of
+executing another step:
 
 1. Copy the `check` response's `step.artifact_root`, run the check, and complete `check`.
 

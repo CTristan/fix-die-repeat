@@ -24,6 +24,7 @@ from fix_die_repeat.sequencer_workflow import (
 )
 
 GIT_PATH = shutil.which("git")
+PROCESS_TIMEOUT_SECONDS = 60
 RECOVERED_ATTEMPT_NUMBER = 2
 HISTORY_OVERFLOW_EVENTS = 2
 
@@ -100,6 +101,7 @@ def _git(repo: Path, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
+        timeout=PROCESS_TIMEOUT_SECONDS,
     )
     return result.stdout.strip()
 
@@ -107,7 +109,8 @@ def _git(repo: Path, *args: str) -> str:
 def _repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
-    _git(repo, "init", "-b", "main")
+    _git(repo, "init")
+    _git(repo, "symbolic-ref", "HEAD", "refs/heads/main")
     _git(repo, "config", "user.email", "tests@example.invalid")
     _git(repo, "config", "user.name", "Tests")
     _git(repo, "config", "commit.gpgsign", "false")

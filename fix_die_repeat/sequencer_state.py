@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -91,8 +92,12 @@ class SequencerLock:
             self._handle.seek(0)
             try:
                 msvcrt.locking(self._handle.fileno(), msvcrt.LK_NBLCK, 1)
-            except OSError:
-                return False
+            except OSError as exc:
+                if exc.errno == errno.EACCES:
+                    return False
+                self._handle.close()
+                msg = f"Cannot lock sequencer transition file: {exc}"
+                raise StateError(msg) from exc
             return True
         try:
             fcntl.flock(self._handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)

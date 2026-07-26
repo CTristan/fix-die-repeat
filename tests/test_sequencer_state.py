@@ -1,9 +1,12 @@
 """Tests for sequencer locking and state persistence."""
 
+import errno
 import json
 import os
 import sys
+from itertools import chain, repeat
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -27,7 +30,7 @@ def test_lock_times_out_with_a_state_error(tmp_path: Path) -> None:
         patch.object(lock, "_try_acquire", return_value=False),
         patch(
             "fix_die_repeat.sequencer_state.time.monotonic",
-            side_effect=[0.0, 0.0, 11.0],
+            side_effect=chain([0.0, 0.0], repeat(11.0)),
         ),
         patch("fix_die_repeat.sequencer_state.time.sleep"),
         pytest.raises(StateError, match="within 10 seconds"),
@@ -113,13 +116,15 @@ def test_state_round_trip_uses_repository_run_layout(tmp_path: Path) -> None:
     state = {"state_schema_version": 1, "message": "ready"}
 
     write_state(paths.state, state)
+    updated = {"state_schema_version": 1, "message": "updated"}
+    write_state(paths.state, updated)
 
     assert paths.directory.parent.name == "runs"
     assert paths.directory.parent.parent.name == "repo-key"
     assert paths.state == paths.directory / "state.json"
     assert paths.lock == paths.directory / "transition.lock"
     assert paths.artifacts == paths.directory / "artifacts"
-    assert read_state(paths.state) == state
+    assert read_state(paths.state) == updated
     assert list(paths.directory.glob(".state-*.tmp")) == []
 
 
@@ -149,6 +154,24 @@ def test_lock_wraps_non_contention_os_error(tmp_path: Path) -> None:
 
     with (
         patch("fix_die_repeat.sequencer_state.fcntl.flock", side_effect=OSError("denied")),
+        pytest.raises(StateError, match="Cannot lock sequencer transition file"),
+    ):
+        lock.__enter__()
+
+    assert lock._handle.closed
+
+
+def test_windows_lock_wraps_non_contention_os_error(tmp_path: Path) -> None:
+    """Only the Windows access-denied error represents lock contention."""
+    lock = SequencerLock(tmp_path / "transition.lock")
+    windows_lock = SimpleNamespace(
+        LK_NBLCK=1,
+        locking=MagicMock(side_effect=OSError(errno.EIO, "device failed")),
+    )
+
+    with (
+        patch.object(sequencer_state.sys, "platform", "win32"),
+        patch.object(sequencer_state, "msvcrt", windows_lock, create=True),
         pytest.raises(StateError, match="Cannot lock sequencer transition file"),
     ):
         lock.__enter__()

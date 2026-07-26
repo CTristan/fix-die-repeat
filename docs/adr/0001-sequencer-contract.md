@@ -798,7 +798,8 @@ does.
 ### `init` compatibility
 
 - Missing state creates a new run after workflow and repository validation.
-- Compatible incomplete state returns the current result without writing.
+- Compatible incomplete state returns the current result without writing unless an explicit
+  matching workflow repairs a relocated source path; that repair increments `state_revision`.
 - Compatible terminal state returns the persisted terminal result.
 - Different flags, workflow identity, repository identity, or workflow fingerprint return
   `blocked`.

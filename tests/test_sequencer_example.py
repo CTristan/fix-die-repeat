@@ -17,6 +17,21 @@ EXAMPLE_ROOT = PROJECT_ROOT / "examples" / "sequencer" / "check-fix-review"
 PROCESS_TIMEOUT_SECONDS = 60
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_git(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Keep the example repository independent of ambient Git configuration."""
+    empty_config = tmp_path / "empty-gitconfig"
+    empty_config.touch()
+    empty_template = tmp_path / "empty-template"
+    empty_template.mkdir()
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty_config))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(empty_config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_TEMPLATE_DIR", str(empty_template))
+    for variable in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        monkeypatch.delenv(variable, raising=False)
+
+
 def _run(arguments: list[str], *, environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         arguments,
@@ -58,7 +73,15 @@ def _response(
         ],
         environment=environment,
     )
-    return result, json.loads(result.stdout)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        pytest.fail(
+            f"invalid JSON response (rc={result.returncode}): "
+            f"stdout={result.stdout!r}; stderr={result.stderr!r}",
+            pytrace=False,
+        )
+    return result, payload
 
 
 def _run_agent(
@@ -110,7 +133,8 @@ def _complete_review(
 def _example_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     shutil.copytree(EXAMPLE_ROOT / "target", repo)
-    _git(repo, "init", "-b", "main")
+    _git(repo, "init")
+    _git(repo, "symbolic-ref", "HEAD", "refs/heads/main")
     _git(repo, "config", "user.email", "tests@example.invalid")
     _git(repo, "config", "user.name", "Tests")
     _git(repo, "config", "commit.gpgsign", "false")

@@ -166,39 +166,51 @@ def _run_git_bounded(repo: Path, args: list[str], limit: int, subject: str) -> b
     if git_path is None:
         msg = "Git executable is not available"
         raise GitProbeError(msg)
-    process = subprocess.Popen(  # noqa: S603  # Git path and argv are controlled here.
+    with subprocess.Popen(  # noqa: S603  # Git path and argv are controlled here.
         [git_path, "-C", str(repo), *args],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-    )
-    output = bytearray()
-    exceeded = threading.Event()
-    reader_errors: list[Exception] = []
-    reader = threading.Thread(
-        target=_read_bounded_output,
-        args=(process, limit, output, exceeded, reader_errors),
-        daemon=True,
-    )
-    reader.start()
-    try:
-        returncode = process.wait(timeout=GIT_TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired as exc:
-        process.kill()
-        process.wait()
-        reader.join()
-        if process.stdout is not None:
-            process.stdout.close()
-        msg = f"Git probe timed out ({' '.join(args)})"
-        raise GitProbeError(msg) from exc
-    reader.join()
-    if process.stdout is not None:
-        process.stdout.close()
+    ) as process:
+        output = bytearray()
+        exceeded = threading.Event()
+        reader_errors: list[Exception] = []
+        reader = threading.Thread(
+            target=_read_bounded_output,
+            args=(process, limit, output, exceeded, reader_errors),
+            daemon=True,
+        )
+        try:
+            reader.start()
+            try:
+                returncode = process.wait(timeout=GIT_TIMEOUT_SECONDS)
+            except subprocess.TimeoutExpired as exc:
+                process.kill()
+                process.wait()
+                reader.join(GIT_TIMEOUT_SECONDS)
+                msg = f"Git probe timed out ({' '.join(args)})"
+                raise GitProbeError(msg) from exc
+            reader.join(GIT_TIMEOUT_SECONDS)
+            if reader.is_alive():
+                msg = f"Git probe output reader did not finish ({' '.join(args)})"
+                raise GitProbeError(msg)
+        finally:
+            if process.poll() is None:
+                with suppress(OSError):
+                    process.kill()
+                with suppress(OSError):
+                    process.wait()
+            if process.stdout is not None:
+                process.stdout.close()
+
     if reader_errors:
         msg = f"Cannot read Git probe output: {reader_errors[0]}"
         raise GitProbeError(msg) from reader_errors[0]
     if exceeded.is_set():
-        msg = f"{subject} content exceeds the remaining {limit} byte snapshot budget"
+        msg = (
+            f"{subject} content exceeds the remaining {limit} byte snapshot budget "
+            f"within the {MAX_TRACKED_DIFF_BYTES} byte total"
+        )
         raise GitProbeError(msg)
     if returncode != 0:
         diagnostic = bytes(output).decode(errors="surrogateescape").strip()

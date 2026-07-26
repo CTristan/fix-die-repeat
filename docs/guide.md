@@ -65,7 +65,8 @@ All options can be set via `FDR_`-prefixed environment variables:
 
 The sequencer owns workflow state and routing, which means your external agent keeps ownership of
 repository changes. It reads the target repository, writes state and artifacts under `FDR_HOME`,
-and returns exactly one JSON response for every completed non-help command.
+and returns exactly one JSON response for every completed command except help and version
+requests.
 
 The public commands are:
 

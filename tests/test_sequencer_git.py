@@ -28,6 +28,7 @@ def _resolve_git_path() -> str:
 
 
 GIT_PATH = _resolve_git_path()
+PROCESS_TIMEOUT_SECONDS = 60
 
 
 @pytest.fixture(autouse=True)
@@ -48,13 +49,15 @@ def _git(repo: Path, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
+        timeout=PROCESS_TIMEOUT_SECONDS,
     )
     return result.stdout.strip()
 
 
 def _init_repo(path: Path, *, commit: bool = True) -> Path:
     path.mkdir()
-    _git(path, "init", "-b", "main")
+    _git(path, "init")
+    _git(path, "symbolic-ref", "HEAD", "refs/heads/main")
     _git(path, "config", "user.email", "tests@example.invalid")
     _git(path, "config", "user.name", "Tests")
     _git(path, "config", "commit.gpgsign", "false")
@@ -152,6 +155,7 @@ def test_bounded_git_output_reports_timeout(tmp_path: Path) -> None:
         subprocess.TimeoutExpired(["git"], 30),
         0,
     ]
+    process.__enter__.return_value = process
 
     with (
         patch.object(subprocess, "Popen", return_value=process),
@@ -165,6 +169,7 @@ def test_bounded_git_output_reports_nonzero_output(tmp_path: Path) -> None:
     process = MagicMock()
     process.stdout.read.side_effect = [b"fatal: failed\n", b""]
     process.wait.return_value = 1
+    process.__enter__.return_value = process
 
     with (
         patch.object(subprocess, "Popen", return_value=process),
@@ -178,12 +183,31 @@ def test_bounded_git_output_reports_reader_failure(tmp_path: Path) -> None:
     process = MagicMock()
     process.stdout.read.side_effect = OSError("read failed")
     process.wait.return_value = 0
+    process.__enter__.return_value = process
 
     with (
         patch.object(subprocess, "Popen", return_value=process),
         pytest.raises(GitProbeError, match="Cannot read Git probe output"),
     ):
         sequencer_git._run_git_bounded(tmp_path, ["diff"], 64, "Test diff")
+
+
+def test_bounded_git_output_rejects_stuck_reader(tmp_path: Path) -> None:
+    """A reader that remains blocked after Git exits fails closed."""
+    process = MagicMock()
+    process.wait.return_value = 0
+    process.__enter__.return_value = process
+    reader = MagicMock()
+    reader.is_alive.return_value = True
+
+    with (
+        patch.object(subprocess, "Popen", return_value=process),
+        patch.object(sequencer_git.threading, "Thread", return_value=reader),
+        pytest.raises(GitProbeError, match="reader did not finish"),
+    ):
+        sequencer_git._run_git_bounded(tmp_path, ["diff"], 64, "Test diff")
+
+    reader.join.assert_called_once_with(sequencer_git.GIT_TIMEOUT_SECONDS)
 
 
 def test_snapshot_reuses_diff_and_untracked_probe_output(tmp_path: Path) -> None:
@@ -227,7 +251,7 @@ def test_head_changed_detects_symbolic_ref_change_at_same_commit(tmp_path: Path)
     info = resolve_repository(repo)
     baseline = capture_snapshot(info)
     _git(repo, "branch", "other")
-    _git(repo, "switch", "other")
+    _git(repo, "checkout", "other")
 
     assert evaluate_git_operation("git.head_changed", info, initial=baseline)
 

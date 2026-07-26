@@ -18,6 +18,7 @@ from fix_die_repeat.sequencer_engine import (
 from fix_die_repeat.sequencer_workflow import ValidationGap, WorkflowValidationError
 
 GIT_PATH = shutil.which("git")
+PROCESS_TIMEOUT_SECONDS = 60
 
 WORKFLOW = """\
 schema_version: 1
@@ -53,13 +54,15 @@ def _git(repo: Path, *args: str) -> None:
         [GIT_PATH, "-C", str(repo), *args],
         check=True,
         capture_output=True,
+        timeout=PROCESS_TIMEOUT_SECONDS,
     )
 
 
 def _repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
-    _git(repo, "init", "-b", "main")
+    _git(repo, "init")
+    _git(repo, "symbolic-ref", "HEAD", "refs/heads/main")
     return repo
 
 

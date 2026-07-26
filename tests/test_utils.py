@@ -439,17 +439,19 @@ class TestRunCommand:
 
     def test_run_command_reports_timeout(self) -> None:
         """A subprocess deadline becomes a stable nonzero command result."""
+        timeout_seconds = 30
         with patch(
             "fix_die_repeat.utils.subprocess.run",
-            side_effect=subprocess.TimeoutExpired(["git"], 30),
-        ):
+            side_effect=subprocess.TimeoutExpired(["git"], timeout_seconds),
+        ) as mock_run:
             returncode, _stdout, stderr = run_command(
                 ["git"],
-                options=RunCommandOptions(timeout=30),
+                options=RunCommandOptions(timeout=timeout_seconds),
             )
 
+        assert mock_run.call_args.kwargs["timeout"] == timeout_seconds
         assert returncode == COMMAND_TIMEOUT_EXIT_CODE
-        assert stderr == "Command timed out after 30 seconds"
+        assert stderr == f"Command timed out after {timeout_seconds} seconds"
 
     def test_run_command_raises_timeout_when_checking(self) -> None:
         """Checked subprocess deadlines retain the subprocess exception contract."""
