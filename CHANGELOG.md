@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added the external workflow sequencer with versioned YAML workflows, one-object JSON responses, atomic repository-scoped state, explicit recovery, closed validators, live Git predicates, and a self-contained check-fix-review example. See [`docs/adr/0001-sequencer-contract.md`](docs/adr/0001-sequencer-contract.md).
 - Node.js sidecar bridge for pi invocation. `fix-die-repeat` now drives pi via the `@mariozechner/pi-coding-agent` SDK through a small Node.js process at `priv/pi-bridge/bridge.js`. Every pi call routes through a JSON-lines protocol on stdin/stdout, enabling a structured event stream (text deltas, tool-execution start/end, thinking, agent end) and clean lifecycle management. See [`docs/pi-bridge.md`](docs/pi-bridge.md) for the design note.
 - Idle-based prompt timeout for the pi bridge. The Python side now fails a prompt only when the bridge stops emitting events (`FDR_PI_IDLE_TIMEOUT_S`, default 120s), with a separate absolute cap (`FDR_PI_HARD_TIMEOUT_S`, default 60 min) as a safety net. Long contextual reviews that stream tool-execution events every few seconds no longer hit a 5-minute wall clock.
 - Live tool-call progress in the log. Pi's `tool_execution_start` events are surfaced at INFO level as `pi: <tool> <arg>` so long turns show what the agent is doing without enabling `--debug`.
@@ -18,10 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Replaced the separate pre-commit validation hooks with one centralized `scripts/ci.sh --check-only` hook.
+- Hardened sequencer validation, bounded artifact and Git probes, state writes, transition locking, and configuration diagnostics after adversarial review.
 - Pi invocation no longer uses the `pi` CLI subprocess. `PiRunner.run_pi` translates the historical argv (`-p`, `--tools`, `--model`, `@file`) into structured bridge commands. The `(returncode, stdout, stderr)` return contract is preserved so managers don't change.
 - `fix-die-repeat` commits to pi as the single backend. Multi-backend scaffolding (paused issues #16 / #17 / #20) is no longer on the roadmap — the sidecar bridge replaces the need for a separate backend-abstraction layer.
 - The `--model-skip` fallback on 503 capacity errors is no longer automatic. The bridge exposes `set_model` but has no fallback list; the 503 handler now logs a warning and retries with the same model. Users who relied on pi's model cycling can configure `FDR_MODEL` / `--model` explicitly.
-- CI workflow and `scripts/ci.sh` now set up Node.js 20 and run `npm ci` for the bridge before running Python tests.
+- CI now installs the locked Python development environment, and the workflow and `scripts/ci.sh` set up Node.js 20 and run `npm ci` for the bridge before running Python tests.
 
 ### Removed
 

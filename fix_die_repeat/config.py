@@ -316,6 +316,11 @@ def _central_root() -> Path:
     return (Path.home() / ".fix-die-repeat").resolve(strict=False)
 
 
+def get_fdr_home() -> Path:
+    """Return the configured central fix-die-repeat state directory."""
+    return _central_root()
+
+
 def _repo_slug(project_root: Path) -> str:
     """Return a stable, semi-readable per-repo slug.
 

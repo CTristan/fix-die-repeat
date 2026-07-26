@@ -12,7 +12,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fix_die_repeat.utils import (
+    COMMAND_TIMEOUT_EXIT_CODE,
     ReviewScope,
+    RunCommandOptions,
     _collect_git_files,
     _should_exclude_file,
     configure_logger,
@@ -434,6 +436,38 @@ class TestRunCommand:
 
         mock_run.assert_called_once()
         assert mock_run.call_args.kwargs.get("stdin") == subprocess.DEVNULL
+
+    def test_run_command_reports_timeout(self) -> None:
+        """A subprocess deadline becomes a stable nonzero command result."""
+        timeout_seconds = 30
+        with patch(
+            "fix_die_repeat.utils.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["git"], timeout_seconds),
+        ) as mock_run:
+            returncode, _stdout, stderr = run_command(
+                ["git"],
+                options=RunCommandOptions(timeout=timeout_seconds),
+            )
+
+        assert mock_run.call_args.kwargs["timeout"] == timeout_seconds
+        assert returncode == COMMAND_TIMEOUT_EXIT_CODE
+        assert stderr == f"Command timed out after {timeout_seconds} seconds"
+
+    def test_run_command_raises_timeout_when_checking(self) -> None:
+        """Checked subprocess deadlines retain the subprocess exception contract."""
+        timeout = subprocess.TimeoutExpired(["git"], 30)
+
+        with (
+            patch("fix_die_repeat.utils.subprocess.run", side_effect=timeout),
+            pytest.raises(subprocess.TimeoutExpired) as raised,
+        ):
+            run_command(
+                ["git"],
+                check=True,
+                options=RunCommandOptions(timeout=30),
+            )
+
+        assert raised.value is timeout
 
 
 class TestPlayCompletionSound:

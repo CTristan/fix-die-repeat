@@ -1,7 +1,13 @@
 """Command-line interface for fix-die-repeat."""
 
+from __future__ import annotations
+
+import json
 import logging
 import traceback
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Never, cast, override
 
 import click
 from rich.console import Console
@@ -19,9 +25,26 @@ from fix_die_repeat.detection import (
 )
 from fix_die_repeat.runner import PiRunner
 from fix_die_repeat.runner_improve_prompts import ImprovePromptsManager
+from fix_die_repeat.sequencer_engine import (
+    DoneOptions,
+    SequencerResult,
+    SequencerService,
+)
+from fix_die_repeat.sequencer_evaluator import EvaluationError
+from fix_die_repeat.sequencer_git import GitProbeError
+from fix_die_repeat.sequencer_state import StateError
+from fix_die_repeat.sequencer_workflow import (
+    FLAG_GAP_CODES,
+    ID_PATTERN,
+    WorkflowValidationError,
+)
 from fix_die_repeat.utils import is_running_in_dev_mode
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 _MAIN_HELP = (
@@ -70,7 +93,87 @@ _MAIN_HELP = (
 )
 
 
-@click.command(help=_MAIN_HELP)
+def _sequencer_error(
+    command: str,
+    outcome: str,
+    message: str,
+    *,
+    context: _SequencerContext | None = None,
+    gaps: list[dict[str, str]] | None = None,
+) -> SequencerResult:
+    """Build a protocol error without requiring initialized state."""
+    return SequencerResult(
+        command=command,
+        outcome=outcome,
+        message=message,
+        repository=(str(context.repository.resolve(strict=False)) if context is not None else None),
+        run_id=context.run_id if context is not None else None,
+        gaps=gaps or [],
+    )
+
+
+def _emit_sequencer_result(result: SequencerResult, *, diagnostic: bool = False) -> int:
+    """Write one JSON response and an optional human diagnostic."""
+    click.echo(json.dumps(result.to_dict(), sort_keys=True, separators=(",", ":")))
+    if diagnostic:
+        click.echo(f"Error: {result.message}", err=True)
+    return result.exit_code
+
+
+def _exit_with_sequencer_result(
+    result: SequencerResult,
+    *,
+    diagnostic: bool = False,
+) -> Never:
+    """Emit a response, then preserve its nonzero process status through Click."""
+    raise click.exceptions.Exit(
+        _emit_sequencer_result(result, diagnostic=diagnostic),
+    )
+
+
+class _RootGroup(click.Group):
+    """Preserve Click help while converting sequencer usage failures to JSON."""
+
+    @override
+    def invoke(self, ctx: click.Context) -> Any:
+        try:
+            return super().invoke(ctx)
+        except click.UsageError as exc:
+            if ctx.invoked_subcommand != "sequencer":
+                raise
+            command, context = _sequencer_usage_context(exc, ctx)
+            result = _sequencer_error(
+                command,
+                "usage_error",
+                exc.format_message(),
+                context=context,
+            )
+            _exit_with_sequencer_result(result, diagnostic=True)
+
+
+def _sequencer_usage_context(
+    error: click.UsageError,
+    root: click.Context,
+) -> tuple[str, _SequencerContext | None]:
+    """Recover the leaf command and parsed identity from Click's context chain."""
+    leaf = error.ctx or root
+    command = leaf.info_name or leaf.command.name or "sequencer"
+    current: click.Context | None = leaf
+    context: _SequencerContext | None = None
+    while current is not None:
+        if isinstance(current.obj, _SequencerContext):
+            context = current.obj
+            break
+        current = current.parent
+    return command, context
+
+
+@click.group(
+    cls=_RootGroup,
+    help=_MAIN_HELP,
+    invoke_without_command=True,
+    no_args_is_help=False,
+)
 @click.option(
     "-c",
     "--check-cmd",
@@ -177,7 +280,8 @@ _MAIN_HELP = (
     envvar="FDR_DEBUG",
 )
 @click.version_option()
-def main(**kwargs: str | int | bool | None) -> None:
+@click.pass_context
+def main(ctx: click.Context, **kwargs: str | int | bool | None) -> None:
     """Run the automated check, review, and fix loop.
 
     fix-die-repeat is an automated tool that:
@@ -187,9 +291,243 @@ def main(**kwargs: str | int | bool | None) -> None:
     4. If review finds issues, fixes them
     5. Repeats until all checks pass and no issues are found
     """
+    if ctx.invoked_subcommand is not None:
+        return
     debug = bool(kwargs.get("debug", False))
     exit_code = _run_main_with_error_handling(kwargs, debug=debug)
     raise SystemExit(exit_code)
+
+
+@dataclass(frozen=True)
+class _SequencerContext:
+    """Repository and run identity shared by sequencer commands."""
+
+    repository: Path
+    run_id: str
+
+
+@main.group(name="sequencer")
+@click.option(
+    "--run-id",
+    required=True,
+    help="Repository-scoped run identifier.",
+)
+@click.option(
+    "--repo",
+    "repository",
+    type=click.Path(path_type=Path, file_okay=False),
+    default=".",
+    show_default=True,
+    help="Target Git repository.",
+)
+@click.pass_context
+def sequencer(ctx: click.Context, run_id: str, repository: Path) -> None:
+    """Drive a persisted, externally executed workflow."""
+    ctx.obj = _SequencerContext(repository=repository, run_id=run_id)
+    _validate_protocol_id(run_id, "run ID")
+
+
+def _validate_protocol_id(value: str, label: str) -> None:
+    """Reject identifiers that cannot enter the version 1 protocol."""
+    if not ID_PATTERN.fullmatch(value):
+        message = f"Invalid {label}: {value!r}"
+        raise click.UsageError(message, ctx=click.get_current_context())
+
+
+def _parse_flags(values: tuple[str, ...]) -> list[tuple[str, str]]:
+    """Split repeated NAME=VALUE flag arguments without interpreting values."""
+    flags: list[tuple[str, str]] = []
+    names: set[str] = set()
+    for value in values:
+        name, separator, flag_value = value.partition("=")
+        if not separator or not name or not flag_value:
+            message = "--flag must use NAME=VALUE"
+            raise click.UsageError(message, ctx=click.get_current_context())
+        _validate_protocol_id(name, "flag name")
+        if name in names:
+            message = f"Duplicate flag: {name!r}"
+            raise click.UsageError(message, ctx=click.get_current_context())
+        names.add(name)
+        flags.append((name, flag_value))
+    return flags
+
+
+def _run_sequencer(
+    command: str,
+    context: _SequencerContext,
+    operation: Callable[[], SequencerResult],
+) -> Never:
+    """Execute one service operation behind the stable response boundary."""
+    try:
+        result = operation()
+    except WorkflowValidationError as exc:
+        gaps = [
+            {"code": gap.code, "subject": gap.subject, "message": gap.message} for gap in exc.gaps
+        ]
+        unreadable = any(gap["code"] == "workflow_unreadable" for gap in gaps)
+        invalid_flags = any(gap["code"] in FLAG_GAP_CODES for gap in gaps)
+        outcome = (
+            "environment_error"
+            if unreadable
+            else "usage_error"
+            if invalid_flags
+            else "configuration_error"
+        )
+        preferred_codes = (
+            {"workflow_unreadable"}
+            if outcome == "environment_error"
+            else FLAG_GAP_CODES
+            if outcome == "usage_error"
+            else set()
+        )
+        diagnostic_gap = next(
+            (gap for gap in gaps if gap["code"] in preferred_codes),
+            gaps[0]
+            if gaps
+            else {
+                "code": "unknown_validation",
+                "subject": command,
+                "message": str(exc) or "Workflow validation failed without diagnostics",
+            },
+        )
+        result = _sequencer_error(
+            command,
+            outcome,
+            diagnostic_gap["message"],
+            context=context,
+            gaps=gaps,
+        )
+        _exit_with_sequencer_result(
+            result,
+            diagnostic=True,
+        )
+    except (GitProbeError, StateError, EvaluationError, OSError) as exc:
+        result = _sequencer_error(
+            command,
+            "environment_error",
+            str(exc),
+            context=context,
+        )
+        _exit_with_sequencer_result(result, diagnostic=True)
+    except KeyboardInterrupt:
+        result = _sequencer_error(
+            command,
+            "interrupted",
+            "Interrupted by user",
+            context=context,
+        )
+        _exit_with_sequencer_result(result, diagnostic=True)
+    except Exception as exc:
+        logger.exception("Unhandled sequencer error in %s", command)
+        result = _sequencer_error(
+            command,
+            "internal_error",
+            str(exc),
+            context=context,
+        )
+        _exit_with_sequencer_result(result, diagnostic=True)
+    _exit_with_sequencer_result(result)
+
+
+@sequencer.command(name="init")
+@click.option(
+    "--workflow",
+    type=click.Path(path_type=Path, dir_okay=False),
+    required=True,
+    help="Workflow YAML file.",
+)
+@click.option(
+    "--flag",
+    "flags",
+    multiple=True,
+    metavar="NAME=VALUE",
+    help="Resolve one declared workflow flag.",
+)
+@click.pass_obj
+def sequencer_init(
+    context: _SequencerContext,
+    workflow: Path,
+    flags: tuple[str, ...],
+) -> Never:
+    """Initialize a workflow run."""
+    parsed_flags = _parse_flags(flags)
+    _run_sequencer(
+        "init",
+        context,
+        lambda: SequencerService().init(
+            context.repository,
+            context.run_id,
+            workflow,
+            parsed_flags,
+        ),
+    )
+
+
+def _workflow_option[**Parameters, Return](
+    function: Callable[Parameters, Return],
+) -> Callable[Parameters, Return]:
+    """Add the common optional workflow source override."""
+    decorator = click.option(
+        "--workflow",
+        type=click.Path(path_type=Path, dir_okay=False),
+        help="Workflow YAML source override.",
+    )
+    return cast("Callable[Parameters, Return]", decorator(function))
+
+
+@sequencer.command(name="next")
+@_workflow_option
+@click.pass_obj
+def sequencer_next(context: _SequencerContext, workflow: Path | None) -> Never:
+    """Return the current instruction without advancing."""
+    _run_sequencer(
+        "next",
+        context,
+        lambda: SequencerService().next(context.repository, context.run_id, workflow),
+    )
+
+
+@sequencer.command(name="status")
+@_workflow_option
+@click.pass_obj
+def sequencer_status(context: _SequencerContext, workflow: Path | None) -> Never:
+    """Report the persisted cursor and configuration health."""
+    _run_sequencer(
+        "status",
+        context,
+        lambda: SequencerService().status(context.repository, context.run_id, workflow),
+    )
+
+
+@sequencer.command(name="done")
+@click.argument("step")
+@_workflow_option
+@click.option("--force", is_flag=True, help="Advance despite failed postconditions.")
+@click.option("--recover", is_flag=True, help="Acknowledge and reissue a mutating step.")
+@click.pass_obj
+def sequencer_done(
+    context: _SequencerContext,
+    *,
+    step: str,
+    workflow: Path | None,
+    force: bool,
+    recover: bool,
+) -> Never:
+    """Validate and advance the current step."""
+    _validate_protocol_id(step, "step ID")
+    if force and recover:
+        message = "--force and --recover are mutually exclusive"
+        raise click.UsageError(message, ctx=click.get_current_context())
+    _run_sequencer(
+        "done",
+        context,
+        lambda: SequencerService().done(
+            context.repository,
+            context.run_id,
+            step,
+            DoneOptions(workflow_path=workflow, force=force, recover=recover),
+        ),
+    )
 
 
 def _build_cli_options(kwargs: dict[str, str | int | bool | None]) -> CliOptions:

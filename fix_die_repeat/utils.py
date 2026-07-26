@@ -11,6 +11,7 @@ import shlex
 import subprocess
 import sys
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 
 from rich.console import Console
@@ -25,6 +26,15 @@ DEFAULT_EXCLUDE_PATTERNS: list[str] = [
     "go.sum",
     "*.min.*",
 ]
+COMMAND_TIMEOUT_EXIT_CODE = 124
+
+
+@dataclass(frozen=True)
+class RunCommandOptions:
+    """Optional subprocess decoding and deadline controls."""
+
+    encoding_errors: str | None = None
+    timeout: float | None = None
 
 
 def _resolve_exclude_patterns(exclude_patterns: list[str] | None) -> list[str]:
@@ -186,6 +196,7 @@ def run_command(
     *,
     capture_output: bool = True,
     check: bool = False,
+    options: RunCommandOptions | None = None,
 ) -> tuple[int, str, str]:
     """Run a command without invoking a shell.
 
@@ -198,9 +209,12 @@ def run_command(
         cwd: Working directory
         capture_output: Capture stdout and stderr
         check: Raise exception on non-zero exit code
+        options: Optional output decoding and timeout controls
 
     Returns:
-        Tuple of (exit_code, stdout, stderr)
+        Tuple of (exit_code, stdout, stderr). Command-not-found returns 127.
+        A timeout returns ``COMMAND_TIMEOUT_EXIT_CODE`` (124) and intentionally
+        discards partial stdout and stderr captured before the deadline.
 
     """
     try:
@@ -211,6 +225,7 @@ def run_command(
     if not args:
         return (2, "", "No command provided")
 
+    resolved_options = options or RunCommandOptions()
     try:
         # stdin=DEVNULL: pi in -p mode reads stdin to merge with its prompt; if we
         # inherit an interactive tty, pi hangs after its work waiting for EOF.
@@ -220,10 +235,20 @@ def run_command(
             stdin=subprocess.DEVNULL,
             capture_output=capture_output,
             text=True,
+            errors=resolved_options.encoding_errors,
             check=check,
+            timeout=resolved_options.timeout,
         )
     except FileNotFoundError:
         return (127, "", f"Command not found: {args[0]}")
+    except subprocess.TimeoutExpired:
+        if check:
+            raise
+        return (
+            COMMAND_TIMEOUT_EXIT_CODE,
+            "",
+            f"Command timed out after {resolved_options.timeout} seconds",
+        )
     else:
         return (result.returncode, result.stdout or "", result.stderr or "")
 

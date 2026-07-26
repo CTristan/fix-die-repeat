@@ -66,9 +66,21 @@ fix-die-repeat -c "make test" -m anthropic/claude-sonnet-4-5
 
 On first run, fix-die-repeat [detects your project type](docs/guide.md#check-command-resolution) and asks you to confirm the check command. The choice is saved so subsequent runs use it automatically.
 
+### External workflow sequencing
+
+`fix-die-repeat sequencer` drives a versioned workflow without running the work itself. Your
+external agent receives one instruction at a time, performs the requested repository work, writes
+any declared JSON artifacts, and reports completion so the sequencer can validate and route the
+next step.
+
+See the [sequencer guide](docs/guide.md#external-workflow-sequencer) for the command and response
+contract. The [check, fix, and review example](examples/sequencer/check-fix-review/) includes a
+complete workflow and small scripts you can run without another integration.
+
 ## Features
 
 - **[Auto-detection](docs/guide.md#check-command-resolution)** — finds your check command from project files (`Makefile`, `package.json`, `Cargo.toml`, `pyproject.toml`, and more)
+- **[External workflow sequencer](docs/guide.md#external-workflow-sequencer)** — validates and routes agent-owned work through a persisted JSON protocol
 - **[PR review mode](docs/guide.md#pr-review-mode)** — fetches and fixes GitHub PR review comments automatically
 - **[PR review introspection](docs/guide.md)** — analyzes PR reviews to identify prompt improvement opportunities
 - **[Self-improving prompts](docs/guide.md#improve-prompts)** — `--improve-prompts` has pi update your user-owned templates from accumulated introspection data
