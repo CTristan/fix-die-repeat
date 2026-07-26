@@ -103,6 +103,14 @@ def test_load_workflow_rejects_duplicate_yaml_keys(tmp_path: Path) -> None:
         load_workflow(_write_workflow(tmp_path, content), {})
 
 
+def test_load_workflow_rejects_unhashable_yaml_keys(tmp_path: Path) -> None:
+    """Unhashable YAML keys fail through the workflow validation contract."""
+    content = "? [one, two]\n: value\n"
+
+    with pytest.raises(WorkflowValidationError, match="invalid_yaml"):
+        load_workflow(_write_workflow(tmp_path, content), {})
+
+
 def test_load_workflow_rejects_unknown_fields(tmp_path: Path) -> None:
     """Unknown schema fields fail closed."""
     content = VALID_WORKFLOW.replace("start: check", "start: check\nsurprise: true")

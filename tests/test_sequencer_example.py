@@ -117,7 +117,8 @@ def test_check_fix_review_example_completes(tmp_path: Path) -> None:
     assert repeated.returncode == EXIT_CODES["proceed"]
     recovery, _ = _response(repo, environment, "next")
     assert recovery.returncode == EXIT_CODES["recovery"]
-    _response(repo, environment, "done", "fix", "--recover")
+    recovered, _ = _response(repo, environment, "done", "fix", "--recover")
+    assert recovered.returncode == EXIT_CODES["proceed"]
 
     _run_agent("fix.py", target, environment)
     recheck, _ = _response(repo, environment, "done", "fix")

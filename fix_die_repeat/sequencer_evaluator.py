@@ -59,10 +59,20 @@ def _resolve_path(operation: OperationSpec, context: EvaluationContext) -> Path:
 def _read_json(path: Path) -> tuple[object | None, str | None]:
     if not path.is_file():
         return None, f"{path} is not a regular file"
+
+    def reject_constant(value: str) -> None:
+        msg = f"non-standard constant {value}"
+        raise ValueError(msg)
+
     try:
-        return json.loads(path.read_text()), None
+        raw = path.read_text(encoding="utf-8")
+        return json.loads(raw, parse_constant=reject_constant), None
     except json.JSONDecodeError as exc:
         return None, f"{path} is not valid JSON: {exc.msg}"
+    except ValueError as exc:
+        return None, f"{path} is not valid JSON: {exc}"
+    except UnicodeDecodeError as exc:
+        return None, f"{path} is not valid UTF-8 JSON: {exc}"
     except OSError as exc:
         msg = f"Cannot read {path}: {exc}"
         raise EvaluationError(msg) from exc

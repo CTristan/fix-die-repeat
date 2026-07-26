@@ -681,8 +681,7 @@ class SequencerService:
             "revision": state["revision"],
             "timestamp": _timestamp(),
         }
-        relocated = self._apply_relocation(state, check)
-        del relocated
+        self._apply_relocation(state, check)
         state["history"].append(event)
         state["revision"] += 1
         newly_issued = False

@@ -4,7 +4,17 @@ This example keeps the boundary visible: the sequencer decides what comes next, 
 external agent reads each instruction, changes `target/app.txt`, and writes declared JSON
 artifacts.
 
-Copy `target/` into a temporary Git repository before you run the workflow. Then initialize a run:
+Copy `target/` into a temporary Git repository, then commit the baseline before you run the
+workflow:
+
+```bash
+git -C /path/to/temporary-repository init -b main
+git -C /path/to/temporary-repository add app.txt
+git -C /path/to/temporary-repository commit -m "Added example baseline"
+```
+
+The `fix` postcondition compares repository snapshots, so `app.txt` must start as a tracked file.
+Then initialize a run:
 
 ```bash
 fix-die-repeat sequencer \

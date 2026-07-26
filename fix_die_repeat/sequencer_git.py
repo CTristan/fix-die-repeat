@@ -89,6 +89,7 @@ def _run_git(
     returncode, stdout, stderr = run_command(
         [git_path, "-C", str(repo), *args],
         check=False,
+        encoding_errors="surrogateescape",
     )
     result = _GitResult(returncode=returncode, stdout=stdout, stderr=stderr)
     if check and result.returncode != 0:
@@ -143,9 +144,12 @@ def _dirty(repo: Path) -> DirtyState:
     return DirtyState(staged=staged, unstaged=unstaged, untracked=untracked)
 
 
-def _update_untracked_digest(repo: Path, digest: _Digest) -> None:
-    result = _run_git(repo, ["ls-files", "--others", "--exclude-standard", "-z"])
-    for relative_path in filter(None, result.stdout.split("\0")):
+def _update_untracked_digest(
+    repo: Path,
+    digest: _Digest,
+    relative_paths: list[str],
+) -> None:
+    for relative_path in relative_paths:
         digest.update(b"untracked\0")
         digest.update(os.fsencode(relative_path))
         path = repo / relative_path
@@ -174,25 +178,33 @@ def _update_untracked_digest(repo: Path, digest: _Digest) -> None:
 def capture_snapshot(repository: RepositoryInfo) -> GitSnapshot:
     """Capture content and HEAD state without writing Git objects."""
     head, symbolic_ref = _head(repository.root)
-    dirty = _dirty(repository.root)
+    staged = _run_git(
+        repository.root,
+        ["diff", "--cached", "--binary", "--no-ext-diff"],
+    ).stdout
+    unstaged = _run_git(
+        repository.root,
+        ["diff", "--binary", "--no-ext-diff"],
+    ).stdout
+    untracked_output = _run_git(
+        repository.root,
+        ["ls-files", "--others", "--exclude-standard", "-z"],
+    ).stdout
+    untracked_paths = list(filter(None, untracked_output.split("\0")))
+    dirty = DirtyState(
+        staged=bool(staged),
+        unstaged=bool(unstaged),
+        untracked=bool(untracked_paths),
+    )
     digest = hashlib.sha256()
     digest.update((head or "<unborn>").encode())
     digest.update(b"\0")
     digest.update((symbolic_ref or "<detached>").encode())
     digest.update(b"\0staged\0")
-    digest.update(
-        _run_git(
-            repository.root,
-            ["diff", "--cached", "--binary", "--no-ext-diff"],
-        ).stdout.encode(errors="surrogateescape"),
-    )
+    digest.update(staged.encode(errors="surrogateescape"))
     digest.update(b"\0unstaged\0")
-    digest.update(
-        _run_git(repository.root, ["diff", "--binary", "--no-ext-diff"]).stdout.encode(
-            errors="surrogateescape",
-        ),
-    )
-    _update_untracked_digest(repository.root, digest)
+    digest.update(unstaged.encode(errors="surrogateescape"))
+    _update_untracked_digest(repository.root, digest, untracked_paths)
     return GitSnapshot(
         head=head,
         symbolic_ref=symbolic_ref,
@@ -256,22 +268,30 @@ def evaluate_git_operation(
     if operation == "git.has_unpushed_commits":
         return _has_unpushed(repository)
 
-    current = capture_snapshot(repository)
     result: bool
-    if operation == "git.is_clean":
-        result = not any(asdict(current.dirty).values())
-    elif operation == "git.has_staged_changes":
-        result = current.dirty.staged
-    elif operation == "git.has_unstaged_changes":
-        result = current.dirty.unstaged
-    elif operation == "git.has_untracked_changes":
-        result = current.dirty.untracked
+    if operation in {
+        "git.is_clean",
+        "git.has_staged_changes",
+        "git.has_unstaged_changes",
+        "git.has_untracked_changes",
+    }:
+        dirty = _dirty(repository.root)
+        if operation == "git.is_clean":
+            result = not any(asdict(dirty).values())
+        elif operation == "git.has_staged_changes":
+            result = dirty.staged
+        elif operation == "git.has_unstaged_changes":
+            result = dirty.unstaged
+        else:
+            result = dirty.untracked
     elif operation == "git.head_changed":
+        current = capture_snapshot(repository)
         if initial is None:
             msg = "git.head_changed requires the initial snapshot"
             raise GitProbeError(msg)
         result = (current.head, current.symbolic_ref) != (initial.head, initial.symbolic_ref)
     elif operation == "git.working_tree_changed":
+        current = capture_snapshot(repository)
         if issued is None:
             msg = "git.working_tree_changed requires an issued-step snapshot"
             raise GitProbeError(msg)

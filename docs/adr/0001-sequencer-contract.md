@@ -220,8 +220,11 @@ workflow matches the stored fingerprint.
 
 ### Transition locking
 
-- **Operating-system file lock (selected):** The operating system releases it on process death,
-  and the project already has Unix and Windows implementations.
+- **Bounded operating-system file lock (selected):** The operating system releases it on process
+  death, while a 10-second non-blocking retry window prevents a live holder from hanging every
+  later command.
+- **Blocking operating-system file lock:** This uses the fewest lock operations, but one long or
+  stuck transaction can leave every caller waiting without a diagnostic.
 - **PID lock file:** A crash leaves stale ownership, and PID reuse makes automatic cleanup unsafe.
 - **Atomic lock-directory creation:** Directory ownership works across platforms, but a crash still
   needs lease and stale-timeout rules.
@@ -297,6 +300,9 @@ workflow matches the stored fingerprint.
   one object for completed calls and deterministic persisted truth after a retry.
 - Path containment could be misread as protection from a hostile local process. It prevents
   configured escape, while the external agent remains inside the repository's trust boundary.
+- An unbounded operating-system lock could hang every later command behind one live holder.
+  Process-death cleanup does not help while that process remains alive, so lock acquisition needs
+  a bounded wait and a clear environment error.
 
 These findings changed the original proposal. The decision below uses persisted state for
 recovery, unconditional JSON, repository-scoped run IDs, named routes, JSON-only artifact
@@ -795,9 +801,10 @@ state file would create ambiguity about which cursor is authoritative.
 
 ### Locking
 
-Every command opens `transition.lock` and takes an exclusive operating-system lock for the whole
-read, probe, validation, route, and write transaction. Unix uses `fcntl.flock`, and Windows uses
-`msvcrt.locking`, matching the project's existing cross-platform lock behavior.
+Every command opens `transition.lock` and retries a non-blocking exclusive operating-system lock
+for up to 10 seconds. Unix uses `fcntl.flock`, and Windows uses `msvcrt.locking`, matching the
+project's existing cross-platform lock behavior. A caller that cannot acquire the lock within that
+window receives an `environment_error` instead of waiting forever.
 
 The operating system releases the lock when a process exits, so a crashed process cannot leave a
 permanent stale lock. The lock file may remain on disk and carries no ownership truth.
@@ -920,6 +927,9 @@ Good, because closed validators and scoped paths keep workflow configuration dec
 
 Good, because the response and workflow versions let us evolve either contract deliberately.
 
+Good, because lock contention fails with a diagnostic after 10 seconds instead of hanging every
+later command behind one live holder.
+
 Bad, because consumers must write result artifacts and acknowledge interrupted mutating steps.
 That extra protocol work is necessary because the sequencer cannot observe an external agent's
 intent.
@@ -944,6 +954,9 @@ later without weakening the initial machine contract.
 
 Bad, because adding a root subcommand requires a careful Click migration and complete regression
 coverage for every existing root invocation.
+
+Bad, because a valid transition that holds the lock for more than 10 seconds can make a concurrent
+caller fail. That caller must retry after the active transition finishes.
 
 ## Required implementation tests
 

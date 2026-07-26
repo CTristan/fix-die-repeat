@@ -135,6 +135,37 @@ def test_blocked_and_terminal_exit_codes(tmp_path: Path, monkeypatch: pytest.Mon
     assert terminal_payload["status"] == "success"
 
 
+def test_next_status_and_workflow_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shared workflow overrides cover relocation and drift through the CLI."""
+    monkeypatch.setenv("FDR_HOME", str(tmp_path / "home"))
+    runner = CliRunner()
+    repo = _repo(tmp_path)
+    workflow = _workflow(tmp_path)
+    initialized = _invoke(runner, repo, ["init", "--workflow", str(workflow)])
+    assert initialized.exit_code == EXIT_CODES["proceed"]
+
+    relocated = tmp_path / "relocated.yaml"
+    workflow.rename(relocated)
+    next_result = _invoke(runner, repo, ["next", "--workflow", str(relocated)])
+
+    assert next_result.exit_code == EXIT_CODES["proceed"]
+    next_configuration = _payload(next_result)["configuration"]
+    assert isinstance(next_configuration, dict)
+    assert next_configuration["source"] == str(relocated.resolve())
+
+    drifted = tmp_path / "drifted.yaml"
+    drifted.write_text(WORKFLOW.replace("Write result.json.", "Write another result."))
+    status_result = _invoke(runner, repo, ["status", "--workflow", str(drifted)])
+
+    assert status_result.exit_code == EXIT_CODES["blocked"]
+    status_configuration = _payload(status_result)["configuration"]
+    assert isinstance(status_configuration, dict)
+    assert status_configuration["status"] == "drifted"
+
+
 def test_usage_error_is_json_with_exit_64(tmp_path: Path) -> None:
     """Sequencer parsing errors do not fall back to Click's text protocol."""
     result = _invoke(CliRunner(), _repo(tmp_path), ["init"])
@@ -159,8 +190,12 @@ def test_environment_error_is_json_with_exit_2(tmp_path: Path) -> None:
     assert _payload(result)["outcome"] == "environment_error"
 
 
-def test_internal_error_is_json_with_exit_70(tmp_path: Path) -> None:
+def test_internal_error_is_json_with_exit_70(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Unexpected failures do not leak a traceback into stdout."""
+    monkeypatch.setenv("FDR_HOME", str(tmp_path / "home"))
     with patch(
         "fix_die_repeat.cli.SequencerService.init",
         side_effect=RuntimeError("unexpected"),
@@ -176,8 +211,12 @@ def test_internal_error_is_json_with_exit_70(tmp_path: Path) -> None:
     assert "unexpected" in result.stderr
 
 
-def test_interruption_is_json_with_exit_130(tmp_path: Path) -> None:
+def test_interruption_is_json_with_exit_130(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Catchable interruption returns the documented retry signal."""
+    monkeypatch.setenv("FDR_HOME", str(tmp_path / "home"))
     with patch(
         "fix_die_repeat.cli.SequencerService.init",
         side_effect=KeyboardInterrupt,

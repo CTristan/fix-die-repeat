@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, Self
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
 
 STATE_SCHEMA_VERSION = 1
 PROTOCOL_VERSION = 1
+LOCK_TIMEOUT_SECONDS = 10.0
+LOCK_RETRY_INTERVAL_SECONDS = 0.05
 
 
 class StateError(RuntimeError):
@@ -60,12 +63,32 @@ class SequencerLock:
 
     def __enter__(self) -> Self:
         """Acquire an exclusive lock until context exit."""
+        deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
+        while not self._try_acquire():
+            if time.monotonic() >= deadline:
+                self._handle.close()
+                msg = (
+                    "Cannot acquire sequencer transition lock "
+                    f"within {LOCK_TIMEOUT_SECONDS:g} seconds"
+                )
+                raise StateError(msg)
+            time.sleep(LOCK_RETRY_INTERVAL_SECONDS)
+        return self
+
+    def _try_acquire(self) -> bool:
+        """Try once without letting lock contention block the process."""
         if sys.platform == "win32":
             self._handle.seek(0)
-            msvcrt.locking(self._handle.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            fcntl.flock(self._handle.fileno(), fcntl.LOCK_EX)
-        return self
+            try:
+                msvcrt.locking(self._handle.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                return False
+            return True
+        try:
+            fcntl.flock(self._handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        return True
 
     def __exit__(
         self,
@@ -144,9 +167,9 @@ def _write_json(handle: IO[str], state: dict[str, Any]) -> None:
 
 def write_state(path: Path, state: dict[str, Any]) -> None:
     """Atomically replace one state record and synchronize its directory."""
-    path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: Path | None = None
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",

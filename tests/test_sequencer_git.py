@@ -3,9 +3,11 @@
 import shutil
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
+from fix_die_repeat import sequencer_git
 from fix_die_repeat.sequencer_git import (
     GitProbeError,
     capture_snapshot,
@@ -72,6 +74,39 @@ def test_snapshot_detects_edit_when_tree_was_already_dirty(tmp_path: Path) -> No
     assert after.digest != before.digest
 
 
+def test_snapshot_reuses_diff_and_untracked_probe_output(tmp_path: Path) -> None:
+    """One snapshot does not repeat its dirty-state Git probes."""
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "untracked.txt").write_text("untracked\n")
+
+    with patch.object(
+        sequencer_git,
+        "_run_git",
+        wraps=sequencer_git._run_git,
+    ) as run_git:
+        capture_snapshot(resolve_repository(repo))
+
+    arguments = [call.args[1] for call in run_git.call_args_list]
+    assert arguments.count(["ls-files", "--others", "--exclude-standard", "-z"]) == 1
+    assert ["diff", "--cached", "--name-only"] not in arguments
+    assert ["diff", "--name-only"] not in arguments
+
+
+def test_git_probes_decode_raw_paths_with_surrogateescape(tmp_path: Path) -> None:
+    """Git path output uses a byte-preserving decoder."""
+    with patch(
+        "fix_die_repeat.sequencer_git.run_command",
+        return_value=(0, "invalid-\udcff.txt\0", ""),
+    ) as run_command:
+        result = sequencer_git._run_git(
+            tmp_path,
+            ["ls-files", "--others", "--exclude-standard", "-z"],
+        )
+
+    assert result.stdout == "invalid-\udcff.txt\0"
+    assert run_command.call_args.kwargs["encoding_errors"] == "surrogateescape"
+
+
 def test_head_changed_detects_symbolic_ref_change_at_same_commit(tmp_path: Path) -> None:
     """Switching branches at one commit still counts as HEAD drift."""
     repo = _init_repo(tmp_path / "repo")
@@ -96,6 +131,19 @@ def test_dirty_predicates_cover_staged_unstaged_and_untracked(tmp_path: Path) ->
 
     _git(repo, "add", "tracked.txt")
     assert evaluate_git_operation("git.has_staged_changes", info)
+
+
+def test_dirty_predicates_do_not_capture_content_snapshot(tmp_path: Path) -> None:
+    """Boolean-only predicates avoid hashing repository content."""
+    repo = _init_repo(tmp_path / "repo")
+    info = resolve_repository(repo)
+
+    with patch.object(
+        sequencer_git,
+        "capture_snapshot",
+        side_effect=AssertionError("content snapshot was requested"),
+    ):
+        assert evaluate_git_operation("git.is_clean", info)
 
 
 def test_unpushed_is_false_for_unborn_repository(tmp_path: Path) -> None:

@@ -186,6 +186,7 @@ def run_command(
     *,
     capture_output: bool = True,
     check: bool = False,
+    encoding_errors: str | None = None,
 ) -> tuple[int, str, str]:
     """Run a command without invoking a shell.
 
@@ -198,6 +199,7 @@ def run_command(
         cwd: Working directory
         capture_output: Capture stdout and stderr
         check: Raise exception on non-zero exit code
+        encoding_errors: Error handler used while decoding command output
 
     Returns:
         Tuple of (exit_code, stdout, stderr)
@@ -220,6 +222,7 @@ def run_command(
             stdin=subprocess.DEVNULL,
             capture_output=capture_output,
             text=True,
+            errors=encoding_errors,
             check=check,
         )
     except FileNotFoundError:

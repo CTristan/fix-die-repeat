@@ -214,7 +214,18 @@ class _StrictSafeLoader(yaml.SafeLoader):
         mapping: dict[object, object] = {}
         for key_node, value_node in node.value:
             key = self.construct_object(key_node, deep=deep)
-            if key in mapping:
+            try:
+                duplicate = key in mapping
+            except TypeError as exc:
+                msg = f"found unacceptable key: {exc}"
+                context = "while constructing a mapping"
+                raise ConstructorError(
+                    context,
+                    node.start_mark,
+                    msg,
+                    key_node.start_mark,
+                ) from exc
+            if duplicate:
                 msg = f"duplicate key: {key}"
                 context = "while constructing a mapping"
                 raise ConstructorError(
