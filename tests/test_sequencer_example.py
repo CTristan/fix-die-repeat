@@ -78,6 +78,12 @@ def _assert_root_fix_instruction(payload: dict[str, object]) -> None:
     assert "target/app.txt" not in step["instruction"]
 
 
+def _artifact_root(payload: dict[str, object]) -> Path:
+    step = payload["step"]
+    assert isinstance(step, dict)
+    return Path(step["artifact_root"])
+
+
 def test_check_fix_review_example_completes(tmp_path: Path) -> None:
     """The public protocol survives recovery, force, repetition, and completion."""
     repo = tmp_path / "repo"
@@ -101,9 +107,7 @@ def test_check_fix_review_example_completes(tmp_path: Path) -> None:
         str(EXAMPLE_ROOT / "workflow.yaml"),
     )
     assert initialized.returncode == EXIT_CODES["proceed"]
-    step = init_payload["step"]
-    assert isinstance(step, dict)
-    artifact_root = Path(step["artifact_root"])
+    artifact_root = _artifact_root(init_payload)
     target = repo / "app.txt"
 
     _run_agent("check.py", target, environment, artifact_root)
@@ -119,8 +123,9 @@ def test_check_fix_review_example_completes(tmp_path: Path) -> None:
     forced, forced_payload = _response(repo, environment, "done", "fix", "--force")
     assert forced.returncode == EXIT_CODES["proceed"]
     assert forced_payload["forced"] is True
+    repeated_check_artifact_root = _artifact_root(forced_payload)
 
-    _run_agent("check.py", target, environment, artifact_root)
+    _run_agent("check.py", target, environment, repeated_check_artifact_root)
     repeated, _ = _response(repo, environment, "done", "check")
     assert repeated.returncode == EXIT_CODES["proceed"]
     recovery, _ = _response(repo, environment, "next")
@@ -129,13 +134,15 @@ def test_check_fix_review_example_completes(tmp_path: Path) -> None:
     assert recovered.returncode == EXIT_CODES["proceed"]
 
     _run_agent("fix.py", target, environment)
-    recheck, _ = _response(repo, environment, "done", "fix")
+    recheck, recheck_payload = _response(repo, environment, "done", "fix")
     assert recheck.returncode == EXIT_CODES["proceed"]
-    _run_agent("check.py", target, environment, artifact_root)
-    review, _ = _response(repo, environment, "done", "check")
+    recheck_artifact_root = _artifact_root(recheck_payload)
+    _run_agent("check.py", target, environment, recheck_artifact_root)
+    review, review_payload = _response(repo, environment, "done", "check")
     assert review.returncode == EXIT_CODES["proceed"]
 
-    _run_agent("review.py", target, environment, artifact_root)
+    review_artifact_root = _artifact_root(review_payload)
+    _run_agent("review.py", target, environment, review_artifact_root)
     terminal, terminal_payload = _response(repo, environment, "done", "review")
     assert terminal.returncode == EXIT_CODES["terminal"]
     terminal_state = terminal_payload["terminal"]

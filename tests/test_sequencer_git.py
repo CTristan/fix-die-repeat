@@ -3,6 +3,7 @@
 import re
 import shutil
 import subprocess
+from hashlib import sha256
 from pathlib import Path
 from unittest.mock import patch
 
@@ -104,6 +105,37 @@ def test_snapshot_rejects_excessive_untracked_content(tmp_path: Path) -> None:
         handle.truncate(MAX_UNTRACKED_BYTES + 1)
 
     with pytest.raises(GitProbeError, match="64 MiB"):
+        capture_snapshot(resolve_repository(repo))
+
+
+def test_untracked_snapshot_enforces_limit_while_reading(tmp_path: Path) -> None:
+    """A file that grows after metadata capture cannot exceed the content budget."""
+    repo = _init_repo(tmp_path / "repo")
+    path = repo / "growing.bin"
+    path.write_bytes(b"x" * 17)
+    metadata = path.lstat()
+
+    with (
+        patch.object(sequencer_git, "MAX_UNTRACKED_BYTES", 16),
+        patch.object(
+            sequencer_git,
+            "_untracked_entries",
+            return_value=[("growing.bin", path, metadata)],
+        ),
+        pytest.raises(GitProbeError, match="snapshot limit"),
+    ):
+        sequencer_git._update_untracked_digest(repo, sha256(), ["growing.bin"])
+
+
+def test_snapshot_rejects_excessive_tracked_diff_output(tmp_path: Path) -> None:
+    """Tracked diff capture stops at its configured content budget."""
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "tracked.txt").write_text("changed content\n")
+
+    with (
+        patch.object(sequencer_git, "MAX_TRACKED_DIFF_BYTES", 16),
+        pytest.raises(GitProbeError, match="Tracked diff content"),
+    ):
         capture_snapshot(resolve_repository(repo))
 
 

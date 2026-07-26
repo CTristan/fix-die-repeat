@@ -239,6 +239,18 @@ def test_mutating_step_returns_recovery_until_reconciled(tmp_path: Path) -> None
     assert check.step["id"] == "check"
 
 
+def test_recovery_is_blocked_for_non_mutating_step(tmp_path: Path) -> None:
+    """Recovery acknowledgement applies only to issued mutating work."""
+    repo = _repo(tmp_path)
+    service = _service(tmp_path)
+    service.init(repo, "run-1", _workflow(tmp_path), [])
+
+    result = service.done(repo, "run-1", "check", DoneOptions(recover=True))
+
+    assert result.outcome == "blocked"
+    assert result.gaps[0]["code"] == "recovery_not_required"
+
+
 def test_done_completes_issued_mutating_step_without_recovery(tmp_path: Path) -> None:
     """A completed mutating step advances without a recovery acknowledgement."""
     repo = _repo(tmp_path)
@@ -286,6 +298,19 @@ def test_status_survives_missing_and_drifted_workflow(tmp_path: Path) -> None:
     assert drifted.step["id"] == "check"
     assert missing.configuration["status"] == "missing"
     assert missing.step["id"] == "check"
+
+
+def test_status_reports_explicitly_missing_workflow(tmp_path: Path) -> None:
+    """An explicitly selected missing workflow remains an environment error."""
+    repo = _repo(tmp_path)
+    workflow = _workflow(tmp_path)
+    service = _service(tmp_path)
+    service.init(repo, "run-1", workflow, [])
+
+    result = service.status(repo, "run-1", workflow_path=tmp_path / "missing.yaml")
+
+    assert result.outcome == "environment_error"
+    assert result.gaps[0]["code"] == "configuration_missing"
 
 
 def test_configuration_drift_blocks_transition(tmp_path: Path) -> None:

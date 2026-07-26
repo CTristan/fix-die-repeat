@@ -33,7 +33,11 @@ from fix_die_repeat.sequencer_engine import (
 from fix_die_repeat.sequencer_evaluator import EvaluationError
 from fix_die_repeat.sequencer_git import GitProbeError
 from fix_die_repeat.sequencer_state import StateError
-from fix_die_repeat.sequencer_workflow import ID_PATTERN, WorkflowValidationError
+from fix_die_repeat.sequencer_workflow import (
+    FLAG_GAP_CODES,
+    ID_PATTERN,
+    WorkflowValidationError,
+)
 from fix_die_repeat.utils import is_running_in_dev_mode
 
 if TYPE_CHECKING:
@@ -361,17 +365,7 @@ def _run_sequencer(
             {"code": gap.code, "subject": gap.subject, "message": gap.message} for gap in exc.gaps
         ]
         unreadable = any(gap["code"] == "workflow_unreadable" for gap in gaps)
-        invalid_flags = any(
-            gap["code"]
-            in {
-                "duplicate_flag",
-                "invalid_flag",
-                "invalid_flag_value",
-                "missing_flag",
-                "unknown_flag",
-            }
-            for gap in gaps
-        )
+        invalid_flags = any(gap["code"] in FLAG_GAP_CODES for gap in gaps)
         outcome = (
             "environment_error"
             if unreadable
@@ -382,13 +376,7 @@ def _run_sequencer(
         preferred_codes = (
             {"workflow_unreadable"}
             if outcome == "environment_error"
-            else {
-                "duplicate_flag",
-                "invalid_flag",
-                "invalid_flag_value",
-                "missing_flag",
-                "unknown_flag",
-            }
+            else FLAG_GAP_CODES
             if outcome == "usage_error"
             else set()
         )

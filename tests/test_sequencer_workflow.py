@@ -396,6 +396,7 @@ def test_load_workflow_rejects_oversized_file(tmp_path: Path) -> None:
         "result\x00.json",
         r"C:\absolute\result.json",
         r"..\result.json",
+        "C:/foo/bar.json",
     ],
 )
 def test_path_spec_rejects_absolute_dot_and_nul_paths(value: str) -> None:

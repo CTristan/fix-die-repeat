@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, cast, override
 
@@ -44,6 +44,15 @@ GIT_OPERATIONS = frozenset(
 )
 SUPPORTED_OPERATIONS = ARTIFACT_OPERATIONS | GIT_OPERATIONS
 JSON_TYPES = frozenset({"null", "boolean", "number", "string", "array", "object"})
+FLAG_GAP_CODES = frozenset(
+    {
+        "duplicate_flag",
+        "invalid_flag",
+        "invalid_flag_value",
+        "missing_flag",
+        "unknown_flag",
+    },
+)
 
 
 @dataclass(frozen=True)
@@ -81,12 +90,14 @@ class PathSpec(StrictModel):
     def validate_value(self) -> PathSpec:
         """Reject absolute and escaping paths before runtime resolution."""
         path = PurePosixPath(self.value)
+        windows_path = PureWindowsPath(self.value)
         components = self.value.split("/")
         if (
             not self.value
             or "\x00" in self.value
             or "\\" in self.value
             or path.is_absolute()
+            or windows_path.drive
             or any(part in {"", ".", ".."} for part in components)
         ):
             msg = "path must be a non-empty relative path without dot components"

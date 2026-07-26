@@ -7,6 +7,9 @@ import os
 import re
 import shutil
 import stat
+import subprocess
+import threading
+from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -19,6 +22,7 @@ from fix_die_repeat.utils import (
 
 GIT_TIMEOUT_SECONDS = 30.0
 MAX_UNTRACKED_BYTES = 64 * 1024 * 1024
+MAX_TRACKED_DIFF_BYTES = 64 * 1024 * 1024
 
 
 class GitProbeError(RuntimeError):
@@ -115,6 +119,68 @@ def _stdout(repo: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
+def _read_bounded_output(
+    process: subprocess.Popen[bytes],
+    limit: int,
+    output: bytearray,
+    exceeded: threading.Event,
+) -> None:
+    if process.stdout is None:
+        return
+    while chunk := process.stdout.read(1024 * 1024):
+        remaining = limit + 1 - len(output)
+        if remaining > 0:
+            output.extend(chunk[:remaining])
+        if len(chunk) > remaining or len(output) > limit:
+            exceeded.set()
+            with suppress(OSError):
+                process.kill()
+            return
+
+
+def _run_git_bounded(repo: Path, args: list[str], limit: int) -> bytes:
+    """Run Git while retaining no more than one byte beyond an output limit."""
+    git_path = shutil.which("git")
+    if git_path is None:
+        msg = "Git executable is not available"
+        raise GitProbeError(msg)
+    process = subprocess.Popen(  # noqa: S603  # Git path and argv are controlled here.
+        [git_path, "-C", str(repo), *args],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    output = bytearray()
+    exceeded = threading.Event()
+    reader = threading.Thread(
+        target=_read_bounded_output,
+        args=(process, limit, output, exceeded),
+        daemon=True,
+    )
+    reader.start()
+    try:
+        returncode = process.wait(timeout=GIT_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        process.kill()
+        process.wait()
+        reader.join()
+        if process.stdout is not None:
+            process.stdout.close()
+        msg = f"Git probe timed out ({' '.join(args)})"
+        raise GitProbeError(msg) from exc
+    reader.join()
+    if process.stdout is not None:
+        process.stdout.close()
+    if exceeded.is_set():
+        msg = "Tracked diff content exceeds the 64 MiB snapshot limit"
+        raise GitProbeError(msg)
+    if returncode != 0:
+        diagnostic = bytes(output).decode(errors="surrogateescape").strip()
+        msg = f"Git probe failed ({' '.join(args)}): {diagnostic}"
+        raise GitProbeError(msg)
+    return bytes(output)
+
+
 def resolve_repository(path: Path) -> RepositoryInfo:
     """Resolve one worktree without modifying Git state."""
     candidate = path.expanduser().resolve(strict=False)
@@ -205,6 +271,7 @@ def _update_untracked_digest(
     digest: _Digest,
     relative_paths: list[str],
 ) -> None:
+    read_bytes = 0
     for relative_path, path, metadata in _untracked_entries(repo, relative_paths):
         digest.update(b"untracked\0")
         digest.update(os.fsencode(relative_path))
@@ -214,6 +281,10 @@ def _update_untracked_digest(
             try:
                 with path.open("rb") as handle:
                     while chunk := handle.read(1024 * 1024):
+                        read_bytes += len(chunk)
+                        if read_bytes > MAX_UNTRACKED_BYTES:
+                            msg = "Untracked regular-file content exceeds the 64 MiB snapshot limit"
+                            raise GitProbeError(msg)
                         digest.update(chunk)
             except OSError as exc:
                 msg = f"Cannot read untracked file {path}: {exc}"
@@ -229,14 +300,16 @@ def _update_untracked_digest(
 def capture_snapshot(repository: RepositoryInfo) -> GitSnapshot:
     """Capture content and HEAD state without writing Git objects."""
     head, symbolic_ref = _head(repository.root)
-    staged = _run_git(
+    staged = _run_git_bounded(
         repository.root,
         ["diff", "--cached", "--binary", "--no-ext-diff"],
-    ).stdout
-    unstaged = _run_git(
+        MAX_TRACKED_DIFF_BYTES,
+    )
+    unstaged = _run_git_bounded(
         repository.root,
         ["diff", "--binary", "--no-ext-diff"],
-    ).stdout
+        MAX_TRACKED_DIFF_BYTES - len(staged),
+    )
     untracked_output = _run_git(
         repository.root,
         ["ls-files", "--others", "--exclude-standard", "-z"],
@@ -252,9 +325,9 @@ def capture_snapshot(repository: RepositoryInfo) -> GitSnapshot:
     digest.update(b"\0")
     digest.update((symbolic_ref or "<detached>").encode())
     digest.update(b"\0staged\0")
-    digest.update(staged.encode(errors="surrogateescape"))
+    digest.update(staged)
     digest.update(b"\0unstaged\0")
-    digest.update(unstaged.encode(errors="surrogateescape"))
+    digest.update(unstaged)
     _update_untracked_digest(repository.root, digest, untracked_paths)
     return GitSnapshot(
         head=head,
