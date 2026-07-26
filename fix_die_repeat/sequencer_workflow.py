@@ -431,8 +431,10 @@ def _validate_operation_fields(
             gaps.append(
                 _gap("missing_operation_field", subject, f"{operation.op} requires expected"),
             )
-    if operation.op == "json.pointer_type" and (
-        not isinstance(operation.expected, str) or operation.expected not in JSON_TYPES
+    if (
+        operation.op == "json.pointer_type"
+        and "expected" in fields
+        and (not isinstance(operation.expected, str) or operation.expected not in JSON_TYPES)
     ):
         gaps.append(
             _gap("invalid_json_type", subject, f"unknown JSON type {operation.expected!r}"),

@@ -16,6 +16,7 @@ from fix_die_repeat.sequencer_engine import (
     SequencerResult,
     SequencerService,
 )
+from fix_die_repeat.sequencer_git import DirtyState, GitSnapshot
 from fix_die_repeat.sequencer_state import StateError
 from fix_die_repeat.sequencer_workflow import (
     LoadedWorkflow,
@@ -147,6 +148,26 @@ def test_init_persists_state_outside_clean_repository(tmp_path: Path) -> None:
     state_path = Path(result.configuration["state_path"])
     assert state_path.is_file()
     assert state_path.is_relative_to(tmp_path / "fdr-home")
+
+
+def test_init_reuses_initial_snapshot_for_mutating_start(tmp_path: Path) -> None:
+    """A mutating start step uses one repository observation."""
+    repo = _repo(tmp_path)
+    workflow = _workflow(tmp_path)
+    workflow.write_text(WORKFLOW.replace("mutates_repository: false", "mutates_repository: true"))
+    snapshot = GitSnapshot(
+        head="a" * 40,
+        symbolic_ref="refs/heads/main",
+        dirty=DirtyState(staged=False, unstaged=False, untracked=False),
+        digest="b" * 64,
+    )
+
+    with patch.object(sequencer_engine, "capture_snapshot", return_value=snapshot) as capture:
+        result = _service(tmp_path).init(repo, "run-1", workflow, [])
+
+    capture.assert_called_once()
+    state = json.loads(Path(result.configuration["state_path"]).read_text())
+    assert state["initial_snapshot"] == state["attempt"]["snapshot"]
 
 
 def test_repeated_init_is_idempotent(tmp_path: Path) -> None:

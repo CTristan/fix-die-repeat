@@ -149,7 +149,12 @@ def test_check_fix_review_example_completes(tmp_path: Path) -> None:
 
     environment = os.environ.copy()
     environment["FDR_HOME"] = str(tmp_path / "fdr-home")
-    environment["PYTHONPATH"] = str(PROJECT_ROOT)
+    existing_pythonpath = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = (
+        f"{PROJECT_ROOT}{os.pathsep}{existing_pythonpath}"
+        if existing_pythonpath
+        else str(PROJECT_ROOT)
+    )
 
     initialized, init_payload = _response(
         repo,

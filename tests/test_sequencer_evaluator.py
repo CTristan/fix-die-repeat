@@ -467,3 +467,22 @@ def test_git_probe_error_uses_evaluation_error_contract(
         pytest.raises(EvaluationError, match="probe failed"),
     ):
         evaluate_operation(operation, context)
+
+
+def test_unknown_json_operation_uses_evaluation_error_contract(
+    tmp_path: Path,
+    context_factory: Callable[[Path, dict[str, bool | str]], EvaluationContext],
+) -> None:
+    """Persisted unknown JSON operations cannot become pointer type checks."""
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    (artifact_root / "result.json").write_text("{}")
+    operation = OperationSpec.model_validate(
+        {
+            "op": "json.unknown",
+            "path": {"scope": "artifacts", "value": "result.json"},
+        },
+    )
+
+    with pytest.raises(EvaluationError, match="Unsupported operation"):
+        evaluate_operation(operation, context_factory(artifact_root, {}))

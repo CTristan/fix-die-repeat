@@ -175,6 +175,9 @@ def _evaluate_json(operation: OperationSpec, path: Path) -> OperationResult:
             passed=passed,
             message=f"{operation.pointer} {comparison} {operation.expected!r}",
         )
+    if operation.op != "json.pointer_type":
+        msg = f"Unsupported operation: {operation.op}"
+        raise EvaluationError(msg)
     actual_type = _json_type(selected)
     passed = actual_type == operation.expected
     if passed:

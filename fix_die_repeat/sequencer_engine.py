@@ -419,7 +419,11 @@ class SequencerService:
             located.paths.artifacts.mkdir(parents=True, exist_ok=True)
             initial = capture_snapshot(located.repository)
             start = loaded.active_steps[loaded.workflow.start]
-            attempt, newly_issued = self._new_attempt(start, located.repository)
+            attempt, newly_issued = self._new_attempt(
+                start,
+                located.repository,
+                snapshot=initial,
+            )
             state = {
                 "state_schema_version": STATE_SCHEMA_VERSION,
                 "protocol_version": PROTOCOL_VERSION,
@@ -490,11 +494,17 @@ class SequencerService:
     def _new_attempt(
         step: Step,
         repository: RepositoryInfo,
+        *,
+        snapshot: GitSnapshot | None = None,
     ) -> tuple[dict[str, Any], bool]:
         if not step.mutates_repository:
             return {"status": "pending", "snapshot": None, "number": 0}, False
-        snapshot = capture_snapshot(repository)
-        return {"status": "issued", "snapshot": snapshot.to_dict(), "number": 1}, True
+        issued_snapshot = snapshot or capture_snapshot(repository)
+        return {
+            "status": "issued",
+            "snapshot": issued_snapshot.to_dict(),
+            "number": 1,
+        }, True
 
     def status(
         self,

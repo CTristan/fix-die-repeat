@@ -391,12 +391,18 @@ def _configured_upstream(repo: Path, symbolic_ref: str | None) -> tuple[str | No
     branch = symbolic_ref.removeprefix("refs/heads/")
     remote = _run_git(repo, ["config", "--get", f"branch.{branch}.remote"], check=False)
     merge = _run_git(repo, ["config", "--get", f"branch.{branch}.merge"], check=False)
+    if any(probe.returncode == COMMAND_TIMEOUT_EXIT_CODE for probe in (remote, merge)):
+        msg = "Git upstream configuration probe timed out"
+        raise GitProbeError(msg)
     configured = remote.returncode == 0 or merge.returncode == 0
     upstream = _run_git(
         repo,
         ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
         check=False,
     )
+    if upstream.returncode == COMMAND_TIMEOUT_EXIT_CODE:
+        msg = "Git upstream resolution probe timed out"
+        raise GitProbeError(msg)
     if upstream.returncode == 0:
         return upstream.stdout.strip(), True
     return None, configured

@@ -36,9 +36,12 @@ def _hermetic_git(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Keep test repositories independent of ambient Git configuration."""
     empty_config = tmp_path / "empty-gitconfig"
     empty_config.touch()
+    empty_template = tmp_path / "empty-template"
+    empty_template.mkdir()
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty_config))
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(empty_config))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_TEMPLATE_DIR", str(empty_template))
     for variable in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
         monkeypatch.delenv(variable, raising=False)
 
@@ -379,6 +382,7 @@ def test_unpushed_supports_detached_head_contained_by_remote_ref(tmp_path: Path)
         [GIT_PATH, "clone", str(remote), str(repo)],
         check=True,
         capture_output=True,
+        timeout=PROCESS_TIMEOUT_SECONDS,
     )
     _git(repo, "checkout", "--detach")
 
@@ -396,12 +400,35 @@ def test_deleted_configured_upstream_fails_closed(tmp_path: Path) -> None:
         [GIT_PATH, "clone", str(remote), str(repo)],
         check=True,
         capture_output=True,
+        timeout=PROCESS_TIMEOUT_SECONDS,
     )
     _git(repo, "branch", "--set-upstream-to", "origin/main")
     _git(repo, "update-ref", "-d", "refs/remotes/origin/main")
 
     with pytest.raises(GitProbeError, match="configured upstream"):
         evaluate_git_operation("git.has_unpushed_commits", resolve_repository(repo))
+
+
+@pytest.mark.parametrize("timed_out_probe", [0, 1, 2])
+def test_configured_upstream_propagates_probe_timeouts(
+    tmp_path: Path,
+    timed_out_probe: int,
+) -> None:
+    """Upstream configuration cannot treat a timed-out probe as absent."""
+    missing = sequencer_git._GitResult(returncode=1, stdout="", stderr="")
+    timeout = sequencer_git._GitResult(
+        returncode=sequencer_git.COMMAND_TIMEOUT_EXIT_CODE,
+        stdout="",
+        stderr="Command timed out after 30 seconds",
+    )
+    results = [missing, missing, missing]
+    results[timed_out_probe] = timeout
+
+    with (
+        patch.object(sequencer_git, "_run_git", side_effect=results),
+        pytest.raises(GitProbeError, match="timed out"),
+    ):
+        sequencer_git._configured_upstream(tmp_path, "refs/heads/main")
 
 
 def test_working_tree_changed_requires_issued_snapshot(tmp_path: Path) -> None:

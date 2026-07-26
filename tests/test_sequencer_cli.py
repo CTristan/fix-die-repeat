@@ -269,13 +269,14 @@ def test_recover_option_is_forwarded_to_service(
         message="Recovery acknowledged and step reissued",
         step={"id": "fix"},
     )
+    repo = _repo(tmp_path)
     with patch(
         "fix_die_repeat.cli.SequencerService.done",
         return_value=service_result,
     ) as done:
         result = _invoke(
             CliRunner(),
-            _repo(tmp_path),
+            repo,
             ["done", "fix", "--recover"],
         )
 
@@ -283,8 +284,12 @@ def test_recover_option_is_forwarded_to_service(
     payload = _payload(result)
     assert payload["outcome"] == "proceed"
     assert payload["step"] == {"id": "fix"}
-    options = done.call_args.args[3]
-    assert options == DoneOptions(recover=True)
+    done.assert_called_once_with(
+        repo,
+        "run-1",
+        "fix",
+        DoneOptions(recover=True),
+    )
 
 
 def test_invalid_workflow_is_configuration_error(

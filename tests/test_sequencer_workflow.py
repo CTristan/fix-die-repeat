@@ -421,6 +421,18 @@ def test_git_operation_fields_produce_one_gap(tmp_path: Path) -> None:
     assert codes.count("unexpected_operation_field") == 1
 
 
+def test_pointer_type_missing_expected_produces_one_gap(tmp_path: Path) -> None:
+    """A missing pointer type reports only its required-field diagnostic."""
+    content = VALID_WORKFLOW.replace("          expected: boolean\n", "", 1)
+
+    with pytest.raises(WorkflowValidationError) as raised:
+        load_workflow(_write_workflow(tmp_path, content), {})
+
+    codes = [gap.code for gap in raised.value.gaps]
+    assert codes.count("missing_operation_field") == 1
+    assert "invalid_json_type" not in codes
+
+
 @pytest.mark.parametrize("expected", ["2026-07-26", "!!binary aGVsbG8="])
 def test_pointer_equals_rejects_yaml_only_expected_values(
     tmp_path: Path,
