@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Replaced the separate pre-commit validation hooks with one centralized `scripts/ci.sh --check-only` hook.
-- Hardened sequencer validation, Git probes, state writes, and transition locking after adversarial review.
+- Hardened sequencer validation, Git probes, state writes, transition locking, and configuration diagnostics after adversarial review.
 - Pi invocation no longer uses the `pi` CLI subprocess. `PiRunner.run_pi` translates the historical argv (`-p`, `--tools`, `--model`, `@file`) into structured bridge commands. The `(returncode, stdout, stderr)` return contract is preserved so managers don't change.
 - `fix-die-repeat` commits to pi as the single backend. Multi-backend scaffolding (paused issues #16 / #17 / #20) is no longer on the roadmap — the sidecar bridge replaces the need for a separate backend-abstraction layer.
 - The `--model-skip` fallback on 503 capacity errors is no longer automatic. The bridge exposes `set_model` but has no fallback list; the 503 handler now logs a warning and retries with the same model. Users who relied on pi's model cycling can configure `FDR_MODEL` / `--model` explicitly.

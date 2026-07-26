@@ -78,7 +78,8 @@ cannot quietly choose behavior that consumers already depend on.
 ### Exit-code strategy
 
 - **Prototype outcomes plus `sysexits` values (selected):** `2`, `3`, and `4` preserve the proven
-  environment, terminal, and blocked results. `64` and `70` separate usage and internal failures.
+  environment, terminal, and blocked results. `64`, `70`, and `78` separate usage, internal, and
+  configuration failures.
 - **Exit `0` for every JSON response:** The response carries enough information, but shell callers
   would treat blocked and failed operations as success.
 - **Click's default exit codes:** This keeps less custom code, but usage errors collide with the
@@ -460,6 +461,7 @@ removing a field, changing a field's type, or changing the meaning of an existin
 | `5` | `recovery` | A mutating instruction was already issued and needs explicit reconciliation. |
 | `64` | `usage_error` | CLI syntax or supplied values are invalid. |
 | `70` | `internal_error` | An invariant failed or an unexpected implementation error escaped. |
+| `78` | `configuration_error` | A readable supplied workflow violates the workflow contract. |
 | `130` | `interrupted` | The sequencer received an interrupt before it could return a normal outcome. |
 
 Terminal routes declare both a machine code and a status:
@@ -723,9 +725,9 @@ Validation reports every independent gap that it can collect safely:
   command.
 
 An unreadable or missing workflow passed explicitly to `init`, `next`, `done`, or `status` is an
-`environment_error`. A missing stored source for an existing run returns `blocked` because the
-persisted configuration relationship broke. A readable workflow that violates the schema returns
-`blocked` with every safe configuration gap.
+`environment_error`. A readable workflow rejected before initialization returns
+`configuration_error` with every safe validation gap. A missing, invalid, or drifted source for
+an existing run returns `blocked` because the persisted configuration relationship broke.
 
 `init` performs all workflow validation before it creates the run directory or state file. It
 rechecks the workflow after acquiring the transition lock, so a file change between validation and
@@ -972,8 +974,8 @@ The implementation will use test-first slices for:
 - Read-only replay and mutating-step recovery acknowledgement.
 - Detached `HEAD`, missing upstreams, unborn repositories, dirty initial state, missing remotes,
   deleted refs, same-commit symbolic-ref changes, special untracked files, and failed Git probes.
-- Subprocess responses for proceed, blocked, terminal, recovery, forced, environment error, usage
-  error, internal error, stale calls, repeated calls, and interruption.
+- Subprocess responses for proceed, blocked, terminal, recovery, forced, environment error,
+  configuration error, usage error, internal error, stale calls, repeated calls, and interruption.
 - Existing root CLI invocations before and after the Click group migration.
 
 The final implementation must pass `./scripts/ci.sh --check-only`, keep coverage at or above 80%,

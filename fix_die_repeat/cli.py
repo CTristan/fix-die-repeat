@@ -371,7 +371,11 @@ def _run_sequencer(
             for gap in gaps
         )
         outcome = (
-            "environment_error" if unreadable else "usage_error" if invalid_flags else "blocked"
+            "environment_error"
+            if unreadable
+            else "usage_error"
+            if invalid_flags
+            else "configuration_error"
         )
         result = _sequencer_error(
             command,
@@ -382,7 +386,7 @@ def _run_sequencer(
         )
         _exit_with_sequencer_result(
             result,
-            diagnostic=unreadable or invalid_flags,
+            diagnostic=True,
         )
     except (GitProbeError, StateError, EvaluationError, OSError) as exc:
         result = _sequencer_error(

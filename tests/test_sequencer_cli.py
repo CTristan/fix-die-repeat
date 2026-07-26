@@ -10,7 +10,11 @@ import pytest
 from click.testing import CliRunner, Result
 
 from fix_die_repeat.cli import main
-from fix_die_repeat.sequencer_engine import EXIT_CODES
+from fix_die_repeat.sequencer_engine import (
+    EXIT_CODES,
+    DoneOptions,
+    SequencerResult,
+)
 
 GIT_PATH = shutil.which("git")
 
@@ -243,6 +247,56 @@ def test_force_and_recover_are_mutually_exclusive(tmp_path: Path) -> None:
     payload = _payload(result)
     assert payload["command"] == "done"
     assert payload["outcome"] == "usage_error"
+
+
+def test_recover_option_is_forwarded_to_service(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The CLI forwards recovery without enabling force."""
+    monkeypatch.setenv("FDR_HOME", str(tmp_path / "home"))
+    service_result = SequencerResult(
+        command="done",
+        outcome="proceed",
+        message="Recovery acknowledged and step reissued",
+        step={"id": "fix"},
+    )
+    with patch(
+        "fix_die_repeat.cli.SequencerService.done",
+        return_value=service_result,
+    ) as done:
+        result = _invoke(
+            CliRunner(),
+            _repo(tmp_path),
+            ["done", "fix", "--recover"],
+        )
+
+    assert result.exit_code == EXIT_CODES["proceed"]
+    payload = _payload(result)
+    assert payload["outcome"] == "proceed"
+    assert payload["step"] == {"id": "fix"}
+    options = done.call_args.args[3]
+    assert options == DoneOptions(recover=True)
+
+
+def test_invalid_workflow_is_configuration_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Readable invalid workflow configuration gets its own diagnostic outcome."""
+    monkeypatch.setenv("FDR_HOME", str(tmp_path / "home"))
+    workflow = _workflow(tmp_path)
+    workflow.write_text(WORKFLOW.replace("start: check", "start: check\nsurprise: true"))
+
+    result = _invoke(
+        CliRunner(),
+        _repo(tmp_path),
+        ["init", "--workflow", str(workflow)],
+    )
+
+    assert result.exit_code == EXIT_CODES["configuration_error"]
+    assert _payload(result)["outcome"] == "configuration_error"
+    assert "Error:" in result.stderr
 
 
 @pytest.mark.parametrize(

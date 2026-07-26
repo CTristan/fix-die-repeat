@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from fix_die_repeat.sequencer_evaluator import EvaluationContext, evaluate_operation
+from fix_die_repeat.sequencer_evaluator import (
+    EvaluationContext,
+    EvaluationError,
+    evaluate_condition,
+    evaluate_operation,
+)
 from fix_die_repeat.sequencer_git import DirtyState, GitSnapshot, RepositoryInfo
 from fix_die_repeat.sequencer_workflow import OperationSpec
 
@@ -42,3 +47,27 @@ def test_json_valid_rejects_non_standard_constants(tmp_path: Path, constant: str
 
     assert not result.passed
     assert "not valid JSON" in result.message
+
+
+@pytest.mark.parametrize("flag", [{}, {"name": "review"}, {"equals": True}])
+def test_persisted_flag_condition_requires_name_and_equals(
+    tmp_path: Path,
+    flag: dict[str, object],
+) -> None:
+    """Corrupt persisted flag conditions fail closed."""
+    snapshot = GitSnapshot(
+        head=None,
+        symbolic_ref=None,
+        dirty=DirtyState(staged=False, unstaged=False, untracked=False),
+        digest="",
+    )
+    context = EvaluationContext(
+        repository=RepositoryInfo(root=tmp_path, common_dir=tmp_path / ".git", key="repo"),
+        artifacts=tmp_path / "artifacts",
+        flags={"review": True},
+        initial=snapshot,
+        issued=None,
+    )
+
+    with pytest.raises(EvaluationError, match="Invalid persisted flag condition"):
+        evaluate_condition({"flag": flag}, context)

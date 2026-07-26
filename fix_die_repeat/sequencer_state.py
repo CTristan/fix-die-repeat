@@ -98,12 +98,14 @@ class SequencerLock:
     ) -> None:
         """Release the lock and close its file handle."""
         del exc_type, exc_value, traceback
-        if sys.platform == "win32":
-            self._handle.seek(0)
-            msvcrt.locking(self._handle.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
-        self._handle.close()
+        try:
+            if sys.platform == "win32":
+                self._handle.seek(0)
+                msvcrt.locking(self._handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            self._handle.close()
 
 
 def run_paths(home: Path, repository: RepositoryInfo, run_id: str) -> RunPaths:
@@ -131,7 +133,7 @@ def run_paths(home: Path, repository: RepositoryInfo, run_id: str) -> RunPaths:
 def read_state(path: Path) -> dict[str, Any]:
     """Read and minimally validate one authoritative state file."""
     try:
-        raw = path.read_text()
+        raw = path.read_text(encoding="utf-8")
         value = json.loads(raw)
     except (OSError, json.JSONDecodeError) as exc:
         msg = f"Cannot read sequencer state {path}: {exc}"

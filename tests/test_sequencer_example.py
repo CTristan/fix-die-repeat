@@ -132,4 +132,5 @@ def test_check_fix_review_example_completes(tmp_path: Path) -> None:
     assert terminal.returncode == EXIT_CODES["terminal"]
     terminal_state = terminal_payload["terminal"]
     assert isinstance(terminal_state, dict)
+    assert terminal_state["code"] == "checks-and-review-passed"
     assert terminal_state["status"] == "success"

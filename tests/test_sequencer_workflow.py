@@ -1,10 +1,12 @@
 """Tests for sequencer workflow loading and validation."""
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from fix_die_repeat.sequencer_workflow import (
+    PathSpec,
     WorkflowValidationError,
     load_workflow,
 )
@@ -208,5 +210,76 @@ def test_load_workflow_rejects_oversized_file(tmp_path: Path) -> None:
     path = tmp_path / "large.yaml"
     path.write_bytes(b"x" * (1024 * 1024 + 1))
 
-    with pytest.raises(WorkflowValidationError, match="workflow_too_large"):
+    with (
+        patch.object(Path, "read_bytes", side_effect=AssertionError("unbounded read")),
+        pytest.raises(WorkflowValidationError, match="workflow_too_large"),
+    ):
         load_workflow(path, {})
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "/absolute/result.json",
+        ".",
+        "../result.json",
+        "artifacts/./result.json",
+        "artifacts/../result.json",
+        "result\x00.json",
+        r"C:\absolute\result.json",
+        r"..\result.json",
+    ],
+)
+def test_path_spec_rejects_absolute_dot_and_nul_paths(value: str) -> None:
+    """Workflow paths cannot escape through either path-separator convention."""
+    with pytest.raises(ValueError, match="relative path"):
+        PathSpec(scope="artifacts", value=value)
+
+
+@pytest.mark.parametrize("value", ["result.json", "reports/check/result.json"])
+def test_path_spec_accepts_valid_relative_paths(value: str) -> None:
+    """Portable relative paths remain valid."""
+    assert PathSpec(scope="artifacts", value=value).value == value
+
+
+def test_load_workflow_handles_long_acyclic_graph(tmp_path: Path) -> None:
+    """Graph validation does not depend on the Python recursion limit."""
+    step_count = 1100
+    steps: list[str] = []
+    for index in range(step_count):
+        step_id = f"step-{index}"
+        steps.extend(
+            [
+                f"  {step_id}:",
+                "    instruction: Continue.",
+                "    mutates_repository: false",
+                "    routes:",
+                f"      - id: route-{index}",
+                "        when: always",
+            ],
+        )
+        if index + 1 < step_count:
+            steps.append(f"        to: step-{index + 1}")
+        else:
+            steps.extend(
+                [
+                    "        terminal:",
+                    "          code: complete",
+                    "          status: success",
+                    "          message: Complete.",
+                ],
+            )
+    content = "\n".join(
+        [
+            "schema_version: 1",
+            "id: long-chain",
+            "start: step-0",
+            "steps:",
+            *steps,
+            "",
+        ],
+    )
+
+    loaded = load_workflow(_write_workflow(tmp_path, content), {})
+
+    assert len(loaded.active_steps) == step_count

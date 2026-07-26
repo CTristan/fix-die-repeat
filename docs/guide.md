@@ -85,12 +85,13 @@ Each response tells you what happened through `outcome`, `message`, and the proc
 | Exit | `outcome` | Meaning |
 |---:|---|---|
 | `0` | `proceed` | Continue with the returned step. |
-| `2` | `environment_error` | A required Git, filesystem, or configuration probe failed. |
+| `2` | `environment_error` | A required Git, filesystem, or encoding probe failed. |
 | `3` | `terminal` | The workflow reached its declared terminal state. |
 | `4` | `blocked` | Validation, ordering, or configuration state blocked progress. |
 | `5` | `recovery` | Reconcile a previously issued mutating step before retrying it. |
 | `64` | `usage_error` | The command or supplied values were invalid. |
 | `70` | `internal_error` | A sequencer invariant failed unexpectedly. |
+| `78` | `configuration_error` | The supplied workflow is readable but invalid. |
 | `130` | `interrupted` | The command received an interrupt. |
 
 When a response contains `step`, run the work described by `step.instruction`. Write requested

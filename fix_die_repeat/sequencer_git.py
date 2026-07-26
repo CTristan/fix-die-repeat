@@ -285,11 +285,14 @@ def evaluate_git_operation(
         else:
             result = dirty.untracked
     elif operation == "git.head_changed":
-        current = capture_snapshot(repository)
         if initial is None:
             msg = "git.head_changed requires the initial snapshot"
             raise GitProbeError(msg)
-        result = (current.head, current.symbolic_ref) != (initial.head, initial.symbolic_ref)
+        current_head, current_symbolic_ref = _head(repository.root)
+        result = (current_head, current_symbolic_ref) != (
+            initial.head,
+            initial.symbolic_ref,
+        )
     elif operation == "git.working_tree_changed":
         current = capture_snapshot(repository)
         if issued is None:

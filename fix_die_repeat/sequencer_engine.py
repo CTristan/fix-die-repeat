@@ -46,6 +46,7 @@ EXIT_CODES = {
     "recovery": 5,
     "usage_error": 64,
     "internal_error": 70,
+    "configuration_error": 78,
     "interrupted": 130,
 }
 

@@ -77,11 +77,13 @@ class PathSpec(StrictModel):
     def validate_value(self) -> PathSpec:
         """Reject absolute and escaping paths before runtime resolution."""
         path = PurePosixPath(self.value)
+        components = self.value.split("/")
         if (
             not self.value
             or "\x00" in self.value
+            or "\\" in self.value
             or path.is_absolute()
-            or any(part in {"", ".", ".."} for part in path.parts)
+            or any(part in {"", ".", ".."} for part in components)
         ):
             msg = "path must be a non-empty relative path without dot components"
             raise ValueError(msg)
@@ -244,7 +246,8 @@ def _gap(code: str, subject: str, message: str) -> ValidationGap:
 
 def _load_yaml(path: Path) -> object:
     try:
-        content = path.read_bytes()
+        with path.open("rb") as handle:
+            content = handle.read(MAX_WORKFLOW_BYTES + 1)
     except OSError as exc:
         raise WorkflowValidationError(
             [_gap("workflow_unreadable", str(path), f"cannot read workflow: {exc}")],
@@ -669,21 +672,29 @@ def _find_unreachable(
 
 
 def _contains_cycle(edges: dict[str, set[str]]) -> bool:
-    visiting: set[str] = set()
-    visited: set[str] = set()
-
-    def visit(step_id: str) -> bool:
-        if step_id in visiting:
-            return True
-        if step_id in visited:
-            return False
-        visiting.add(step_id)
-        cycle_found = any(visit(target) for target in edges.get(step_id, set()))
-        visiting.remove(step_id)
-        visited.add(step_id)
-        return cycle_found
-
-    return any(visit(step_id) for step_id in edges if step_id not in visited)
+    visiting = 1
+    visited = 2
+    state: dict[str, int] = {}
+    for start in edges:
+        if state.get(start) == visited:
+            continue
+        state[start] = visiting
+        stack = [(start, iter(edges.get(start, set())))]
+        while stack:
+            step_id, targets = stack[-1]
+            try:
+                target = next(targets)
+            except StopIteration:
+                state[step_id] = visited
+                stack.pop()
+                continue
+            target_state = state.get(target, 0)
+            if target_state == visiting:
+                return True
+            if target_state == 0:
+                state[target] = visiting
+                stack.append((target, iter(edges.get(target, set()))))
+    return False
 
 
 def _validate_graph(

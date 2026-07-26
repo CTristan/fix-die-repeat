@@ -4,10 +4,12 @@ This example keeps the boundary visible: the sequencer decides what comes next, 
 external agent reads each instruction, changes `target/app.txt`, and writes declared JSON
 artifacts.
 
-Copy `target/` into a temporary Git repository, then commit the baseline before you run the
-workflow:
+Copy the contents of `target/` into a temporary Git repository so `app.txt` sits at the repository
+root, then commit the baseline before you run the workflow:
 
 ```bash
+mkdir -p /path/to/temporary-repository
+cp -R target/. /path/to/temporary-repository/
 git -C /path/to/temporary-repository init -b main
 git -C /path/to/temporary-repository add app.txt
 git -C /path/to/temporary-repository commit -m "Added example baseline"

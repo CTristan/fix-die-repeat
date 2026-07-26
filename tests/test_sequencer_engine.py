@@ -220,6 +220,21 @@ def test_mutating_step_returns_recovery_until_reconciled(tmp_path: Path) -> None
     assert check.step["id"] == "check"
 
 
+def test_done_completes_issued_mutating_step_without_recovery(tmp_path: Path) -> None:
+    """A completed mutating step advances without a recovery acknowledgement."""
+    repo = _repo(tmp_path)
+    service = _service(tmp_path)
+    initialized = service.init(repo, "run-1", _workflow(tmp_path), [])
+    _write_result(initialized, passed=False)
+    service.done(repo, "run-1", "check")
+    (repo / "tracked.txt").write_text("fixed\n")
+
+    result = service.done(repo, "run-1", "fix")
+
+    assert result.outcome == "proceed"
+    assert result.step["id"] == "check"
+
+
 def test_done_rejects_stale_and_out_of_order_steps(tmp_path: Path) -> None:
     """Step names produce deterministic ordering gaps."""
     repo = _repo(tmp_path)

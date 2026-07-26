@@ -118,6 +118,20 @@ def test_head_changed_detects_symbolic_ref_change_at_same_commit(tmp_path: Path)
     assert evaluate_git_operation("git.head_changed", info, initial=baseline)
 
 
+def test_head_changed_does_not_capture_content_snapshot(tmp_path: Path) -> None:
+    """HEAD comparison avoids hashing repository content."""
+    repo = _init_repo(tmp_path / "repo")
+    info = resolve_repository(repo)
+    baseline = capture_snapshot(info)
+
+    with patch.object(
+        sequencer_git,
+        "capture_snapshot",
+        side_effect=AssertionError("content snapshot was requested"),
+    ):
+        assert not evaluate_git_operation("git.head_changed", info, initial=baseline)
+
+
 def test_dirty_predicates_cover_staged_unstaged_and_untracked(tmp_path: Path) -> None:
     """Each live dirty predicate reports only its own Git state."""
     repo = _init_repo(tmp_path / "repo")

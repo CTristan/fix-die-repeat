@@ -194,10 +194,10 @@ def evaluate_condition(value: object, context: EvaluationContext) -> bool:
         raise EvaluationError(msg)
     if set(value) == {"flag"}:
         flag = value["flag"]
-        if not isinstance(flag, dict):
+        if not isinstance(flag, dict) or "name" not in flag or "equals" not in flag:
             msg = "Invalid persisted flag condition"
             raise EvaluationError(msg)
-        return context.flags.get(str(flag.get("name"))) == flag.get("equals")
+        return context.flags.get(str(flag["name"])) == flag["equals"]
     if set(value) == {"all"}:
         return all(evaluate_condition(child, context) for child in value["all"])
     if set(value) == {"any"}:
