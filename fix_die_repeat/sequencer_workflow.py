@@ -340,8 +340,8 @@ def _pairs(
     for name, value in items:
         if name in result:
             gaps.append(_gap("duplicate_flag", name, f"flag {name!r} was supplied more than once"))
-        else:
-            result[name] = value
+            continue
+        result[name] = value
     return result, gaps
 
 
@@ -403,12 +403,25 @@ def _validate_operation_fields(
         return
 
     fields = operation.model_fields_set
+    if operation.op in GIT_OPERATIONS:
+        allowed_fields = {"op"}
+    elif operation.op in {"json.pointer_equals", "json.pointer_type"}:
+        allowed_fields = {"op", "path", "pointer", "expected"}
+    else:
+        allowed_fields = {"op", "path"}
+    unexpected_fields = fields - allowed_fields
+    if unexpected_fields:
+        names = ", ".join(sorted(unexpected_fields))
+        gaps.append(
+            _gap(
+                "unexpected_operation_field",
+                subject,
+                f"{operation.op} does not accept fields: {names}",
+            ),
+        )
+
     if operation.op in ARTIFACT_OPERATIONS and operation.path is None:
         gaps.append(_gap("missing_operation_field", subject, f"{operation.op} requires path"))
-    if operation.op in GIT_OPERATIONS and fields & {"path", "pointer", "expected"}:
-        gaps.append(
-            _gap("unexpected_operation_field", subject, f"{operation.op} accepts no fields"),
-        )
     if operation.op in {"json.pointer_equals", "json.pointer_type"}:
         if operation.pointer is None or not (
             operation.pointer == "" or operation.pointer.startswith("/")
@@ -418,10 +431,6 @@ def _validate_operation_fields(
             gaps.append(
                 _gap("missing_operation_field", subject, f"{operation.op} requires expected"),
             )
-    elif operation.op not in GIT_OPERATIONS and fields & {"pointer", "expected"}:
-        gaps.append(
-            _gap("unexpected_operation_field", subject, f"{operation.op} does not accept pointer"),
-        )
     if operation.op == "json.pointer_type" and (
         not isinstance(operation.expected, str) or operation.expected not in JSON_TYPES
     ):
@@ -619,6 +628,19 @@ def _flag_condition_value(
     return result
 
 
+def _has_non_string_mapping_key(value: object) -> bool:
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, dict):
+            if any(not isinstance(key, str) for key in item):
+                return True
+            pending.extend(item.values())
+        elif isinstance(item, (list, tuple)):
+            pending.extend(item)
+    return False
+
+
 def _condition_key(value: object) -> str:
     def encode_non_json(item: object) -> dict[str, str]:
         return {
@@ -628,7 +650,18 @@ def _condition_key(value: object) -> str:
 
     def stable_invalid(item: object) -> object:
         if isinstance(item, dict):
-            pairs = [(stable_invalid(key), stable_invalid(child)) for key, child in item.items()]
+            pairs = [
+                (
+                    {
+                        "__invalid_key_type__": (
+                            f"{type(key).__module__}.{type(key).__qualname__}"
+                        ),
+                        "value": stable_invalid(key),
+                    },
+                    stable_invalid(child),
+                )
+                for key, child in item.items()
+            ]
             pairs.sort(
                 key=lambda pair: json.dumps(
                     pair[0],
@@ -650,7 +683,7 @@ def _condition_key(value: object) -> str:
 
     try:
         normalized = json.dumps(
-            value,
+            stable_invalid(value) if _has_non_string_mapping_key(value) else value,
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,

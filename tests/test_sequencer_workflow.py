@@ -14,6 +14,7 @@ from fix_die_repeat.sequencer_workflow import (
     FlagDeclaration,
     PathSpec,
     WorkflowValidationError,
+    _condition_key,
     load_workflow,
 )
 
@@ -363,6 +364,11 @@ def test_load_workflow_rejects_duplicate_route_predicates(tmp_path: Path) -> Non
 
     with pytest.raises(WorkflowValidationError, match="duplicate_route_predicate"):
         load_workflow(_write_workflow(tmp_path, content), {})
+
+
+def test_invalid_condition_keys_retain_their_types() -> None:
+    """Invalid mapping keys cannot collapse into one route fingerprint."""
+    assert _condition_key({1: "value"}) != _condition_key({"1": "value"})
 
 
 def test_load_workflow_rejects_unknown_and_duplicate_flags(tmp_path: Path) -> None:

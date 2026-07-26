@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from fix_die_repeat.config import get_fdr_home
 from fix_die_repeat.sequencer_evaluator import (
@@ -37,6 +37,9 @@ from fix_die_repeat.sequencer_workflow import (
     WorkflowValidationError,
     load_workflow,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 EXIT_CODES = {
     "proceed": 0,
@@ -303,6 +306,22 @@ class SequencerService:
             raise StateError(msg)
         return state
 
+    def _with_locked_state(
+        self,
+        repository: Path,
+        run_id: str,
+        command: str,
+        callback: Callable[[dict[str, Any], _LocatedRun], SequencerResult],
+    ) -> SequencerResult:
+        """Load one existing run and invoke a command while holding its lock."""
+        located = self._locate(repository, run_id)
+        if not _state_exists(located.paths.state):
+            return self._missing_result(command, located)
+        with SequencerLock(located.paths.lock):
+            if not _state_exists(located.paths.state):
+                return self._missing_result(command, located)
+            return callback(self._load_existing(located), located)
+
     def _configuration_check(
         self,
         state: dict[str, Any],
@@ -484,24 +503,31 @@ class SequencerService:
         workflow_path: Path | None = None,
     ) -> SequencerResult:
         """Report persisted cursor and configuration health without writing."""
-        located = self._locate(repository, run_id)
-        if not _state_exists(located.paths.state):
-            return self._missing_result("status", located)
-        with SequencerLock(located.paths.lock):
-            if not _state_exists(located.paths.state):
-                return self._missing_result("status", located)
-            state = self._load_existing(located)
-            check = self._configuration_check(state, workflow_path)
-            result = _state_outcome("status", state, located)
-            result.configuration = _configuration_payload(state, located.paths, check.status)
-            if result.outcome in {"terminal", "recovery"}:
-                result.gaps = check.gaps
-                return result
-            if check.status != "matching":
-                result.outcome = "environment_error" if check.explicit_unreadable else "blocked"
-                result.message = check.gaps[0]["message"]
-                result.gaps = check.gaps
+        return self._with_locked_state(
+            repository,
+            run_id,
+            "status",
+            lambda state, located: self._status_from_state(state, located, workflow_path),
+        )
+
+    def _status_from_state(
+        self,
+        state: dict[str, Any],
+        located: _LocatedRun,
+        workflow_path: Path | None,
+    ) -> SequencerResult:
+        """Build a status result after state is loaded under its lock."""
+        check = self._configuration_check(state, workflow_path)
+        result = _state_outcome("status", state, located)
+        result.configuration = _configuration_payload(state, located.paths, check.status)
+        if result.outcome in {"terminal", "recovery"}:
+            result.gaps = check.gaps
             return result
+        if check.status != "matching":
+            result.outcome = "environment_error" if check.explicit_unreadable else "blocked"
+            result.message = check.gaps[0]["message"]
+            result.gaps = check.gaps
+        return result
 
     def next(
         self,
@@ -510,35 +536,42 @@ class SequencerService:
         workflow_path: Path | None = None,
     ) -> SequencerResult:
         """Return the current instruction without advancing the cursor."""
-        located = self._locate(repository, run_id)
-        if not _state_exists(located.paths.state):
-            return self._missing_result("next", located)
-        with SequencerLock(located.paths.lock):
-            if not _state_exists(located.paths.state):
-                return self._missing_result("next", located)
-            state = self._load_existing(located)
-            if state["status"] == "terminal":
-                return _state_outcome("next", state, located)
-            check = self._configuration_check(state, workflow_path)
-            if check.status != "matching":
-                return self._configuration_block("next", state, located, check)
-            relocated = self._apply_relocation(state, check)
-            loaded = _require_loaded(check)
-            step = loaded.active_steps[state["cursor"]]
-            newly_issued = False
-            if step.mutates_repository and state["attempt"]["status"] != "issued":
-                state["attempt"], newly_issued = self._new_attempt(step, located.repository)
-            if relocated or newly_issued:
-                state["revision"] += 1
-                write_state(located.paths.state, state)
-            result = _state_outcome(
-                "next",
-                state,
-                located,
-                newly_issued=newly_issued,
-            )
-            result.repeated = not newly_issued
-            return result
+        return self._with_locked_state(
+            repository,
+            run_id,
+            "next",
+            lambda state, located: self._next_from_state(state, located, workflow_path),
+        )
+
+    def _next_from_state(
+        self,
+        state: dict[str, Any],
+        located: _LocatedRun,
+        workflow_path: Path | None,
+    ) -> SequencerResult:
+        """Build the next result after state is loaded under its lock."""
+        if state["status"] == "terminal":
+            return _state_outcome("next", state, located)
+        check = self._configuration_check(state, workflow_path)
+        if check.status != "matching":
+            return self._configuration_block("next", state, located, check)
+        relocated = self._apply_relocation(state, check)
+        loaded = _require_loaded(check)
+        step = loaded.active_steps[state["cursor"]]
+        newly_issued = False
+        if step.mutates_repository and state["attempt"]["status"] != "issued":
+            state["attempt"], newly_issued = self._new_attempt(step, located.repository)
+        if relocated or newly_issued:
+            state["revision"] += 1
+            write_state(located.paths.state, state)
+        result = _state_outcome(
+            "next",
+            state,
+            located,
+            newly_issued=newly_issued,
+        )
+        result.repeated = not newly_issued
+        return result
 
     def done(
         self,
@@ -549,14 +582,17 @@ class SequencerService:
     ) -> SequencerResult:
         """Validate and advance the current step once."""
         resolved_options = options or DoneOptions()
-        located = self._locate(repository, run_id)
-        if not _state_exists(located.paths.state):
-            return self._missing_result("done", located)
-        with SequencerLock(located.paths.lock):
-            if not _state_exists(located.paths.state):
-                return self._missing_result("done", located)
-            state = self._load_existing(located)
-            return self._done_from_state(state, located, step_id, resolved_options)
+        return self._with_locked_state(
+            repository,
+            run_id,
+            "done",
+            lambda state, located: self._done_from_state(
+                state,
+                located,
+                step_id,
+                resolved_options,
+            ),
+        )
 
     def _done_from_state(
         self,

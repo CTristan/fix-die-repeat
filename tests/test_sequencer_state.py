@@ -1,6 +1,7 @@
 """Tests for sequencer locking and state persistence."""
 
 import json
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -33,6 +34,9 @@ def test_lock_times_out_with_a_state_error(tmp_path: Path) -> None:
     ):
         lock.__enter__()
 
+    with pytest.raises(StateError, match="cannot be reacquired"):
+        lock.__enter__()
+
 
 def test_lock_enforces_mutual_exclusion_and_releases(tmp_path: Path) -> None:
     """One lock excludes peers until its context exits."""
@@ -46,6 +50,16 @@ def test_lock_enforces_mutual_exclusion_and_releases(tmp_path: Path) -> None:
     third = SequencerLock(path)
     with third:
         pass
+
+
+def test_lock_rejects_reacquisition_after_exit(tmp_path: Path) -> None:
+    """A closed lock preserves the state-error contract when reused."""
+    lock = SequencerLock(tmp_path / "transition.lock")
+    with lock:
+        pass
+
+    with pytest.raises(StateError, match="cannot be reacquired"):
+        lock.__enter__()
 
 
 def test_write_state_wraps_directory_creation_failure(tmp_path: Path) -> None:
@@ -153,6 +167,7 @@ def test_read_state_uses_utf8_encoding(tmp_path: Path) -> None:
     read_text.assert_called_once_with(encoding="utf-8")
 
 
+@pytest.mark.skipif(not hasattr(os, "O_DIRECTORY"), reason="POSIX directory fsync")
 def test_directory_sync_is_best_effort(tmp_path: Path) -> None:
     """Directory fsync failures do not invalidate an atomic state replacement."""
     with (

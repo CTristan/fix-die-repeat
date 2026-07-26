@@ -212,7 +212,9 @@ def run_command(
         options: Optional output decoding and timeout controls
 
     Returns:
-        Tuple of (exit_code, stdout, stderr)
+        Tuple of (exit_code, stdout, stderr). Command-not-found returns 127.
+        A timeout returns ``COMMAND_TIMEOUT_EXIT_CODE`` (124) and intentionally
+        discards partial stdout and stderr captured before the deadline.
 
     """
     try:

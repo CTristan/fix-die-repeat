@@ -137,7 +137,7 @@ def test_snapshot_rejects_excessive_tracked_diff_output(tmp_path: Path) -> None:
 
     with (
         patch.object(sequencer_git, "MAX_TRACKED_DIFF_BYTES", 16),
-        pytest.raises(GitProbeError, match="Tracked diff content") as raised,
+        pytest.raises(GitProbeError, match="Unstaged diff content") as raised,
     ):
         capture_snapshot(resolve_repository(repo))
 
@@ -157,7 +157,7 @@ def test_bounded_git_output_reports_timeout(tmp_path: Path) -> None:
         patch.object(subprocess, "Popen", return_value=process),
         pytest.raises(GitProbeError, match="timed out"),
     ):
-        sequencer_git._run_git_bounded(tmp_path, ["diff"], 16)
+        sequencer_git._run_git_bounded(tmp_path, ["diff"], 16, "Test diff")
 
 
 def test_bounded_git_output_reports_nonzero_output(tmp_path: Path) -> None:
@@ -170,7 +170,7 @@ def test_bounded_git_output_reports_nonzero_output(tmp_path: Path) -> None:
         patch.object(subprocess, "Popen", return_value=process),
         pytest.raises(GitProbeError, match="fatal: failed"),
     ):
-        sequencer_git._run_git_bounded(tmp_path, ["diff"], 64)
+        sequencer_git._run_git_bounded(tmp_path, ["diff"], 64, "Test diff")
 
 
 def test_bounded_git_output_reports_reader_failure(tmp_path: Path) -> None:
@@ -183,7 +183,7 @@ def test_bounded_git_output_reports_reader_failure(tmp_path: Path) -> None:
         patch.object(subprocess, "Popen", return_value=process),
         pytest.raises(GitProbeError, match="Cannot read Git probe output"),
     ):
-        sequencer_git._run_git_bounded(tmp_path, ["diff"], 64)
+        sequencer_git._run_git_bounded(tmp_path, ["diff"], 64, "Test diff")
 
 
 def test_snapshot_reuses_diff_and_untracked_probe_output(tmp_path: Path) -> None:
@@ -350,7 +350,6 @@ def test_unpushed_requires_remote_tracking_truth(tmp_path: Path) -> None:
 def test_unpushed_supports_detached_head_contained_by_remote_ref(tmp_path: Path) -> None:
     """Detached HEAD is pushed when a local remote-tracking ref contains it."""
     remote = _init_repo(tmp_path / "remote")
-    _git(remote, "config", "receive.denyCurrentBranch", "ignore")
     repo = tmp_path / "clone"
     subprocess.run(
         [GIT_PATH, "clone", str(remote), str(repo)],

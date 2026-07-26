@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, Self
@@ -69,6 +70,9 @@ class SequencerLock:
 
     def __enter__(self) -> Self:
         """Acquire an exclusive lock until context exit."""
+        if self._handle.closed:
+            msg = "Sequencer transition lock cannot be reacquired"
+            raise StateError(msg)
         deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
         while not self._try_acquire():
             if time.monotonic() >= deadline:
@@ -165,10 +169,8 @@ def _sync_directory(path: Path) -> None:
     except OSError:
         return
     try:
-        try:
+        with suppress(OSError):
             os.fsync(descriptor)
-        except OSError:
-            return
     finally:
         os.close(descriptor)
 

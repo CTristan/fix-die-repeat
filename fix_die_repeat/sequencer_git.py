@@ -160,7 +160,7 @@ def _read_bounded_output(
             process.kill()
 
 
-def _run_git_bounded(repo: Path, args: list[str], limit: int) -> bytes:
+def _run_git_bounded(repo: Path, args: list[str], limit: int, subject: str) -> bytes:
     """Run Git while retaining no more than one byte beyond an output limit."""
     git_path = shutil.which("git")
     if git_path is None:
@@ -198,7 +198,7 @@ def _run_git_bounded(repo: Path, args: list[str], limit: int) -> bytes:
         msg = f"Cannot read Git probe output: {reader_errors[0]}"
         raise GitProbeError(msg) from reader_errors[0]
     if exceeded.is_set():
-        msg = f"Tracked diff content exceeds the remaining {limit} byte snapshot budget"
+        msg = f"{subject} content exceeds the remaining {limit} byte snapshot budget"
         raise GitProbeError(msg)
     if returncode != 0:
         diagnostic = bytes(output).decode(errors="surrogateescape").strip()
@@ -339,11 +339,13 @@ def capture_snapshot(repository: RepositoryInfo) -> GitSnapshot:
         repository.root,
         ["diff", "--cached", "--binary", "--no-ext-diff"],
         MAX_TRACKED_DIFF_BYTES,
+        "Staged diff",
     )
     unstaged = _run_git_bounded(
         repository.root,
         ["diff", "--binary", "--no-ext-diff"],
         MAX_TRACKED_DIFF_BYTES - len(staged),
+        "Unstaged diff",
     )
     untracked_output = _run_git(
         repository.root,
