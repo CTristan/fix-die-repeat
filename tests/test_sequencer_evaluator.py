@@ -156,6 +156,28 @@ def test_json_valid_reports_invalid_utf8(
     assert "not valid UTF-8 JSON" in result.message
 
 
+def test_json_valid_reports_excessive_nesting(
+    tmp_path: Path,
+    context_factory: Callable[[Path, dict[str, bool | str]], EvaluationContext],
+) -> None:
+    """Deeply nested JSON fails through the ordinary operation-result path."""
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    (artifact_root / "result.json").write_text("[0]")
+    operation = OperationSpec.model_validate(
+        {
+            "op": "json.valid",
+            "path": {"scope": "artifacts", "value": "result.json"},
+        },
+    )
+
+    with patch.object(sequencer_evaluator.json, "loads", side_effect=RecursionError):
+        result = evaluate_operation(operation, context_factory(artifact_root, {}))
+
+    assert not result.passed
+    assert "nested too deeply" in result.message
+
+
 @pytest.mark.parametrize(
     ("actual", "expected", "expected_outcome"),
     [(True, 1, "fail"), (1, True, "fail"), (1, 1.0, "pass")],
@@ -208,6 +230,40 @@ def test_json_pointer_equals_respects_nested_json_types(
     result = evaluate_operation(operation, context_factory(artifact_root, {}))
 
     assert not result.passed
+
+
+def test_json_equality_handles_deep_containers_without_recursion() -> None:
+    """Structural equality does not recurse on nested untrusted containers."""
+    left: object = 0
+    right: object = 0
+    for _ in range(1100):
+        left = [left]
+        right = [right]
+
+    assert sequencer_evaluator._json_equal(left, right)
+
+
+def test_json_pointer_type_success_message_reports_match(
+    tmp_path: Path,
+    context_factory: Callable[[Path, dict[str, bool | str]], EvaluationContext],
+) -> None:
+    """A successful type predicate describes the type as matching."""
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    (artifact_root / "result.json").write_text('{"passed": true}')
+    operation = OperationSpec.model_validate(
+        {
+            "op": "json.pointer_type",
+            "path": {"scope": "artifacts", "value": "result.json"},
+            "pointer": "/passed",
+            "expected": "boolean",
+        },
+    )
+
+    result = evaluate_operation(operation, context_factory(artifact_root, {}))
+
+    assert result.passed
+    assert "matches expected type boolean" in result.message
 
 
 @pytest.mark.parametrize("pointer", ["/values/01", "/values/\N{ARABIC-INDIC DIGIT ONE}"])

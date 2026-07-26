@@ -172,7 +172,7 @@ def _run_git_bounded(repo: Path, args: list[str], limit: int) -> bytes:
     if process.stdout is not None:
         process.stdout.close()
     if exceeded.is_set():
-        msg = "Tracked diff content exceeds the 64 MiB snapshot limit"
+        msg = f"Tracked diff content exceeds the remaining {limit} byte snapshot budget"
         raise GitProbeError(msg)
     if returncode != 0:
         diagnostic = bytes(output).decode(errors="surrogateescape").strip()

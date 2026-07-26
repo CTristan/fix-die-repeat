@@ -266,6 +266,21 @@ def test_done_completes_issued_mutating_step_without_recovery(tmp_path: Path) ->
     assert result.step["id"] == "check"
 
 
+def test_mutating_step_blocks_when_working_tree_is_unchanged(tmp_path: Path) -> None:
+    """An unchanged working tree keeps the mutating step blocked."""
+    repo = _repo(tmp_path)
+    service = _service(tmp_path)
+    initialized = service.init(repo, "run-1", _workflow(tmp_path), [])
+    _write_result(initialized, passed=False)
+    service.done(repo, "run-1", "check")
+
+    result = service.done(repo, "run-1", "fix")
+
+    assert result.outcome == "blocked"
+    assert result.gaps[0]["subject"] == "changed"
+    assert result.step["id"] == "fix"
+
+
 def test_done_rejects_stale_and_out_of_order_steps(tmp_path: Path) -> None:
     """Step names produce deterministic ordering gaps."""
     repo = _repo(tmp_path)
@@ -296,6 +311,7 @@ def test_status_survives_missing_and_drifted_workflow(tmp_path: Path) -> None:
     assert drifted.outcome == "blocked"
     assert drifted.configuration["status"] == "drifted"
     assert drifted.step["id"] == "check"
+    assert missing.outcome == "blocked"
     assert missing.configuration["status"] == "missing"
     assert missing.step["id"] == "check"
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -105,6 +106,26 @@ class PathSpec(StrictModel):
         return self
 
 
+def _is_json_representable(value: object) -> bool:
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        if current is None or isinstance(current, (bool, int, str)):
+            continue
+        if isinstance(current, float):
+            if not math.isfinite(current):
+                return False
+            continue
+        if isinstance(current, list):
+            pending.extend(current)
+            continue
+        if isinstance(current, dict) and all(isinstance(key, str) for key in current):
+            pending.extend(current.values())
+            continue
+        return False
+    return True
+
+
 class OperationSpec(StrictModel):
     """One closed-registry validator or predicate operation."""
 
@@ -112,6 +133,18 @@ class OperationSpec(StrictModel):
     path: PathSpec | None = None
     pointer: str | None = None
     expected: Any = None
+
+    @model_validator(mode="after")
+    def validate_expected(self) -> OperationSpec:
+        """Keep pointer-equality operands inside the JSON data model."""
+        if (
+            self.op == "json.pointer_equals"
+            and "expected" in self.model_fields_set
+            and not _is_json_representable(self.expected)
+        ):
+            msg = "json.pointer_equals expected must be JSON-representable"
+            raise ValueError(msg)
+        return self
 
 
 class FlagDeclaration(StrictModel):

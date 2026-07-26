@@ -369,6 +369,22 @@ def test_load_workflow_rejects_unknown_and_duplicate_flags(tmp_path: Path) -> No
         load_workflow(path, [("review", "true"), ("review", "false")])
 
 
+@pytest.mark.parametrize("expected", ["2026-07-26", "!!binary aGVsbG8="])
+def test_pointer_equals_rejects_yaml_only_expected_values(
+    tmp_path: Path,
+    expected: str,
+) -> None:
+    """Pointer equality accepts only values representable by JSON."""
+    content = VALID_WORKFLOW.replace(
+        "          expected: false",
+        f"          expected: {expected}",
+        1,
+    )
+
+    with pytest.raises(WorkflowValidationError, match="JSON-representable"):
+        load_workflow(_write_workflow(tmp_path, content), {})
+
+
 def test_load_workflow_rejects_oversized_file(tmp_path: Path) -> None:
     """Workflow input is bounded before YAML parsing."""
     path = tmp_path / "large.yaml"

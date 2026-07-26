@@ -72,6 +72,8 @@ def _parse_json_content(path: Path, content: bytes) -> tuple[object | None, str 
         return None, f"{path} is not valid UTF-8 JSON: {exc}"
     except ValueError as exc:
         return None, f"{path} is not valid JSON: {exc}"
+    except RecursionError:
+        return None, f"{path} is nested too deeply to evaluate"
 
 
 def _read_json(path: Path) -> tuple[object | None, str | None]:
@@ -132,18 +134,22 @@ def _json_type(value: object) -> str:
 
 
 def _json_equal(left: object, right: object) -> bool:
-    if _json_type(left) != _json_type(right):
-        return False
-    if isinstance(left, list) and isinstance(right, list):
-        return len(left) == len(right) and all(
-            _json_equal(left_item, right_item)
-            for left_item, right_item in zip(left, right, strict=True)
-        )
-    if isinstance(left, dict) and isinstance(right, dict):
-        return left.keys() == right.keys() and all(
-            _json_equal(left[key], right[key]) for key in left
-        )
-    return left == right
+    pending = [(left, right)]
+    while pending:
+        left_item, right_item = pending.pop()
+        if _json_type(left_item) != _json_type(right_item):
+            return False
+        if isinstance(left_item, list) and isinstance(right_item, list):
+            if len(left_item) != len(right_item):
+                return False
+            pending.extend(zip(left_item, right_item, strict=True))
+        elif isinstance(left_item, dict) and isinstance(right_item, dict):
+            if left_item.keys() != right_item.keys():
+                return False
+            pending.extend((left_item[key], right_item[key]) for key in left_item)
+        elif left_item != right_item:
+            return False
+    return True
 
 
 def _evaluate_json(operation: OperationSpec, path: Path) -> OperationResult:
@@ -167,9 +173,16 @@ def _evaluate_json(operation: OperationSpec, path: Path) -> OperationResult:
         )
     actual_type = _json_type(selected)
     passed = actual_type == operation.expected
+    if passed:
+        message = (
+            f"{operation.pointer} has type {actual_type}, "
+            f"which matches expected type {operation.expected}"
+        )
+    else:
+        message = f"{operation.pointer} has type {actual_type}, expected {operation.expected}"
     return OperationResult(
         passed=passed,
-        message=f"{operation.pointer} has type {actual_type}, expected {operation.expected}",
+        message=message,
     )
 
 

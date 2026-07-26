@@ -37,6 +37,8 @@ def _hermetic_git(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty_config))
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(empty_config))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for variable in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        monkeypatch.delenv(variable, raising=False)
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -134,9 +136,11 @@ def test_snapshot_rejects_excessive_tracked_diff_output(tmp_path: Path) -> None:
 
     with (
         patch.object(sequencer_git, "MAX_TRACKED_DIFF_BYTES", 16),
-        pytest.raises(GitProbeError, match="Tracked diff content"),
+        pytest.raises(GitProbeError, match="Tracked diff content") as raised,
     ):
         capture_snapshot(resolve_repository(repo))
+
+    assert "16 byte snapshot budget" in str(raised.value)
 
 
 def test_snapshot_reuses_diff_and_untracked_probe_output(tmp_path: Path) -> None:
