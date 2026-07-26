@@ -97,8 +97,9 @@ Each response tells you what happened through `outcome`, `message`, and the proc
 When a response contains `step`, run the work described by `step.instruction`. Write requested
 artifacts under `step.artifact_root`, then call `done` with the same step ID. A repeated `next`
 for an issued mutating step returns `recovery` because the sequencer cannot tell whether the
-external work started before the interruption. Reconcile the repository, then call
-`done STEP --recover` to acknowledge and reissue it.
+external work started before the interruption. Reconcile the repository, then call `done STEP`
+when the requested work is complete. Use `done STEP --recover` only when the work remains
+incomplete; it acknowledges the interrupted attempt and reissues the instruction.
 
 `--force` bypasses only failed postconditions backed by validators that produced reliable
 results, and it records each bypassed gap in transition history. It cannot bypass recovery,

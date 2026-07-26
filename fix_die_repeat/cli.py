@@ -382,7 +382,13 @@ def _run_sequencer(
         )
         diagnostic_gap = next(
             (gap for gap in gaps if gap["code"] in preferred_codes),
-            gaps[0],
+            gaps[0]
+            if gaps
+            else {
+                "code": "unknown_validation",
+                "subject": command,
+                "message": str(exc) or "Workflow validation failed without diagnostics",
+            },
         )
         result = _sequencer_error(
             command,

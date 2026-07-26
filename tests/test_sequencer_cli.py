@@ -327,6 +327,27 @@ def test_workflow_error_diagnostic_matches_selected_outcome(
     assert result.stderr == "Error: workflow disappeared\n"
 
 
+def test_workflow_error_without_gaps_uses_fallback_diagnostic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty validation error still produces one stable JSON response."""
+    monkeypatch.setenv("FDR_HOME", str(tmp_path / "home"))
+    with patch(
+        "fix_die_repeat.cli.SequencerService.init",
+        side_effect=WorkflowValidationError([]),
+    ):
+        result = _invoke(
+            CliRunner(),
+            _repo(tmp_path),
+            ["init", "--workflow", str(_workflow(tmp_path))],
+        )
+
+    assert result.exit_code == EXIT_CODES["configuration_error"]
+    assert _payload(result)["outcome"] == "configuration_error"
+    assert result.stderr == "Error: Workflow validation failed without diagnostics\n"
+
+
 @pytest.mark.parametrize(
     "arguments",
     [
